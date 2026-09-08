@@ -2,7 +2,7 @@
 // @name         kitty klient
 // @author       Coder Guy
 // @credits       random4ik — bot script
-// @version      6.8.12
+// @version      6.8.13
 // @icon         https://cdn.discordapp.com/icons/1540876076224356437/ac27c0ce87c4c46b407ebca78e150aeb.webp?size=2048
 // @description  kitty klient — a MooMoo.io client with adaptive zoom, fast autoheal, gear automation, combat tools, predictive placement, visual markers, CC0 background music, manual quick builds, and a fully rebindable keyboard/mouse controls HUD.
 // @match        *://moomoo.io/*
@@ -259,7 +259,7 @@
     const AUTO_PUSH_FINISHER_MIGRATION_KEY = "kitty-klient-auto-push-finisher-v1";
     const ASSASSIN_RANGE_AUTO_MIGRATION_KEY = "kitty-klient-assassin-range-auto-v1";
     const TAB_SYNC_BRIDGE_KEY = "kitty-klient-tab-sync-bridge-v1";
-const KITTY_KLIENT_VERSION = "6.8.12";
+const KITTY_KLIENT_VERSION = "6.8.13";
     const KITTY_SHARED_STORAGE_APPLIED_EVENT = "KittyMooMooSharedStorageApplied";
     // FRVR's v1.8 client changed the game module and now owns its own Altcha
     // verification flow. The legacy runtime patch relies on exact bundle
@@ -7152,6 +7152,8 @@ const KITTY_KLIENT_VERSION = "6.8.12";
         const runtime = window.__KittyGameRuntime;
         if (!kittyAccountApiBase() || !session || !runtime || typeof runtime.getPlayerSessionSnapshot !== "function") return;
         const now = Date.now();
+        const socket = window.__KittyGameSocket;
+        if (!socket || socket.readyState !== 1) return;
         const snapshot = runtime.getPlayerSessionSnapshot();
         if (!snapshot || !snapshot.self || !snapshot.self.sid || !snapshot.shard) return;
         if (snapshot.shard !== kittyAccountLastShard) {
@@ -7197,7 +7199,7 @@ const KITTY_KLIENT_VERSION = "6.8.12";
             const announced = shouldAnnounce
                 ? await kittyAccountRequest(
                     "/v1/presence/announce",
-                    { shard: snapshot.shard, playerSid: String(snapshot.self.sid) }
+                    { shard: snapshot.shard, playerSid: String(snapshot.self.sid), clientVersion: KITTY_KLIENT_VERSION }
                 )
                 : { profile: session.profile };
             // Presence announce is also the inexpensive periodic source of
@@ -9504,6 +9506,7 @@ let __mmSoldierRange = 400,
   __mmSpikeSyncEnabled = !0,
   __mmSpikeSyncHammerEnabled = !0,
   __mmVelTickInstaEnabled = !0,
+  __mmHammerPolearmInstaEnabled = !1,
   __mmPolearmAidsEnabled = !0,
   __mmAutoPushInstaEnabled = !0,
   __mmAutoPushFinisherEnabled = !0,
@@ -16076,6 +16079,22 @@ const __mmBoostInsta = {
     this.cleanup(__mmReason || "cancelled");
   },
 };
+// Removed Hammer+Polearm auto-Insta sequence: the dedicated controller was
+// deleted but four call sites still referenced it (__mmUpdateAutoPushWatchVisual,
+// __mmUpdateKittyInstas, __mmRefreshKittyInstaLoop, __mmUpdateAntiInsta), which
+// threw ReferenceError __mmHammerPolearmInsta is not defined on every
+// tactical tick and on every HUD toggle. Keep a disabled stub so those guards
+// evaluate safely; the Polearm+Hammer path is covered by Polearm Aids /
+// Knockback / Apple profiles via __mmStartKittyProfile.
+const __mmHammerPolearmInsta = {
+  isActive() {
+    return !1;
+  },
+  start() {
+    return !1;
+  },
+  cancel() {},
+};
 function __mmNearestBetrayalTarget() {
   if (!v || !v.alive || !Array.isArray(E) || __mmTeamKey(v) == null)
     return null;
@@ -20431,6 +20450,7 @@ function __mmDrawMidnightWeaponInNativeSlot(
   __mmWeaponImage,
   __mmSizeScale = 1,
   __mmForwardOffset = -7,
+  __mmRightOffset = 0,
 ) {
   // MooMoo's weapon pass has already translated, rotated, and animated this
   // context. Reuse that exact transform, replacing just the polearm bitmap.
@@ -20477,7 +20497,7 @@ function __mmDrawMidnightWeaponInNativeSlot(
   // transform retains ownership of its facing and swing rotation.
   const __mmCenterX =
       __mmX + __mmNativeWidth / 2 + Number(__mmForwardOffset || 0),
-    __mmCenterY = __mmY + __mmNativeHeight / 2,
+    __mmCenterY = __mmY + __mmNativeHeight / 2 + Number(__mmRightOffset || 0),
     // Preserve the asset's own proportions rather than stretching it to the
     // Native weapon rectangle at a 1:1 scale.
     __mmHeight = Math.abs(__mmNativeHeight) * __mmSizeScale,
@@ -20767,9 +20787,10 @@ function __mmInstallMidnightWeaponNativeRenderer() {
           // The Scythe already has its intended authored scale. Every other
           // Midnight retexture gets the same 10% visual size increase.
           __mmUseMidnightScythe || __mmUseCardboardShortSword ? 1 : 1.1,
-          // The Scythe has authored forward reach. Midnight Polearm returns
-          // to the native weapon line; every other retexture keeps its own offset.
-          __mmUseMidnightScythe ? 16 : __mmUseMidnightDaggers ? 0 : -7,
+          // Nudge Midnight Polearm six units forward and four to the player's
+          // right; native facing and swing rotation carry both offsets.
+          __mmUseMidnightScythe ? 16 : __mmUseMidnightPolearm ? -1 : __mmUseMidnightDaggers ? 0 : -7,
+          __mmUseMidnightPolearm ? 4 : 0,
         )
       )
         return;
@@ -29326,6 +29347,21 @@ function __mmDefaultSoldierThreat() {
     __mmSpikeDanger
   );
 }
+function __mmIdleEnemyTurretNearby() {
+  if (!v || !v.alive) return !1;
+  const __mmTurrets = __mmActiveObjectSnapshot().turrets;
+  for (const __mmTurret of __mmTurrets) {
+    if (!__mmTurret || !__mmTurret.active || __mmFriendlyStructure(__mmTurret))
+      continue;
+    const __mmRange = Math.max(0, Number(__mmTurretGearRange) || 700),
+      __mmDistance = Math.hypot(
+        Number(__mmTurret.x) - Number(v.x),
+        Number(__mmTurret.y) - Number(v.y),
+      );
+    if (__mmDistance <= __mmRange) return !0;
+  }
+  return !1;
+}
 function __mmResolveDefaultHat() {
   if (!v || !v.alive) return null;
   const __mmActual = Number.isFinite(Number(__mmActualHat))
@@ -29345,11 +29381,26 @@ function __mmResolveDefaultHat() {
   )
     return 6;
 
-  // Remaining default order: stationary manual selection, Soldier under player
-  // or spike danger, river Flipper, stationary EMP, Winter, Booster, no hat.
+  // Combat defense takes priority over the saved manual cosmetic, including
+  // while stationary between attacks. Keep the manual selection unchanged so
+  // it returns when safely idle after combat.
+  if (__mmDefaultSoldierThreat()) return 6;
+  // A nearby hostile turret takes priority over idle cosmetics only while
+  // safe and not attacking. Preserve the saved manual hat for clear areas.
+  if (
+    __mmStationary &&
+    !__mmPrimaryHeld &&
+    !__mmSecondaryHeld &&
+    v.skins && v.skins[__mmEmpHelmet] &&
+    __mmIdleEnemyTurretNearby() &&
+    !__mmPrimaryTankCombatBlocked() &&
+    !(__mmPassiveSpikeAvoidanceEnabled && __mmPassiveSpikeThreat())
+  )
+    return __mmEmpHelmet;
   if (__mmActualOwned && __mmActual !== 0 && __mmStationary)
     return __mmActual;
-  if (__mmDefaultSoldierThreat()) return 6;
+  // Remaining default order: river Flipper, stationary EMP, Winter, Booster,
+  // no hat.
   if (!__mmMovementGearEnabled)
     return __mmActualOwned ? __mmActual : 0;
   if (
@@ -50518,8 +50569,10 @@ function __mmReleasePrimaryTankLease(__mmAllowWatchdog = !1) {
       __mmAllowWatchdog &&
       __mmPrimaryTankLeaseUntil > 0 &&
       __mmNow >= __mmPrimaryTankLeaseUntil;
-  if (!__mmTickReady && !__mmWatchdogReady) return !1;
-  __mmWatchdogReady && !__mmTickReady && __mmResetManualHatOutput();
+  const __mmCombatBlocked = __mmPrimaryTankCombatBlocked();
+  if (!__mmTickReady && !__mmWatchdogReady && !__mmCombatBlocked) return !1;
+  (__mmCombatBlocked || (__mmWatchdogReady && !__mmTickReady)) &&
+    __mmResetManualHatOutput();
   (__mmClearPrimaryTankLease(),
     __mmPrimaryHeld && __mmEquipPrimaryDowntimeHat(),
     __mmGearArbiter.commit());
@@ -52224,10 +52277,19 @@ function __mmTankSecondaryPreferred(__mmWeapon = __mmRightClickWeapon()) {
     return !1;
   return !!__mmKittyTankTarget(__mmWeapon);
 }
+function __mmPrimaryTankCombatBlocked() {
+  // Combat safety is independent of the Auto Soldier toggle or hat ownership.
+  if (__mmEnemyWithinCombatRange() || __mmDangerAnimalNearby()) return !0;
+  const __mmThreat = __mmCombatThreatSnapshot();
+  return !!(__mmThreat &&
+    (Number(__mmThreat.nearbyEnemies) > 0 ||
+      Number(__mmThreat.damage) > 0 ||
+      Number(__mmThreat.potentialDamage) > 0));
+}
 function __mmTankPrimaryTarget(__mmWeapon = v && v.weapons && v.weapons[0]) {
   // Left click stays on slot zero and does not enter Tank while a hostile
-  // player is in the configured combat radius, or while the cursor is
-  // fighting an animal. Animals include mobs, bosses, and Treasure in the
+  // player or incoming damage is detected, a dangerous animal is nearby,
+  // or while the cursor is fighting an animal. Animals include mobs, bosses, and Treasure in the
   // native entity list. This keeps the held break path from stealing its
   // normal left-click gear during PvE; right click retains its separate Tank
   // behavior. __mmKittyTankTarget supplies the live player-built-breakable
@@ -52239,7 +52301,7 @@ function __mmTankPrimaryTarget(__mmWeapon = v && v.weapons && v.weapons[0]) {
     !v.skins ||
     !v.skins[40] ||
     __mmWeapon == null ||
-    __mmEnemyWithinCombatRange()
+    __mmPrimaryTankCombatBlocked()
   )
     return null;
   if (__mmAnimalInWeaponPath(Number(__mmWeapon), !0)) return null;
