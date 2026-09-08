@@ -2,7 +2,7 @@
 // @name         kitty klient
 // @author       Coder Guy
 // @credits       random4ik — bot script
-// @version      6.8.17
+// @version      6.8.18
 // @icon         https://cdn.discordapp.com/icons/1540876076224356437/ac27c0ce87c4c46b407ebca78e150aeb.webp?size=2048
 // @description  kitty klient — a MooMoo.io client with adaptive zoom, fast autoheal, gear automation, combat tools, predictive placement, visual markers, CC0 background music, manual quick builds, and a fully rebindable keyboard/mouse controls HUD.
 // @match        *://moomoo.io/*
@@ -259,7 +259,7 @@
     const AUTO_PUSH_FINISHER_MIGRATION_KEY = "kitty-klient-auto-push-finisher-v1";
     const ASSASSIN_RANGE_AUTO_MIGRATION_KEY = "kitty-klient-assassin-range-auto-v1";
     const TAB_SYNC_BRIDGE_KEY = "kitty-klient-tab-sync-bridge-v1";
-const KITTY_KLIENT_VERSION = "6.8.17";
+const KITTY_KLIENT_VERSION = "6.8.18";
     const KITTY_SHARED_STORAGE_APPLIED_EVENT = "KittyMooMooSharedStorageApplied";
     // FRVR's v1.8 client changed the game module and now owns its own Altcha
     // verification flow. The legacy runtime patch relies on exact bundle
@@ -5016,6 +5016,10 @@ const KITTY_KLIENT_VERSION = "6.8.17";
     let kittyAccountRankSaveTimer = 0;
     let kittyAccountRankSavePanel = null;
     let kittyAccountSupportState = null;
+    let kittySupportEvents = null;
+    let kittySupportEventsSession = "";
+    let kittySupportReadBusy = false;
+
     let kittyAccountSupportRequest = null;
 
     function kittyAccountApiBase() {
@@ -5835,6 +5839,75 @@ const KITTY_KLIENT_VERSION = "6.8.17";
             : "";
     }
 
+    function syncKittySupportLive() {
+        const session = readKittyAccountSession();
+        const key = kittyAccountSessionKey(session);
+        if (key === kittySupportEventsSession && kittySupportEvents) return;
+        if (kittySupportEvents) kittySupportEvents.close();
+        kittySupportEvents = null;
+        kittySupportEventsSession = key;
+        if (!session || !kittyAccountApiBase()) { updateKittyMessageDots(); return; }
+        const events = new EventSource(kittyAccountApiBase() + "/v1/account/support-events", { withCredentials: true });
+        kittySupportEvents = events;
+        events.onmessage = (event) => {
+            if (kittySupportEvents !== events) return;
+            try {
+                kittyAccountSupportState = JSON.parse(event.data);
+                updateKittyAccountPanel();
+                updateKittyMessageDots();
+            } catch {}
+        };
+        // Native EventSource reconnects and receives a complete snapshot.
+    }
+    function updateKittyMessageDots() {
+        const unread = !!readKittyAccountSession() && Number(kittyAccountSupportState?.unreadCount || 0) > 0;
+        const targets = [document.getElementById(KITTY_HUD_LAUNCHER_ID), ...document.querySelectorAll("#" + HUD_ID + " button[data-page='cosmetics']")];
+        targets.filter(Boolean).forEach((target) => {
+            let dot = target.querySelector('.kitty-message-dot');
+            if (unread && !dot) {
+                dot = document.createElement('span'); dot.className = 'kitty-message-dot';
+                dot.setAttribute('role','status'); dot.setAttribute('aria-label','Unread moderator message');
+                target.append(dot);
+            } else if (!unread && dot) dot.remove();
+        });
+        if (!unread || kittySupportReadBusy || !hudOpen || document.hidden || !document.hasFocus()) return;
+        const inbox = document.querySelector('#kitty-klient-cosmetics-panel .kitty-account-support');
+        if (!inbox || !inbox.getClientRects().length) return;
+        const rect = inbox.getBoundingClientRect();
+        if (rect.bottom <= 0 || rect.top >= window.innerHeight) return;
+        kittySupportReadBusy = true;
+        kittyAccountRequest('/v1/account/support', { markRead: true }).then((result) => {
+            kittyAccountSupportState = result; updateKittyAccountPanel();
+        }).catch(() => {}).finally(() => { kittySupportReadBusy = false; });
+    }
+    async function changeKittySupportMessage(action, message = null) {
+        let text = '';
+        if (action === 'edit') {
+            text = window.prompt('Edit message', message.body);
+            if (text == null) return;
+        } else if (!window.confirm(action === 'hide' ? 'Delete this conversation from your inbox? Moderators keep their copy until they also delete it.' : 'Delete this message?')) return;
+        try {
+            kittyAccountSupportState = await kittyAccountRequest('/v1/account/support-mutate', { action, id: message?.id, message: text });
+            updateKittyAccountPanel();
+        } catch(error) {
+            const panel = document.getElementById('kitty-klient-cosmetics-panel');
+            if (panel) setKittyAccountPanelStatus(panel, error.message || 'Could not update message.', 'error');
+        }
+    }
+    window.addEventListener('click', (event) => {
+        const launcher = document.getElementById(KITTY_HUD_LAUNCHER_ID);
+        if (launcher?.contains(event.target) && Number(kittyAccountSupportState?.unreadCount || 0) > 0) {
+            event.preventDefault(); event.stopImmediatePropagation();
+            setKittyHudOpen(true);
+            document.querySelector('#' + HUD_ID + " button[data-page='cosmetics']")?.click();
+            document.querySelector('#kitty-klient-cosmetics-panel .kitty-account-support')?.scrollIntoView({ block: 'nearest' });
+        }
+        requestAnimationFrame(updateKittyMessageDots);
+    }, true);
+    window.addEventListener('focus', updateKittyMessageDots);
+    window.addEventListener('scroll', updateKittyMessageDots, true);
+    window.addEventListener('MooMooKittyHudVisibility', () => requestAnimationFrame(updateKittyMessageDots));
+
     function renderKittyAccountSupportControls(panel, support) {
         const controls = panel && panel.querySelector(".kitty-account-support");
         if (!controls) return;
@@ -5888,6 +5961,18 @@ const KITTY_KLIENT_VERSION = "6.8.17";
                 heading.append(author, time);
                 const body = document.createElement("p");
                 body.textContent = String(message && message.body || "");
+                if (message.deletedBy) { body.style.fontStyle = 'italic'; body.style.color = '#94a3b8'; }
+                if (message.editedAt && !message.deletedBy) time.textContent += ' · edited';
+                if (sender === 'you' && !message.deletedBy && message.id) {
+                    const actions = document.createElement('div');
+                    for (const action of ['edit','delete']) {
+                        const button = document.createElement('button'); button.type = 'button';
+                        button.textContent = action === 'edit' ? 'Edit' : 'Delete';
+                        button.addEventListener('click', () => void changeKittySupportMessage(action,message));
+                        actions.append(button);
+                    }
+                    heading.append(actions);
+                }
                 row.append(heading, body);
                 thread.appendChild(row);
             });
@@ -6040,6 +6125,8 @@ const KITTY_KLIENT_VERSION = "6.8.17";
             }
         });
         syncKittyMainAccountDrawer();
+        syncKittySupportLive();
+        updateKittyMessageDots();
     }
 
     function clearKittyAccountDrawerTimers() {
@@ -6868,7 +6955,10 @@ const KITTY_KLIENT_VERSION = "6.8.17";
         supportRefresh.type = "button";
         supportRefresh.dataset.kittySupportRefresh = "1";
         supportRefresh.textContent = "Refresh";
-        supportTop.append(supportTitleWrap, supportRefresh);
+        const hideConversation = document.createElement('button'); hideConversation.type = 'button';
+        hideConversation.textContent = 'Delete conversation';
+        hideConversation.addEventListener('click', () => void changeKittySupportMessage('hide'));
+        supportTop.append(supportTitleWrap, supportRefresh, hideConversation);
         const supportIdentity = document.createElement("div");
         supportIdentity.className = "kitty-account-support-identity";
         const supportNameLabel = document.createElement("div");
@@ -7059,6 +7149,7 @@ const KITTY_KLIENT_VERSION = "6.8.17";
             "#moomoo-op-hud :is(#kitty-klient-account-panel,#kitty-klient-cosmetics-panel) :is(input,select,textarea){min-width:0;max-width:100%;box-sizing:border-box}#moomoo-op-hud :is(#kitty-klient-account-panel,#kitty-klient-cosmetics-panel) button{white-space:normal;overflow-wrap:anywhere}",
             ".kitty-cosmetics-panel .kitty-weapon-cosmetic-card{grid-template-columns:80px minmax(0,1fr);gap:14px;padding:12px}.kitty-cosmetics-panel .kitty-weapon-cosmetic-preview{width:80px;height:90px}.kitty-cosmetics-panel .kitty-weapon-cosmetic-actions{grid-template-columns:minmax(0,1fr) minmax(110px,.3fr);gap:10px}",
             "@media(max-width:480px){.kitty-cosmetics-panel .kitty-weapon-cosmetic-card{grid-template-columns:64px minmax(0,1fr);gap:10px}.kitty-cosmetics-panel .kitty-weapon-cosmetic-preview{width:64px;height:76px}.kitty-cosmetics-panel .kitty-weapon-cosmetic-actions{grid-template-columns:minmax(0,1fr)}}",
+            ".kitty-message-dot{display:inline-block!important;flex:0 0 8px;width:8px;height:8px;margin-left:6px;border-radius:50%!important;background:#fb7185;box-shadow:0 0 5px #fb7185;vertical-align:middle}.kitty-cosmetics-panel .kitty-account-support{width:100%;padding:12px;border:1px solid rgba(192,132,252,.35);box-sizing:border-box}.kitty-cosmetics-panel .kitty-account-support button{padding:7px 10px;border:1px solid #c4b5fd;border-radius:7px;background:#4c1d95;color:#fff;font:800 11px/1.3 system-ui;cursor:pointer}.kitty-cosmetics-panel .kitty-account-support button:disabled{opacity:.5}.kitty-cosmetics-panel .kitty-account-support-top{flex-wrap:wrap}",
             ".kitty-cosmetics-panel{gap:12px!important}",
             ".kitty-cosmetics-panel .kitty-cosmetics-collection{display:grid;gap:7px;padding:11px!important}",
             ".kitty-cosmetics-panel .kitty-cosmetics-collection>span{color:#cbd5e1;font-size:10px;line-height:1.4}",
@@ -7105,6 +7196,8 @@ const KITTY_KLIENT_VERSION = "6.8.17";
         } else if (panel.parentElement !== cosmeticsPage) {
             cosmeticsPage.appendChild(panel);
         }
+        const inboxControls = document.querySelector("#" + KITTY_ACCOUNT_PANEL_ID + " .kitty-account-support");
+        if (inboxControls && inboxControls.parentElement !== panel) panel.insertBefore(inboxControls, panel.querySelector('.kitty-account-status'));
         const rankControls = document.querySelector("#" + KITTY_ACCOUNT_PANEL_ID + " .kitty-account-discord");
         if (rankControls && rankControls.parentElement !== panel) {
             panel.insertBefore(rankControls, panel.querySelector(".kitty-account-status"));
