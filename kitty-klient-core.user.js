@@ -2,7 +2,7 @@
 // @name         kitty klient
 // @author       Coder Guy
 // @credits       random4ik — bot script
-// @version      6.8.5
+// @version      6.8.6
 // @icon         https://cdn.discordapp.com/icons/1540876076224356437/ac27c0ce87c4c46b407ebca78e150aeb.webp?size=2048
 // @description  kitty klient — a MooMoo.io client with adaptive zoom, fast autoheal, gear automation, combat tools, predictive placement, visual markers, CC0 background music, manual quick builds, and a fully rebindable keyboard/mouse controls HUD.
 // @match        *://moomoo.io/*
@@ -259,7 +259,7 @@
     const AUTO_PUSH_FINISHER_MIGRATION_KEY = "kitty-klient-auto-push-finisher-v1";
     const ASSASSIN_RANGE_AUTO_MIGRATION_KEY = "kitty-klient-assassin-range-auto-v1";
     const TAB_SYNC_BRIDGE_KEY = "kitty-klient-tab-sync-bridge-v1";
-    const KITTY_KLIENT_VERSION = "6.8.5";
+    const KITTY_KLIENT_VERSION = "6.8.6";
     const KITTY_SHARED_STORAGE_APPLIED_EVENT = "KittyMooMooSharedStorageApplied";
     // FRVR's v1.8 client changed the game module and now owns its own Altcha
     // verification flow. The legacy runtime patch relies on exact bundle
@@ -4585,7 +4585,7 @@
         addHudToggle(visuals, "hotbarPlaceableLocator", "Hotbar placeable locator", "Hover a placeable in the native hotbar to mark every matching structure you own on the minimap");
         addHudToggle(visuals, "autoPushVisuals", "Auto Push tactical lane", "Draw a lightweight neon route, exact stand point, push lane, target brackets, and live ROUTE / ALIGN / PUSH status");
         addHudToggle(visuals, "cooldownBars", "Tool cooldown bars", "Three refill bars track primary, secondary, and Turret Gear cooldowns independently");
-        addHudToggle(visuals, "weaponXpBar", "Weapon XP bar", "Tracks confirmed Food, Wood, Stone, breakable refunds, animal drops, and native Gold Mine gather XP for every held tool; general Gold never fills it");
+        addHudToggle(visuals, "weaponXpBar", "Weapon XP bar", "Tracks confirmed Food, Wood, Stone, breakable refunds, animal and boss rewards, and native Gold Mine gather XP for every held tool; general Gold never fills it");
         addHudToggle(visuals, "chatHistory", "Stacked chat bubbles", "Shows up to three unexpired messages above each player plus the in-game chat-history panel");
 
         const interfaceColorsStack = document.createElement("div");
@@ -22259,8 +22259,19 @@ function __mmObserveOutgoingWeaponXpAttack(__mmArguments) {
   // F=1 only records attribution; XP is still added exclusively after MooMoo
   // confirms a positive material reward. Projectiles must participate here as
   // their animal drops and wood-structure refunds progress that held weapon.
+  const __mmNow = Date.now(),
+    __mmAngle = Number(__mmArguments[2]);
   ((__mmWeaponXpLastAttackWeapon = __mmWeapon),
-    (__mmWeaponXpLastAttackAt = Date.now()));
+    (__mmWeaponXpLastAttackAt = __mmNow),
+    (__mmWeaponXpLastAttackOrigin = {
+      x: Number(v.x),
+      y: Number(v.y),
+      angle: Number.isFinite(__mmAngle)
+        ? __mmAngle
+        : Number.isFinite(Number(v.dir))
+          ? Number(v.dir)
+          : 0,
+    }));
 }
 function __mmTrackPlayerToolCooldown(
   __mmPlayerSid,
@@ -22839,8 +22850,12 @@ let __mmWeaponXpOwnerSid = null,
   __mmWeaponXpLastGatherWeapon = null,
   __mmWeaponXpLastGatherAt = 0,
   __mmWeaponXpLastAttackWeapon = null,
-  __mmWeaponXpLastAttackAt = 0;
-const __mmWeaponXpRecentObjectHits = [];
+  __mmWeaponXpLastAttackAt = 0,
+  __mmWeaponXpLastAttackOrigin = null,
+  __mmWeaponXpPendingKillWeapon = null,
+  __mmWeaponXpPendingKillUntil = 0;
+const __mmWeaponXpRecentObjectHits = [],
+  __mmWeaponXpAnimalSnapshots = Object.create(null);
 function __mmWeaponXpReset() {
   for (let __mmIndex = 0; __mmIndex < __mmWeaponXpSlots.length; __mmIndex++)
     __mmWeaponXpSlots[__mmIndex] = {
@@ -22855,6 +22870,12 @@ function __mmWeaponXpReset() {
     (__mmWeaponXpLastGatherAt = 0),
     (__mmWeaponXpLastAttackWeapon = null),
     (__mmWeaponXpLastAttackAt = 0),
+    (__mmWeaponXpLastAttackOrigin = null),
+    (__mmWeaponXpPendingKillWeapon = null),
+    (__mmWeaponXpPendingKillUntil = 0),
+    Object.keys(__mmWeaponXpAnimalSnapshots).forEach(function (__mmKey) {
+      delete __mmWeaponXpAnimalSnapshots[__mmKey];
+    }),
     (__mmWeaponXpRecentObjectHits.length = 0));
 }
 function __mmWeaponXpSlotIndex(__mmWeapon) {
@@ -23000,6 +23021,101 @@ function __mmObserveWeaponXpObjectHit(__mmAngle, __mmObjectSid) {
       __mmNow - __mmWeaponXpRecentObjectHits[0].at > 350)
   )
     __mmWeaponXpRecentObjectHits.shift();
+}
+function __mmWeaponXpAnimalKey(__mmAnimal) {
+  if (!__mmAnimal) return null;
+  const __mmId =
+    __mmAnimal.sid != null
+      ? __mmAnimal.sid
+      : __mmAnimal.id != null
+        ? __mmAnimal.id
+        : __mmAnimal.index;
+  return __mmId == null ? null : String(__mmId);
+}
+function __mmWeaponXpAnimalHealth(__mmAnimal) {
+  const __mmHealth = Number(
+    __mmAnimal &&
+      (__mmAnimal.health == null
+        ? __mmAnimal.currentHealth
+        : __mmAnimal.health),
+  );
+  return Number.isFinite(__mmHealth) ? __mmHealth : null;
+}
+function __mmRememberWeaponXpAnimalKill(__mmSnapshot, __mmNow) {
+  const __mmAttackAt = Number(__mmWeaponXpLastAttackAt),
+    __mmWeapon = Number(__mmWeaponXpLastAttackWeapon),
+    __mmOrigin = __mmWeaponXpLastAttackOrigin,
+    __mmWeaponData = b && b.weapons && b.weapons[__mmWeapon];
+  if (
+    !v ||
+    !v.alive ||
+    !__mmSnapshot ||
+    !__mmOrigin ||
+    !__mmWeaponData ||
+    !Number.isInteger(__mmWeapon) ||
+    __mmWeaponXpSlotIndex(__mmWeapon) < 0
+  )
+    return;
+  const __mmAge = __mmNow - __mmAttackAt,
+    __mmWindow = Math.max(4000, __mmWeaponXpAttributionWindow(__mmWeapon)),
+    __mmDistance = Math.hypot(
+      Number(__mmSnapshot.x) - Number(__mmOrigin.x),
+      Number(__mmSnapshot.y) - Number(__mmOrigin.y),
+    ),
+    __mmTargetAngle = Math.atan2(
+      Number(__mmSnapshot.y) - Number(__mmOrigin.y),
+      Number(__mmSnapshot.x) - Number(__mmOrigin.x),
+    ),
+    __mmAngleDifference = Math.abs(
+      Math.atan2(
+        Math.sin(__mmTargetAngle - Number(__mmOrigin.angle)),
+        Math.cos(__mmTargetAngle - Number(__mmOrigin.angle)),
+      ),
+    ),
+    __mmReach =
+      (Number(__mmWeaponData.range) || 0) +
+      (Number(__mmSnapshot.scale) || 35) +
+      (__mmWeaponData.projectile != null ? 900 : 90);
+  if (
+    !Number.isFinite(__mmAge) ||
+    __mmAge < 0 ||
+    __mmAge > __mmWindow ||
+    !Number.isFinite(__mmDistance) ||
+    __mmDistance > __mmReach ||
+    !Number.isFinite(__mmAngleDifference) ||
+    __mmAngleDifference > 1.25
+  )
+    return;
+  // The following resource packet is still authoritative for the XP amount.
+  // This hold only connects a confirmed animal or boss removal to its weapon.
+  ((__mmWeaponXpPendingKillWeapon = __mmWeapon),
+    (__mmWeaponXpPendingKillUntil = __mmNow + 2800));
+}
+function __mmObserveWeaponXpAnimalRewards() {
+  if (!Array.isArray(N)) return;
+  const __mmNow = Date.now(),
+    __mmSeen = Object.create(null);
+  for (let __mmIndex = 0; __mmIndex < N.length; __mmIndex++) {
+    const __mmAnimal = N[__mmIndex],
+      __mmKey = __mmWeaponXpAnimalKey(__mmAnimal),
+      __mmHealth = __mmWeaponXpAnimalHealth(__mmAnimal);
+    if (__mmKey == null || __mmHealth == null) continue;
+    __mmSeen[__mmKey] = !0;
+    __mmWeaponXpAnimalSnapshots[__mmKey] = {
+      x: Number(__mmAnimal.x),
+      y: Number(__mmAnimal.y),
+      scale: Number(__mmAnimal.scale) || 35,
+      at: __mmNow,
+    };
+  }
+  for (const __mmKey in __mmWeaponXpAnimalSnapshots) {
+    const __mmSnapshot = __mmWeaponXpAnimalSnapshots[__mmKey];
+    if (!__mmSeen[__mmKey]) {
+      __mmRememberWeaponXpAnimalKill(__mmSnapshot, __mmNow);
+      delete __mmWeaponXpAnimalSnapshots[__mmKey];
+    } else if (__mmNow - Number(__mmSnapshot.at) > 15000)
+      delete __mmWeaponXpAnimalSnapshots[__mmKey];
+  }
 }
 // Resource gains arrive as stat packets after the local hit callback. Keep a
 // tiny, local-only history of the resource node that was actually struck, so
@@ -23466,18 +23582,23 @@ function __mmTrackWeaponXpResourceGain(
     __mmRecentAttack =
       __mmNow - __mmWeaponXpLastAttackAt <=
       __mmWeaponXpAttributionWindow(__mmWeaponXpLastAttackWeapon),
+    __mmRecentKill =
+      __mmNow <= Number(__mmWeaponXpPendingKillUntil) &&
+      Number.isInteger(Number(__mmWeaponXpPendingKillWeapon)),
     __mmWeaponId = Number(
       __mmRecentGather
         ? __mmWeaponXpLastGatherWeapon
         : __mmRecentAttack
           ? __mmWeaponXpLastAttackWeapon
-          : NaN,
+          : __mmRecentKill
+            ? __mmWeaponXpPendingKillWeapon
+            : NaN,
     ),
     __mmGain = __mmNext - __mmPrevious;
   if (
     !Number.isFinite(__mmPrevious) ||
     !Number.isFinite(__mmNext) ||
-    (!__mmRecentGather && !__mmRecentAttack) ||
+    (!__mmRecentGather && !__mmRecentAttack && !__mmRecentKill) ||
     !Number.isInteger(__mmWeaponId) ||
     __mmWeaponId < 0 ||
     !Number.isFinite(__mmGain) ||
@@ -23487,7 +23608,10 @@ function __mmTrackWeaponXpResourceGain(
   // Prefer the confirmed gather callback. The optimistic outgoing-melee stamp
   // covers the client ordering where the resource packet arrives first; idle
   // reload selection can therefore never steal the XP attribution.
-  __mmAddWeaponXp(__mmWeaponId, __mmGain);
+  (__mmAddWeaponXp(__mmWeaponId, __mmGain),
+    __mmRecentKill &&
+      ((__mmWeaponXpPendingKillWeapon = null),
+      (__mmWeaponXpPendingKillUntil = 0)));
 }
 function __mmRecordCombatDelta(__mmPlayer, __mmPrevious, __mmNext) {
   if (
@@ -52797,8 +52921,9 @@ Sl = function () {
 };
 Xl = function () {
   const __mmResult = __mmOriginalAnimalUpdate.apply(this, arguments);
-  __mmMobStealEnabled &&
-    (__mmMobStealObserveAllHealth(), __mmUpdateMobSteal());
+  (__mmObserveWeaponXpAnimalRewards(),
+    __mmMobStealEnabled &&
+      (__mmMobStealObserveAllHealth(), __mmUpdateMobSteal()));
   return __mmResult;
 };
 $l = function (__mmPlayerSid, __mmHealth) {
