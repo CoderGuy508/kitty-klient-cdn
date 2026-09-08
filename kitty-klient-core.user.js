@@ -2,7 +2,7 @@
 // @name         kitty klient
 // @author       Coder Guy
 // @credits       random4ik — bot script
-// @version      6.8.11
+// @version      6.8.12
 // @icon         https://cdn.discordapp.com/icons/1540876076224356437/ac27c0ce87c4c46b407ebca78e150aeb.webp?size=2048
 // @description  kitty klient — a MooMoo.io client with adaptive zoom, fast autoheal, gear automation, combat tools, predictive placement, visual markers, CC0 background music, manual quick builds, and a fully rebindable keyboard/mouse controls HUD.
 // @match        *://moomoo.io/*
@@ -259,7 +259,7 @@
     const AUTO_PUSH_FINISHER_MIGRATION_KEY = "kitty-klient-auto-push-finisher-v1";
     const ASSASSIN_RANGE_AUTO_MIGRATION_KEY = "kitty-klient-assassin-range-auto-v1";
     const TAB_SYNC_BRIDGE_KEY = "kitty-klient-tab-sync-bridge-v1";
-const KITTY_KLIENT_VERSION = "6.8.11";
+const KITTY_KLIENT_VERSION = "6.8.12";
     const KITTY_SHARED_STORAGE_APPLIED_EVENT = "KittyMooMooSharedStorageApplied";
     // FRVR's v1.8 client changed the game module and now owns its own Altcha
     // verification flow. The legacy runtime patch relies on exact bundle
@@ -20546,8 +20546,18 @@ function __mmInstallMidnightWeaponNativeRenderer() {
         String(__mmActiveWeapon && __mmActiveWeapon.name || "").toLowerCase() === "daggers") &&
       String(__mmRubyVariant && __mmRubyVariant.src || "") === "_r" &&
       !(Number(__mmPlayer.buildIndex) >= 0)
+    ),
+      // The original renderer wrapper was intentionally entered only for Ruby
+      // weapons. Cardboard replaces the normal Short Sword, so opt that one
+      // verified equipped texture into the same native draw pass.
+      __mmCardboardShortSwordActive = !!(
+        __mmPlayer &&
+        Number(__mmPlayer.weaponIndex) === __mmShortSword &&
+        String(__mmRubyVariant && __mmRubyVariant.src || "") !== "_r" &&
+        !(Number(__mmPlayer.buildIndex) >= 0) &&
+        __mmCardboardShortSwordCosmetic(__mmPlayer)
     );
-    if (!__mmRubyWeaponActive)
+    if (!__mmRubyWeaponActive && !__mmCardboardShortSwordActive)
       return __mmOriginalPlayerDrawable.apply(this, arguments);
     const __mmPreviousDrawingPlayer = __mmMidnightWeaponDrawingPlayer;
     __mmMidnightWeaponDrawingPlayer = __mmPlayer;
