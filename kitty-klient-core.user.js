@@ -2,7 +2,7 @@
 // @name         kitty klient
 // @author       Coder Guy
 // @credits       random4ik — bot script
-// @version      6.8.10
+// @version      6.8.11
 // @icon         https://cdn.discordapp.com/icons/1540876076224356437/ac27c0ce87c4c46b407ebca78e150aeb.webp?size=2048
 // @description  kitty klient — a MooMoo.io client with adaptive zoom, fast autoheal, gear automation, combat tools, predictive placement, visual markers, CC0 background music, manual quick builds, and a fully rebindable keyboard/mouse controls HUD.
 // @match        *://moomoo.io/*
@@ -259,7 +259,7 @@
     const AUTO_PUSH_FINISHER_MIGRATION_KEY = "kitty-klient-auto-push-finisher-v1";
     const ASSASSIN_RANGE_AUTO_MIGRATION_KEY = "kitty-klient-assassin-range-auto-v1";
     const TAB_SYNC_BRIDGE_KEY = "kitty-klient-tab-sync-bridge-v1";
-const KITTY_KLIENT_VERSION = "6.8.10";
+const KITTY_KLIENT_VERSION = "6.8.11";
     const KITTY_SHARED_STORAGE_APPLIED_EVENT = "KittyMooMooSharedStorageApplied";
     // FRVR's v1.8 client changed the game module and now owns its own Altcha
     // verification flow. The legacy runtime patch relies on exact bundle
@@ -284,6 +284,7 @@ const KITTY_KLIENT_VERSION = "6.8.10";
     const KITTY_MIDNIGHT_HAMMER_ASSET_URL = KITTY_ACCOUNT_SERVICE_URL + "/cosmetics/midnight-hammer.png?v=1";
     const KITTY_MIDNIGHT_KATANA_ASSET_URL = KITTY_ACCOUNT_SERVICE_URL + "/cosmetics/midnight-katana.png?v=1";
     const KITTY_MIDNIGHT_DAGGERS_ASSET_URL = KITTY_ACCOUNT_SERVICE_URL + "/cosmetics/midnight-daggers.png?v=2";
+    const KITTY_CARDBOARD_SHORT_SWORD_ASSET_URL = KITTY_ACCOUNT_SERVICE_URL + "/cosmetics/cardboard-short-sword.png?v=1";
     const KITTY_MIDNIGHT_SHORT_SWORD_ASSET_URL = KITTY_ACCOUNT_SERVICE_URL + "/cosmetics/midnight-short-sword.png?v=1";
     const KITTY_MIDNIGHT_STICK_ASSET_URL = KITTY_ACCOUNT_SERVICE_URL + "/cosmetics/midnight-stick.png?v=1";
     const KITTY_MIDNIGHT_MCGRABBY_ASSET_URL = KITTY_ACCOUNT_SERVICE_URL + "/cosmetics/midnight-mcgrabby.png?v=1";
@@ -5199,6 +5200,18 @@ const KITTY_KLIENT_VERSION = "6.8.10";
         // The remote profile is signed service data, but the browser still
         // keeps its render allow-list fixed. A modified page cannot use this
         // sync channel to cause arbitrary URLs to be drawn on other clients.
+        if (key === "cardboard-short-sword") return {
+                key,
+                label: "Cardboard Short Sword",
+                description: "A permanent Kitty gift retexture for the normal Short Sword.",
+                category: "weapon",
+                target: "short-sword",
+                slot: "weapon:short-sword",
+                weapon: "short-sword",
+                assetUrl: KITTY_CARDBOARD_SHORT_SWORD_ASSET_URL,
+                eventOnly: false,
+                gift: true
+            };
         if (key === "midnight-scythe") return {
                 key,
                 label: "Midnight Scythe",
@@ -5349,6 +5362,7 @@ const KITTY_KLIENT_VERSION = "6.8.10";
 
     function kittyWeaponCosmeticTargetLabel(cosmetic) {
         const target = String(cosmetic && cosmetic.target || "");
+        if (target === "short-sword") return "Short Sword";
         if (target === "ruby-great-hammer") return "Ruby Great Hammer";
         if (target === "ruby-katana") return "Ruby Katana";
         if (target === "ruby-daggers") return "Ruby Daggers";
@@ -5389,7 +5403,7 @@ const KITTY_KLIENT_VERSION = "6.8.10";
         // Keep the catalog explicit in the client, even when a signed profile
         // has not yet arrived. This makes both event rewards discoverable
         // while refusing arbitrary server-provided weapon image URLs.
-        return ["midnight-scythe", "midnight-polearm", "midnight-bat", "midnight-great-axe", "midnight-axe", "midnight-tool-hammer", "midnight-hammer", "midnight-katana", "midnight-daggers", "midnight-short-sword", "midnight-stick", "midnight-mcgrabby", "midnight-shield"].map((key) => {
+        return ["cardboard-short-sword", "midnight-scythe", "midnight-polearm", "midnight-bat", "midnight-great-axe", "midnight-axe", "midnight-tool-hammer", "midnight-hammer", "midnight-katana", "midnight-daggers", "midnight-short-sword", "midnight-stick", "midnight-mcgrabby", "midnight-shield"].map((key) => {
             const cosmetic = kittyWeaponCosmetic({ key });
             const ownedEntry = source.find((entry) =>
                 String(entry && entry.key || "").trim().toLowerCase() === key
@@ -6266,7 +6280,7 @@ const KITTY_KLIENT_VERSION = "6.8.10";
         const title = document.createElement("strong");
         title.textContent = "Weapon retextures";
         const copy = document.createElement("span");
-        copy.textContent = "Event rewards only. Equipped retextures are verified and visible to other Kitty Klient players.";
+        copy.textContent = "Permanent gifts and event rewards. Equipped retextures are verified and visible to other Kitty Klient players.";
         weaponCollection.append(title, copy);
         const cosmetics = kittyWeaponCosmetics(
             session && session.weaponCosmetics,
@@ -6296,9 +6310,11 @@ const KITTY_KLIENT_VERSION = "6.8.10";
                 const name = document.createElement("strong");
                 name.textContent = cosmetic.label;
                 const meta = document.createElement("span");
-                meta.textContent = kittyWeaponCosmeticTargetLabel(cosmetic) + " · event only";
+                meta.textContent = kittyWeaponCosmeticTargetLabel(cosmetic) + (cosmetic.gift ? " · permanent gift" : " · event only");
                 const description = document.createElement("p");
-                description.textContent = cosmetic.owned
+                description.textContent = cosmetic.gift
+                    ? "Included with every Kitty account. Choose it below for this weapon."
+                    : cosmetic.owned
                     ? "Unlocked from an event. Choose it below for this weapon."
                     : "Earned exclusively through Kitty events.";
                 detail.append(name, meta, description);
@@ -7065,7 +7081,7 @@ const KITTY_KLIENT_VERSION = "6.8.10";
             title.textContent = "Cosmetics";
             const copy = document.createElement("p");
             copy.className = "kitty-cosmetics-copy";
-            copy.textContent = "Verified name cosmetics and event weapon retextures, organized in one place. Your MooMoo name and gameplay stats never change here.";
+            copy.textContent = "Verified name cosmetics, permanent gifts, and event weapon retextures, organized in one place. Your MooMoo name and gameplay stats never change here.";
             const nameCollection = document.createElement("section");
             nameCollection.className = "kitty-cosmetics-collection";
             nameCollection.dataset.kittyNameCosmetics = "1";
@@ -20168,6 +20184,7 @@ const __mmMidnightToolHammerImage = new Image();
 const __mmMidnightHammerImage = new Image();
 const __mmMidnightKatanaImage = new Image();
 const __mmMidnightDaggersImage = new Image();
+const __mmCardboardShortSwordImage = new Image();
 const __mmMidnightShortSwordImage = new Image();
 const __mmMidnightStickImage = new Image();
 const __mmMidnightMcGrabbyImage = new Image();
@@ -20181,6 +20198,7 @@ let __mmMidnightToolHammerRequested = !1;
 let __mmMidnightHammerRequested = !1;
 let __mmMidnightKatanaRequested = !1;
 let __mmMidnightDaggersRequested = !1;
+let __mmCardboardShortSwordRequested = !1;
 let __mmMidnightShortSwordRequested = !1;
 let __mmMidnightStickRequested = !1;
 let __mmMidnightMcGrabbyRequested = !1;
@@ -20253,6 +20271,13 @@ function __mmLoadMidnightDaggers() {
   __mmMidnightDaggersRequested = !0;
   (__mmMidnightDaggersImage.crossOrigin = "anonymous",
     (__mmMidnightDaggersImage.src = ${JSON.stringify(KITTY_MIDNIGHT_DAGGERS_ASSET_URL)}));
+  return !1;
+}
+function __mmLoadCardboardShortSword() {
+  if (__mmCardboardShortSwordRequested) return __mmCardboardShortSwordImage.complete;
+  __mmCardboardShortSwordRequested = !0;
+  (__mmCardboardShortSwordImage.crossOrigin = "anonymous",
+    (__mmCardboardShortSwordImage.src = ${JSON.stringify(KITTY_CARDBOARD_SHORT_SWORD_ASSET_URL)}));
   return !1;
 }
 function __mmLoadMidnightShortSword() {
@@ -20362,6 +20387,13 @@ function __mmMidnightDaggersCosmetic(__mmPlayer) {
     __mmPlayer,
     "midnight-daggers",
     "weapon:ruby-daggers",
+  );
+}
+function __mmCardboardShortSwordCosmetic(__mmPlayer) {
+  return __mmMidnightWeaponCosmetic(
+    __mmPlayer,
+    "cardboard-short-sword",
+    "weapon:short-sword",
   );
 }
 function __mmMidnightShortSwordCosmetic(__mmPlayer) {
@@ -20604,6 +20636,16 @@ function __mmInstallMidnightWeaponNativeRenderer() {
         __mmLoadMidnightToolHammer() &&
         __mmMidnightToolHammerImage.naturalWidth
       ),
+      __mmUseCardboardShortSword = !!(
+        __mmPlayer &&
+        __mmWeapon === __mmRubyShortSword &&
+        String(__mmVariant || "") !== "_r" &&
+        __mmContext &&
+        typeof __mmContext.drawImage === "function" &&
+        __mmCardboardShortSwordCosmetic(__mmPlayer) &&
+        __mmLoadCardboardShortSword() &&
+        __mmCardboardShortSwordImage.naturalWidth
+      ),
       __mmUseMidnightShortSword = !!(
         __mmPlayer &&
         __mmWeapon === __mmRubyShortSword &&
@@ -20674,7 +20716,7 @@ function __mmInstallMidnightWeaponNativeRenderer() {
         __mmLoadMidnightDaggers() &&
         __mmMidnightDaggersImage.naturalWidth
       );
-    if (__mmUseMidnightScythe || __mmUseMidnightPolearm || __mmUseMidnightAxe || __mmUseMidnightToolHammer || __mmUseMidnightBat || __mmUseMidnightGreatAxe || __mmUseMidnightShield || __mmUseMidnightStick || __mmUseMidnightMcGrabby || __mmUseMidnightShortSword || __mmUseMidnightKatana || __mmUseMidnightHammer || __mmUseMidnightDaggers) {
+    if (__mmUseMidnightScythe || __mmUseMidnightPolearm || __mmUseMidnightAxe || __mmUseMidnightToolHammer || __mmUseMidnightBat || __mmUseMidnightGreatAxe || __mmUseMidnightShield || __mmUseMidnightStick || __mmUseMidnightMcGrabby || __mmUseCardboardShortSword || __mmUseMidnightShortSword || __mmUseMidnightKatana || __mmUseMidnightHammer || __mmUseMidnightDaggers) {
       const __mmNativeWidth = Number(__mmWeapon.length),
         __mmNativeHeight = Number(__mmWeapon.width),
         __mmNativeX = Number(__mmScale) + Number(__mmWeapon.xOff) - __mmNativeWidth / 2,
@@ -20697,6 +20739,8 @@ function __mmInstallMidnightWeaponNativeRenderer() {
             ? __mmMidnightMcGrabbyImage
           : __mmUseMidnightStick
             ? __mmMidnightStickImage
+          : __mmUseCardboardShortSword
+            ? __mmCardboardShortSwordImage
           : __mmUseMidnightShortSword
             ? __mmMidnightShortSwordImage
           : __mmUseMidnightKatana
@@ -20712,7 +20756,7 @@ function __mmInstallMidnightWeaponNativeRenderer() {
           __mmImage,
           // The Scythe already has its intended authored scale. Every other
           // Midnight retexture gets the same 10% visual size increase.
-          __mmUseMidnightScythe ? 1 : 1.1,
+          __mmUseMidnightScythe || __mmUseCardboardShortSword ? 1 : 1.1,
           // The Scythe has authored forward reach. Midnight Polearm returns
           // to the native weapon line; every other retexture keeps its own offset.
           __mmUseMidnightScythe ? 16 : __mmUseMidnightDaggers ? 0 : -7,
@@ -20736,7 +20780,7 @@ function __mmDrawServerWeaponCosmetics() {
   }
 }
 function __mmDrawServerWeaponCosmeticsUnsafe() {
-  (__mmLoadMidnightScythe(), __mmLoadMidnightPolearm(), __mmLoadMidnightAxe(), __mmLoadMidnightToolHammer(), __mmLoadMidnightBat(), __mmLoadMidnightGreatAxe(), __mmLoadMidnightHammer(), __mmLoadMidnightKatana(), __mmLoadMidnightDaggers(), __mmLoadMidnightShortSword(), __mmLoadMidnightStick(), __mmLoadMidnightMcGrabby(), __mmLoadMidnightShield());
+  (__mmLoadMidnightScythe(), __mmLoadMidnightPolearm(), __mmLoadMidnightAxe(), __mmLoadMidnightToolHammer(), __mmLoadMidnightBat(), __mmLoadMidnightGreatAxe(), __mmLoadMidnightHammer(), __mmLoadMidnightKatana(), __mmLoadMidnightDaggers(), __mmLoadCardboardShortSword(), __mmLoadMidnightShortSword(), __mmLoadMidnightStick(), __mmLoadMidnightMcGrabby(), __mmLoadMidnightShield());
 }
 __mmInstallMidnightWeaponNativeRenderer();
 function __mmDrawDeveloperIdentities() {
