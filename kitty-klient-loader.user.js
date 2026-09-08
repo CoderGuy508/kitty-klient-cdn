@@ -17,7 +17,7 @@
 // @run-at       document-start
 // @namespace    thisisirrelevandandidontknowwhygreasyforkneedsthisanyways
 // @license      MIT
-// @require      https://cdn.jsdelivr.net/gh/CoderGuy508/kitty-klient-cdn@6658436a5043e1fbf21deaa76085fb46f59a3a1f/kitty-klient-core.user.js
+// @require      https://cdn.jsdelivr.net/gh/CoderGuy508/kitty-klient-cdn@ebe0f1dbed442d640deb788d0becb9e936f38743/kitty-klient-core.user.js
 // ==/UserScript==
 
 // The complete, uncompressed client is loaded from the pinned source above.
