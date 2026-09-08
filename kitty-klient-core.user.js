@@ -2,7 +2,7 @@
 // @name         kitty klient
 // @author       Coder Guy
 // @credits       random4ik — bot script
-// @version      6.8.15
+// @version      6.8.16
 // @icon         https://cdn.discordapp.com/icons/1540876076224356437/ac27c0ce87c4c46b407ebca78e150aeb.webp?size=2048
 // @description  kitty klient — a MooMoo.io client with adaptive zoom, fast autoheal, gear automation, combat tools, predictive placement, visual markers, CC0 background music, manual quick builds, and a fully rebindable keyboard/mouse controls HUD.
 // @match        *://moomoo.io/*
@@ -259,7 +259,7 @@
     const AUTO_PUSH_FINISHER_MIGRATION_KEY = "kitty-klient-auto-push-finisher-v1";
     const ASSASSIN_RANGE_AUTO_MIGRATION_KEY = "kitty-klient-assassin-range-auto-v1";
     const TAB_SYNC_BRIDGE_KEY = "kitty-klient-tab-sync-bridge-v1";
-const KITTY_KLIENT_VERSION = "6.8.15";
+const KITTY_KLIENT_VERSION = "6.8.16";
     const KITTY_SHARED_STORAGE_APPLIED_EVENT = "KittyMooMooSharedStorageApplied";
     // FRVR's v1.8 client changed the game module and now owns its own Altcha
     // verification flow. The legacy runtime patch relies on exact bundle
@@ -7062,7 +7062,7 @@ const KITTY_KLIENT_VERSION = "6.8.15";
             ".kitty-weapon-cosmetic-card{display:grid;grid-template-columns:64px 1fr;gap:10px;align-items:center;padding:8px;border:1px solid rgba(192,132,252,.32);border-radius:9px;background:linear-gradient(135deg,rgba(30,20,52,.62),rgba(5,3,12,.55))}",
             ".kitty-weapon-cosmetic-preview{width:64px;height:76px;object-fit:contain;filter:drop-shadow(0 0 7px rgba(129,140,248,.8))}",
             ".kitty-weapon-cosmetic-card strong{display:block;color:#f5f3ff;font-size:12px}.kitty-weapon-cosmetic-card span{display:block;margin-top:2px;color:#c4b5fd;font-size:9px;font-weight:900;text-transform:uppercase;letter-spacing:.09em}.kitty-weapon-cosmetic-card p{margin:4px 0 0;color:#cbd5e1;font-size:10px;line-height:1.35}",
-            ".kitty-weapon-cosmetic-actions{display:grid;grid-template-columns:1fr auto;gap:7px}.kitty-weapon-cosmetic-actions select,.kitty-weapon-cosmetic-actions button{min-height:31px;border:1px solid rgba(196,181,253,.55);border-radius:7px;background:rgba(12,7,23,.76);color:#fff;padding:0 8px;font:800 10px/1 system-ui,sans-serif;text-shadow:none}.kitty-weapon-cosmetic-actions button{cursor:pointer;background:linear-gradient(135deg,#4c1d95,#7c3aed)}.kitty-weapon-cosmetic-actions :disabled{opacity:.48;cursor:not-allowed}",
+            ".kitty-weapon-cosmetic-actions{display:grid;grid-template-columns:1fr auto;gap:7px}.kitty-weapon-cosmetic-actions select,.kitty-weapon-cosmetic-actions button,#kitty-klient-cosmetics-panel .kitty-account-discord button{min-height:31px;border:1px solid rgba(196,181,253,.55);border-radius:7px;background:rgba(12,7,23,.76);color:#fff;padding:0 8px;font:800 10px/1 system-ui,sans-serif;text-shadow:none}.kitty-weapon-cosmetic-actions button,#kitty-klient-cosmetics-panel .kitty-account-discord button{cursor:pointer;background:linear-gradient(135deg,#4c1d95,#7c3aed)}#kitty-klient-cosmetics-panel .kitty-account-discord button{padding:7px 10px;line-height:1.3;white-space:normal}#kitty-klient-cosmetics-panel .kitty-account-discord button:hover:not(:disabled){filter:brightness(1.12)}#kitty-klient-cosmetics-panel .kitty-account-discord button:focus-visible{outline:2px solid #c4b5fd;outline-offset:2px}.kitty-weapon-cosmetic-actions :disabled,#kitty-klient-cosmetics-panel .kitty-account-discord button:disabled{opacity:.48;cursor:not-allowed}",
             "@media(max-width:480px){.kitty-weapon-cosmetic-actions{grid-template-columns:1fr}.kitty-weapon-cosmetic-actions button{min-height:34px}}"
         ].join("");
         (document.head || document.documentElement).appendChild(style);
