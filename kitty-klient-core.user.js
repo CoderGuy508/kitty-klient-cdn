@@ -2,7 +2,7 @@
 // @name         kitty klient
 // @author       Coder Guy
 // @credits       random4ik — bot script
-// @version      6.8.9
+// @version      6.8.10
 // @icon         https://cdn.discordapp.com/icons/1540876076224356437/ac27c0ce87c4c46b407ebca78e150aeb.webp?size=2048
 // @description  kitty klient — a MooMoo.io client with adaptive zoom, fast autoheal, gear automation, combat tools, predictive placement, visual markers, CC0 background music, manual quick builds, and a fully rebindable keyboard/mouse controls HUD.
 // @match        *://moomoo.io/*
@@ -259,7 +259,7 @@
     const AUTO_PUSH_FINISHER_MIGRATION_KEY = "kitty-klient-auto-push-finisher-v1";
     const ASSASSIN_RANGE_AUTO_MIGRATION_KEY = "kitty-klient-assassin-range-auto-v1";
     const TAB_SYNC_BRIDGE_KEY = "kitty-klient-tab-sync-bridge-v1";
-const KITTY_KLIENT_VERSION = "6.8.9";
+const KITTY_KLIENT_VERSION = "6.8.10";
     const KITTY_SHARED_STORAGE_APPLIED_EVENT = "KittyMooMooSharedStorageApplied";
     // FRVR's v1.8 client changed the game module and now owns its own Altcha
     // verification flow. The legacy runtime patch relies on exact bundle
@@ -14261,8 +14261,19 @@ const __mmInsta = {
       autoHeal: __mmAutoHealEnabled,
     };
   },
-  nearestEnemy() {
-    if (__mmLiveStateFresh()) return __mmLiveState.nearestEnemy;
+  nearestEnemy(__mmForceRefresh = !1) {
+    // A manual Insta must use the players visible at the key press. The live
+    // snapshot is normally enough for background automation, but it can be
+    // fresh while still describing the frame just before an enemy appeared.
+    // Do not let that empty cache turn a targetted Insta into angle 0.
+    __mmForceRefresh && __mmUpdateLiveState(!0);
+    if (
+      __mmLiveStateFresh() &&
+      __mmIsEnemyPlayer(__mmLiveState.nearestEnemy) &&
+      Number.isFinite(Number(__mmLiveState.nearestEnemy.x)) &&
+      Number.isFinite(Number(__mmLiveState.nearestEnemy.y))
+    )
+      return __mmLiveState.nearestEnemy;
     if (!v || !v.alive || !Array.isArray(E)) return null;
     let __mmClosest = null;
     let __mmClosestDistance = Infinity;
@@ -14841,7 +14852,7 @@ const __mmInsta = {
     try {
       __mmPreflightTarget =
         __mmOptions.targetSid == null
-          ? this.nearestEnemy()
+          ? this.nearestEnemy(__mmManualHotkey)
           : Rt(__mmOptions.targetSid);
     } catch (__mmPreflightTargetError) {}
     // Revalidate at the one point that can actually claim the Insta. Earlier
@@ -14927,7 +14938,7 @@ const __mmInsta = {
           ? __mmRequestedTarget
           : this.betrayal
             ? null
-            : this.nearestEnemy();
+            : this.nearestEnemy(__mmManualHotkey);
     if (__mmTarget) this.targetSid = __mmTarget.sid;
     // Keep this distinct from targetOptional: R always permits a no-target
     // burst, but a valid enemy present at activation should still receive the
@@ -33311,7 +33322,7 @@ function __mmHandleInstaHotkey() {
     __mmBushStatus("Insta testing mode: Autoheal only");
     return !1;
   }
-  const __mmBowUpgradeTarget = __mmInsta.nearestEnemy(),
+  const __mmBowUpgradeTarget = __mmInsta.nearestEnemy(!0),
     __mmProfile = __mmOneTickInstaEnabled
       ? "oneTick"
       : __mmReverseInstaEnabled
