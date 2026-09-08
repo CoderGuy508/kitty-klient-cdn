@@ -5880,10 +5880,10 @@ const KITTY_KLIENT_VERSION = "6.8.18";
             kittyAccountSupportState = result; updateKittyAccountPanel();
         }).catch(() => {}).finally(() => { kittySupportReadBusy = false; });
     }
-    async function changeKittySupportMessage(action, message = null) {
+    async function changeKittySupportMessage(action, message = null, editedText = null) {
         let text = '';
         if (action === 'edit') {
-            text = window.prompt('Edit message', message.body);
+            text = editedText;
             if (text == null) return;
         } else if (!window.confirm(action === 'hide' ? 'Delete this conversation from your inbox? Moderators keep their copy until they also delete it.' : 'Delete this message?')) return;
         try {
@@ -5968,7 +5968,17 @@ const KITTY_KLIENT_VERSION = "6.8.18";
                     for (const action of ['edit','delete']) {
                         const button = document.createElement('button'); button.type = 'button';
                         button.textContent = action === 'edit' ? 'Edit' : 'Delete';
-                        button.addEventListener('click', () => void changeKittySupportMessage(action,message));
+                        button.addEventListener('click', () => {
+                            if (action !== 'edit') return void changeKittySupportMessage(action,message);
+                            if (row.querySelector('.kitty-message-editor')) return;
+                            const editor = document.createElement('div'); editor.className = 'kitty-message-editor';
+                            const input = document.createElement('textarea'); input.value = message.body; input.maxLength = 600;
+                            input.setAttribute('aria-label','Edit message'); input.style.cssText = 'width:100%;min-height:90px;box-sizing:border-box';
+                            const save = document.createElement('button'); save.type = 'button'; save.textContent = 'Save';
+                            save.addEventListener('click', () => void changeKittySupportMessage('edit',message,input.value));
+                            const cancel = document.createElement('button'); cancel.type = 'button'; cancel.textContent = 'Cancel'; cancel.addEventListener('click', () => editor.remove());
+                            editor.append(input,save,cancel); row.append(editor); input.focus();
+                        });
                         actions.append(button);
                     }
                     heading.append(actions);
@@ -6979,7 +6989,7 @@ const KITTY_KLIENT_VERSION = "6.8.18";
         const supportReply = document.createElement("textarea");
         supportReply.name = "kitty-support-reply";
         supportReply.maxLength = 600;
-        supportReply.placeholder = "Write a private reply to Kitty staff";
+        supportReply.placeholder = "Write a reply… Enter adds a new line. Emojis welcome.";
         supportReply.setAttribute("aria-label", "Private reply to Kitty staff");
         const supportSend = document.createElement("button");
         supportSend.type = "button";
