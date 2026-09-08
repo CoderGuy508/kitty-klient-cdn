@@ -2,7 +2,7 @@
 // @name         kitty klient
 // @author       Coder Guy
 // @credits       random4ik — bot script
-// @version      6.8.6
+// @version      6.8.7
 // @icon         https://cdn.discordapp.com/icons/1540876076224356437/ac27c0ce87c4c46b407ebca78e150aeb.webp?size=2048
 // @description  kitty klient — a MooMoo.io client with adaptive zoom, fast autoheal, gear automation, combat tools, predictive placement, visual markers, CC0 background music, manual quick builds, and a fully rebindable keyboard/mouse controls HUD.
 // @match        *://moomoo.io/*
@@ -259,7 +259,7 @@
     const AUTO_PUSH_FINISHER_MIGRATION_KEY = "kitty-klient-auto-push-finisher-v1";
     const ASSASSIN_RANGE_AUTO_MIGRATION_KEY = "kitty-klient-assassin-range-auto-v1";
     const TAB_SYNC_BRIDGE_KEY = "kitty-klient-tab-sync-bridge-v1";
-    const KITTY_KLIENT_VERSION = "6.8.6";
+    const KITTY_KLIENT_VERSION = "6.8.7";
     const KITTY_SHARED_STORAGE_APPLIED_EVENT = "KittyMooMooSharedStorageApplied";
     // FRVR's v1.8 client changed the game module and now owns its own Altcha
     // verification flow. The legacy runtime patch relies on exact bundle
@@ -654,7 +654,7 @@
     }
     const KITTY_BINDING_ACTIONS = Object.freeze([
         Object.freeze({ id: "toggleHud", group: "Menu & view", binding: "Escape", action: "Toggle Kitty HUD", note: "Closes MooMoo shop, clan, or chat first when one is open." }),
-        Object.freeze({ id: "toggleConfig", group: "Menu & view", binding: "KeyP", action: "Toggle Config", note: "Opens or closes Kitty's Config page without changing gameplay settings." }),
+        Object.freeze({ id: "toggleConfig", group: "Menu & view", binding: "Alt+KeyP", action: "Toggle Config", note: "Opens or closes Kitty's Config page without changing gameplay settings." }),
         Object.freeze({ id: "saveInstantReplay", group: "Menu & view", binding: "F8", action: "Save instant replay", note: "Saves the current Clip Farm replay window when its buffer is ready." }),
         Object.freeze({ id: "moveUp", group: "Movement", binding: "KeyW", action: "Move up", note: "Hold to move north. This replaces MooMoo's fixed W movement key." }),
         Object.freeze({ id: "moveLeft", group: "Movement", binding: "KeyA", action: "Move left", note: "Hold to move west. This replaces MooMoo's fixed A movement key." }),
@@ -671,7 +671,7 @@
         Object.freeze({ id: "quadTrap", group: "Combat & gear", binding: "Shift+KeyB", action: "Manual Quad Trap", note: "Forces one legal four-slot trap solve." }),
         Object.freeze({ id: "quadSpike", group: "Combat & gear", binding: "Shift+KeyC", action: "Manual Quad Spike", note: "Forces one legal four-slot spike solve." }),
         Object.freeze({ id: "betrayalInsta", group: "Combat & gear", binding: "Shift+KeyT", action: "Betrayal Quad Spikes", note: "Targets the nearest teammate within 175px only after all four spike slots are legal, then leaves and places. Disable Targeted teammate betrayal to restore the global best-effort ring." }),
-        Object.freeze({ id: "toggleAutoHeal", group: "Combat & gear", binding: "Alt+KeyP", action: "Toggle Autoheal", note: "Changes Autoheal without opening the HUD." }),
+        Object.freeze({ id: "toggleAutoHeal", group: "Combat & gear", binding: "KeyP", action: "Toggle Autoheal", note: "Changes Autoheal without opening the HUD." }),
         Object.freeze({ id: "food", group: "Building & supplies", binding: "KeyQ", action: "Food", note: "Repeatedly uses the current food while held.", hold: true }),
         Object.freeze({ id: "trapBuild", group: "Building & supplies", binding: "KeyF", action: "Pit trap", note: "Repeatedly places the current trap while held.", hold: true }),
         Object.freeze({ id: "spikeBuild", group: "Building & supplies", binding: "KeyV", action: "Spike", note: "Repeatedly places the current spike while held.", hold: true }),
@@ -2916,6 +2916,15 @@
                     KITTY_DEFAULT_KEYBINDS[entry.id]
                 );
             });
+            // 6.8.6 briefly put Config on P. Restore the intended defaults
+            // for existing installs without disturbing other custom bindings.
+            if (
+                settings.keybinds.toggleConfig === "KeyP" &&
+                settings.keybinds.toggleAutoHeal === "Alt+KeyP"
+            ) {
+                settings.keybinds.toggleConfig = "Alt+KeyP";
+                settings.keybinds.toggleAutoHeal = "KeyP";
+            }
         }
         return settings;
     }
