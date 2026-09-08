@@ -2,7 +2,7 @@
 // @name         kitty klient
 // @author       Coder Guy
 // @credits       random4ik — bot script
-// @version      6.8.8
+// @version      6.8.9
 // @icon         https://cdn.discordapp.com/icons/1540876076224356437/ac27c0ce87c4c46b407ebca78e150aeb.webp?size=2048
 // @description  kitty klient — a MooMoo.io client with adaptive zoom, fast autoheal, gear automation, combat tools, predictive placement, visual markers, CC0 background music, manual quick builds, and a fully rebindable keyboard/mouse controls HUD.
 // @match        *://moomoo.io/*
@@ -259,7 +259,7 @@
     const AUTO_PUSH_FINISHER_MIGRATION_KEY = "kitty-klient-auto-push-finisher-v1";
     const ASSASSIN_RANGE_AUTO_MIGRATION_KEY = "kitty-klient-assassin-range-auto-v1";
     const TAB_SYNC_BRIDGE_KEY = "kitty-klient-tab-sync-bridge-v1";
-    const KITTY_KLIENT_VERSION = "6.8.8";
+const KITTY_KLIENT_VERSION = "6.8.9";
     const KITTY_SHARED_STORAGE_APPLIED_EVENT = "KittyMooMooSharedStorageApplied";
     // FRVR's v1.8 client changed the game module and now owns its own Altcha
     // verification flow. The legacy runtime patch relies on exact bundle
@@ -879,6 +879,7 @@
         // A positive HUD value remains an absolute custom radius.
         assassinDangerRange: 0,
         debugPanel: false,
+        killMessageEnabled: true,
         killMessage: "kitty klient is goated",
         // Clip Farm stores only this compact configuration in localStorage.
         // Video blobs, thumbnails, and clip metadata live in IndexedDB.
@@ -916,6 +917,7 @@
         "cleanupProgressChat",
         "cleanupCompleteChat",
         "boostChat",
+        "killMessageEnabled",
         "materialReply",
         "meowChainInsta",
         "modReplyChat",
@@ -1083,6 +1085,7 @@
         "instaSync",
         "boostBreak",
         "boostChat",
+        "killMessageEnabled",
         "materialReply",
         "meowChainInsta",
         "instaChat",
@@ -4369,7 +4372,8 @@
             ["animalColor", "Animal", "Animal markers"]
         ].forEach(([key, label, subtitle]) => addHudCompactColor(mediumWorldColors, key, label, subtitle));
         const mediumText = addHudSection(mediumConfig, "Kill message");
-        addHudCompactText(mediumText, "killMessage", "Auto kill text", "Sent after a kill; leave blank to disable");
+        addHudToggle(mediumText, "killMessageEnabled", "Auto kill text", "Send the configured message after a confirmed kill");
+        addHudCompactText(mediumText, "killMessage", "Auto kill message", "Sent after a kill while Auto kill text is on");
         const mediumMode = addHudSection(mediumConfig, "Menu complexity");
         const mediumModeHint = document.createElement("small");
         mediumModeHint.textContent = "Easy hides navigation; Medium keeps these essentials; Advanced exposes every setting.";
@@ -4789,6 +4793,7 @@
         diagnostics.appendChild(debugReadout);
  
         const messages = addHudSection(configPage, "Chat automation");
+        addHudToggle(messages, "killMessageEnabled", "Auto kill text", "Send the configured message after a confirmed kill");
         addHudToggle(messages, "instaChat", "Insta complete · Meow!", "Send Meow! after a completed normal or boost insta");
         addHudToggle(messages, "bushChat", "Bush ambush · SURPRISE!!!", "Send SURPRISE!!! when a bush ambush begins");
         addHudToggle(messages, "friendAddedChat", "Friend-added message", "Announce Added friend, [name]! after U + click");
@@ -4805,12 +4810,12 @@
         addHudToggle(messages, "deathHistoryChat", "Death history entries", "Add [name] died notices to Kitty's local chat-history panel");
         const messageRow = document.createElement("label");
         messageRow.className = "mm-hud-text";
-        setHudTooltip(messageRow, "Message sent after your kill count rises; maximum 30 characters. Leave it blank to disable auto text.");
+        setHudTooltip(messageRow, "Message sent after your kill count rises while Auto kill text is on; maximum 30 characters.");
         const messageText = document.createElement("span");
         const messageTitle = document.createElement("strong");
-        messageTitle.textContent = "Auto kill text";
+        messageTitle.textContent = "Auto kill message";
         const messageHint = document.createElement("small");
-        messageHint.textContent = "Sent after a kill · leave blank to turn it off";
+        messageHint.textContent = "Sent after a kill while Auto kill text is on";
         const messageLock = document.createElement("small");
         messageLock.className = "mm-hud-account-lock";
         messageLock.dataset.kittyAccountLock = "1";
@@ -4821,7 +4826,7 @@
         message.className = "mm-hud-message";
         message.type = "text";
         message.maxLength = MOO_CHAT_MESSAGE_MAX_LENGTH;
-        message.placeholder = "Leave blank to disable";
+        message.placeholder = "Optional message";
         message.value = hudState.killMessage;
         message.disabled = kittyAccountFeatureLocked("killMessage");
         message.addEventListener("input", () => {
@@ -9518,6 +9523,7 @@ let __mmSoldierRange = 400,
   __mmInstaSyncEnabled = !0,
   __mmBoostBreakEnabled = !0,
   __mmBoostChatEnabled = !0,
+  __mmKillMessageEnabled = !0,
   __mmMaterialReplyEnabled = !0,
   __mmMeowChainInstaEnabled = !0,
   __mmInstaChatEnabled = !0,
@@ -27933,6 +27939,7 @@ function __mmHudState() {
     instaSync: __mmInstaSyncEnabled,
     boostBreak: __mmBoostBreakEnabled,
     boostChat: __mmBoostChatEnabled,
+    killMessageEnabled: __mmKillMessageEnabled,
     materialReply: __mmMaterialReplyEnabled,
     meowChainInsta: __mmMeowChainInstaEnabled,
     instaChat: __mmInstaChatEnabled,
@@ -28195,6 +28202,7 @@ function __mmSetHudNumber(__mmKey, __mmValue) {
   __mmPublishHudState();
 }
 const __mmAutoChatToggleKeys = new Set([
+  "killMessageEnabled",
   "instaChat",
   "bushChat",
   "friendAddedChat",
@@ -28698,6 +28706,8 @@ function __mmSetHudToggle(__mmKey, __mmValue) {
       !__mmEnabled && __mmStopBoostBreak());
   } else if (__mmKey === "boostChat") {
     ((__mmBoostChatEnabled = __mmEnabled), !__mmEnabled && __mmStopBoostChat());
+  } else if (__mmKey === "killMessageEnabled") {
+    __mmKillMessageEnabled = __mmEnabled;
   } else if (__mmKey === "materialReply") {
     __mmMaterialReplyEnabled = __mmEnabled;
   } else if (__mmKey === "meowChainInsta") {
@@ -29013,6 +29023,7 @@ function __mmApplyHudSettings(__mmSettings) {
     "syncRelayUrl",
     "syncRoom",
     "debugPanel",
+    "killMessageEnabled",
     "killMessage",
     "soldierRange",
     "combatRange",
@@ -52784,7 +52795,7 @@ function __mmSendKillMessage() {
   const __mmMessage = String(__mmKillMessage || "");
   // Whitespace alone remains an off value, but meaningful spaces in a custom
   // message are sent exactly as the player entered them.
-  if (!__mmMessage.trim() || !v || !v.alive) return;
+  if (!__mmKillMessageEnabled || !__mmMessage.trim() || !v || !v.alive) return;
   __mmSendChat(__mmMessage);
 }
 let __mmServerCapacityWarningNonce = -1;
