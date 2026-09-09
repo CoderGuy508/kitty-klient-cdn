@@ -2,7 +2,7 @@
 // @name         kitty klient
 // @author       Coder Guy
 // @credits       random4ik — bot script
-// @version      6.8.19
+// @version      6.8.20
 // @icon         https://cdn.discordapp.com/icons/1540876076224356437/ac27c0ce87c4c46b407ebca78e150aeb.webp?size=2048
 // @description  kitty klient — a MooMoo.io client with adaptive zoom, fast autoheal, gear automation, combat tools, predictive placement, visual markers, CC0 background music, manual quick builds, and a fully rebindable keyboard/mouse controls HUD.
 // @match        *://moomoo.io/*
@@ -259,7 +259,7 @@
     const AUTO_PUSH_FINISHER_MIGRATION_KEY = "kitty-klient-auto-push-finisher-v1";
     const ASSASSIN_RANGE_AUTO_MIGRATION_KEY = "kitty-klient-assassin-range-auto-v1";
     const TAB_SYNC_BRIDGE_KEY = "kitty-klient-tab-sync-bridge-v1";
-const KITTY_KLIENT_VERSION = "6.8.19";
+const KITTY_KLIENT_VERSION = "6.8.20";
     const KITTY_SHARED_STORAGE_APPLIED_EVENT = "KittyMooMooSharedStorageApplied";
     // FRVR's v1.8 client changed the game module and now owns its own Altcha
     // verification flow. The legacy runtime patch relies on exact bundle
@@ -5888,6 +5888,7 @@ const KITTY_KLIENT_VERSION = "6.8.19";
         } else if (!window.confirm(action === 'hide' ? 'Delete this conversation from your inbox? Moderators keep their copy until they also delete it.' : 'Delete this message?')) return;
         try {
             kittyAccountSupportState = await kittyAccountRequest('/v1/account/support-mutate', { action, id: message?.id, message: text });
+            document.querySelectorAll('.kitty-message-editor').forEach((editor) => editor.remove());
             updateKittyAccountPanel();
         } catch(error) {
             const panel = document.getElementById('kitty-klient-cosmetics-panel');
@@ -5942,7 +5943,7 @@ const KITTY_KLIENT_VERSION = "6.8.19";
             return;
         }
         const messages = Array.isArray(support.messages) ? support.messages : [];
-        if (thread) {
+        if (thread && !thread.querySelector(".kitty-message-editor")) {
             thread.replaceChildren();
             messages.forEach((message) => {
                 const row = document.createElement("article");
@@ -5973,11 +5974,14 @@ const KITTY_KLIENT_VERSION = "6.8.19";
                             if (row.querySelector('.kitty-message-editor')) return;
                             const editor = document.createElement('div'); editor.className = 'kitty-message-editor';
                             const input = document.createElement('textarea'); input.value = message.body; input.maxLength = 600;
-                            input.setAttribute('aria-label','Edit message'); input.style.cssText = 'width:100%;min-height:90px;box-sizing:border-box';
+                            input.setAttribute('aria-label','Edit message'); input.style.cssText = 'display:block;width:100%;min-height:110px;box-sizing:border-box;resize:vertical;padding:10px;border:1px solid #a78bfa;border-radius:8px;background:#130d20;color:#f8fafc;-webkit-text-fill-color:#f8fafc;-webkit-text-security:none;font:400 14px/1.5 system-ui;letter-spacing:normal;text-shadow:none;white-space:pre-wrap;overflow-wrap:anywhere';
+                            for (const type of ['keydown','keyup','keypress']) input.addEventListener(type, (event) => event.stopPropagation());
                             const save = document.createElement('button'); save.type = 'button'; save.textContent = 'Save';
-                            save.addEventListener('click', () => void changeKittySupportMessage('edit',message,input.value));
-                            const cancel = document.createElement('button'); cancel.type = 'button'; cancel.textContent = 'Cancel'; cancel.addEventListener('click', () => editor.remove());
-                            editor.append(input,save,cancel); row.append(editor); input.focus();
+                            save.addEventListener('click', async () => { if (!input.value.trim() || save.disabled) return; save.disabled = true; save.textContent = 'Saving…'; await changeKittySupportMessage('edit',message,input.value); save.disabled = false; save.textContent = 'Save changes'; });
+                            const cancel = document.createElement('button'); cancel.type = 'button'; cancel.textContent = 'Cancel'; cancel.addEventListener('click', () => { editor.remove(); updateKittyAccountPanel(); });
+                            const label = document.createElement('label'); label.textContent = 'Edit message'; label.style.cssText = 'display:grid;gap:7px;font:600 13px/1.4 system-ui;color:#e9d5ff'; label.append(input);
+                            const buttons = document.createElement('div'); buttons.style.cssText = 'display:flex;flex-wrap:wrap;gap:8px;margin-top:9px'; save.textContent = 'Save changes'; buttons.append(save,cancel);
+                            editor.style.cssText = 'margin-top:12px;min-width:0'; editor.append(label,buttons); row.append(editor); input.focus();
                         });
                         actions.append(button);
                     }
