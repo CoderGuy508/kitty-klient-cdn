@@ -2,7 +2,7 @@
 // @name         kitty klient
 // @author       Coder Guy
 // @credits       random4ik — bot script
-// @version      6.8.20
+// @version      6.8.21
 // @icon         https://cdn.discordapp.com/icons/1540876076224356437/ac27c0ce87c4c46b407ebca78e150aeb.webp?size=2048
 // @description  kitty klient — a MooMoo.io client with adaptive zoom, fast autoheal, gear automation, combat tools, predictive placement, visual markers, CC0 background music, manual quick builds, and a fully rebindable keyboard/mouse controls HUD.
 // @match        *://moomoo.io/*
@@ -259,7 +259,7 @@
     const AUTO_PUSH_FINISHER_MIGRATION_KEY = "kitty-klient-auto-push-finisher-v1";
     const ASSASSIN_RANGE_AUTO_MIGRATION_KEY = "kitty-klient-assassin-range-auto-v1";
     const TAB_SYNC_BRIDGE_KEY = "kitty-klient-tab-sync-bridge-v1";
-const KITTY_KLIENT_VERSION = "6.8.20";
+const KITTY_KLIENT_VERSION = "6.8.21";
     const KITTY_SHARED_STORAGE_APPLIED_EVENT = "KittyMooMooSharedStorageApplied";
     // FRVR's v1.8 client changed the game module and now owns its own Altcha
     // verification flow. The legacy runtime patch relies on exact bundle
@@ -5988,6 +5988,13 @@ const KITTY_KLIENT_VERSION = "6.8.20";
                     heading.append(actions);
                 }
                 row.append(heading, body);
+                if (sender === 'you' && !message.deletedBy) {
+                    const delivery = document.createElement('small');
+                    delivery.textContent = 'Delivered';
+                    delivery.title = 'Accepted by Kitty staff inbox; this does not mean it has been read.';
+                    delivery.style.cssText = 'display:block;margin-top:5px;color:#94a3b8;font:500 11px/1.4 system-ui;text-align:right';
+                    row.append(delivery);
+                }
                 thread.appendChild(row);
             });
             if (messages.length) thread.scrollTop = thread.scrollHeight;
@@ -6044,22 +6051,46 @@ const KITTY_KLIENT_VERSION = "6.8.20";
         if (!session) return;
         const input = panel.querySelector("[name='kitty-support-reply']");
         const button = panel.querySelector("[data-kitty-support-send]");
-        if (!input) return;
-        if (button) button.disabled = true;
-        setKittyAccountPanelStatus(panel, "Sending your reply…", "pending");
-        try {
-            kittyAccountSupportState = await kittyAccountRequest(
-                "/v1/account/support-reply",
-                { message: String(input.value || "") }
-            );
-            input.value = "";
-            updateKittyAccountPanel();
-            setKittyAccountPanelStatus(panel, "Reply sent to Kitty staff.", "ok");
-        } catch (error) {
-            setKittyAccountPanelStatus(panel, String(error && error.message || "Could not send your reply."), "error");
-        } finally {
-            if (button) button.disabled = false;
+        const controls = panel.querySelector('.kitty-account-support');
+        if (!input || !controls || controls.querySelector('.kitty-pending-reply')) return;
+        const text = String(input.value || '');
+        if (!text.trim()) return;
+        const sessionKey = kittyAccountSessionKey(session);
+        const pending = document.createElement('article'); pending.className = 'kitty-pending-reply';
+        pending.style.cssText = 'padding:10px;margin:8px 0;border:1px solid #64748b;border-radius:8px;min-width:0';
+        const body = document.createElement('p'); body.textContent = text;
+        body.style.cssText = 'margin:0;white-space:pre-wrap;overflow-wrap:anywhere;color:#f8fafc;font:400 13px/1.5 system-ui';
+        const status = document.createElement('div'); status.setAttribute('role','status');
+        status.style.cssText = 'margin-top:7px;font:600 12px/1.4 system-ui';
+        const retry = document.createElement('button'); retry.type='button'; retry.textContent='Retry';
+        retry.style.cssText='margin:7px 8px 0 0;padding:7px 12px';
+        const dismiss = document.createElement('button'); dismiss.type='button'; dismiss.textContent='Dismiss';
+        dismiss.addEventListener('click',()=>{pending.remove();if(button)button.disabled=false;});
+        pending.append(body,status,retry,dismiss);
+        controls.append(pending);
+        let busy=false;
+        async function attempt() {
+            if(busy)return;
+            const current=readKittyAccountSession();
+            if(!current || kittyAccountSessionKey(current)!==sessionKey){pending.remove();return;}
+            busy=true; if(button)button.disabled=true;
+            retry.hidden=true;dismiss.hidden=true;status.style.color='#94a3b8';status.textContent='Sending…';
+            try {
+                const result=await kittyAccountRequest('/v1/account/support-reply',{message:text});
+                const latest=readKittyAccountSession();
+                if(!latest || kittyAccountSessionKey(latest)!==sessionKey){pending.remove();return;}
+                kittyAccountSupportState=result;
+                if(input.value===text)input.value='';
+                pending.remove();updateKittyAccountPanel();
+                setKittyAccountPanelStatus(panel,'Reply delivered to Kitty staff inbox.','ok');
+            } catch(error) {
+                status.style.color='#fb7185';status.textContent='ⓘ Not delivered — '+String(error?.message || 'Connection failed.');
+                retry.hidden=false;dismiss.hidden=false;
+                retry.title='Send this message again. If the previous response was lost, a duplicate may appear.';
+            } finally {busy=false;if(button)button.disabled=false;}
         }
+        retry.addEventListener('click',()=>void attempt());
+        await attempt();
     }
 
     function updateKittyAccountPanel(panel = null) {
