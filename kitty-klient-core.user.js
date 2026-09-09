@@ -2,7 +2,7 @@
 // @name         kitty klient
 // @author       Coder Guy
 // @credits       random4ik — bot script
-// @version      6.8.21
+// @version      6.8.22
 // @icon         https://cdn.discordapp.com/icons/1540876076224356437/ac27c0ce87c4c46b407ebca78e150aeb.webp?size=2048
 // @description  kitty klient — a MooMoo.io client with adaptive zoom, fast autoheal, gear automation, combat tools, predictive placement, visual markers, CC0 background music, manual quick builds, and a fully rebindable keyboard/mouse controls HUD.
 // @match        *://moomoo.io/*
@@ -259,7 +259,7 @@
     const AUTO_PUSH_FINISHER_MIGRATION_KEY = "kitty-klient-auto-push-finisher-v1";
     const ASSASSIN_RANGE_AUTO_MIGRATION_KEY = "kitty-klient-assassin-range-auto-v1";
     const TAB_SYNC_BRIDGE_KEY = "kitty-klient-tab-sync-bridge-v1";
-const KITTY_KLIENT_VERSION = "6.8.21";
+const KITTY_KLIENT_VERSION = "6.8.22";
     const KITTY_SHARED_STORAGE_APPLIED_EVENT = "KittyMooMooSharedStorageApplied";
     // FRVR's v1.8 client changed the game module and now owns its own Altcha
     // verification flow. The legacy runtime patch relies on exact bundle
@@ -9806,7 +9806,6 @@ const __mmShieldWeapon = 11,
   __mmTurretProjectileSpeed = 3.6,
   __mmEmpHelmet = 22,
   __mmAssassinGear = 56,
-  __mmFullInstaRangeMultiplier = 1.5,
   __mmThreatTrapRange = 325,
   __mmThreatAnimalRange = 200,
   __mmPassiveMobTrapRange = 190,
@@ -9972,7 +9971,6 @@ let __mmKittyInstaTimer = 0,
   __mmVelTickManualUntil = 0,
   __mmAutoPushMoveAngle = null,
   __mmAutoPushTargetSid = null,
-  __mmAutoPushManualUntil = 0,
   __mmAutoPushRoute = [],
   __mmAutoPushRouteAt = 0,
   __mmAutoPushRouteGoalX = null,
@@ -14535,21 +14533,36 @@ const __mmInsta = {
       __mmWeapon;
   },
   inRange(__mmWeapon, __mmTarget) {
-    const __mmData = this.weaponData(__mmWeapon);
-    const __mmRange = __mmData && Number(__mmData.range);
-    if (
-      !v ||
-      !__mmTarget ||
-      !Number.isFinite(__mmRange) ||
-      __mmRange <= 0
-    )
+    const __mmData = this.weaponData(__mmWeapon),
+      __mmProjectile = __mmData && __mmData.projectile != null
+        ? b.projectiles && b.projectiles[__mmData.projectile]
+        : null,
+      __mmRange = Number((__mmProjectile || __mmData || {}).range);
+    if (!v || !__mmTarget || !Number.isFinite(__mmRange) || __mmRange <= 0)
       return !1;
-    const __mmReach =
-      (__mmRange +
-        (Number(v.scale) || 0) +
-        (Number(__mmTarget.scale) || 0)) *
-      __mmFullInstaRangeMultiplier;
+    // Use weapon reach to the target hitbox, without a player-radius bonus
+    // or a multiplier that lets the combo open outside melee contact.
+    const __mmReach = __mmRange + Math.max(0, Number(__mmTarget.scale) || 0);
     return Math.hypot(__mmTarget.x - v.x, __mmTarget.y - v.y) <= __mmReach;
+  },
+  pathClear(__mmTarget) {
+    if (!v || !__mmTarget || !__mmShieldBypass(v, __mmTarget)) return !1;
+    const __mmDx = Number(__mmTarget.x) - Number(v.x),
+      __mmDy = Number(__mmTarget.y) - Number(v.y),
+      __mmDistance = Math.hypot(__mmDx, __mmDy);
+    if (!Number.isFinite(__mmDistance)) return !1;
+    if (__mmDistance <= 0) return !0;
+    const __mmLength = Math.max(0, __mmDistance - (Number(__mmTarget.scale) || 0)),
+      __mmEndX = Number(v.x) + __mmDx / __mmDistance * __mmLength,
+      __mmEndY = Number(v.y) + __mmDy / __mmDistance * __mmLength;
+    return !__mmActiveObjectSnapshot().all.some((__mmObject) => {
+      if (!__mmObject || !__mmObject.active || __mmObject.ignoreCollision) return !1;
+      const __mmRadius = __mmThreatObjectScale(__mmObject);
+      return __mmSegmentDistanceSquared(
+        Number(v.x), Number(v.y), __mmEndX, __mmEndY,
+        Number(__mmObject.x), Number(__mmObject.y),
+      ) <= __mmRadius * __mmRadius;
+    });
   },
   canFullBurst(__mmTarget) {
     const __mmPrimary = this.supportedPrimary(),
@@ -14649,7 +14662,7 @@ const __mmInsta = {
       (!__mmBetrayal && !__mmIsEnemyPlayer(__mmTarget))
     )
       return !1;
-    if (!__mmIgnoreShield && !__mmShieldBypass(v, __mmTarget)) return !1;
+    if (!__mmIgnoreShield && !this.pathClear(__mmTarget)) return !1;
     const __mmPrimary = this.supportedPrimary(),
       __mmPrimaryReady = __mmProfile === "velTick"
         ? __mmWeaponReadyWithin(__mmPrimary, this.tick())
@@ -14912,6 +14925,7 @@ const __mmInsta = {
     if (__mmPrimary == null) return null;
     const __mmTarget = this.target();
     if (!__mmTarget && !this.targetOptional) return null;
+    if (this.automatic && __mmTarget && !this.pathClear(__mmTarget)) return null;
     if (
       __mmRequireRange &&
       __mmTarget &&
@@ -15253,6 +15267,8 @@ const __mmInsta = {
   sendAttack(__mmItem, __mmIsWeapon, __mmTarget, __mmForcedAngle = null) {
     if (!v || !v.alive || __mmItem == null) return !1;
     this.releaseAttack();
+    if (this.automatic && __mmIsWeapon && __mmTarget &&
+      (!this.inRange(__mmItem, __mmTarget) || !this.pathClear(__mmTarget))) return !1;
     try {
       const __mmAngle = __mmForcedAngle != null && Number.isFinite(Number(__mmForcedAngle))
         ? Number(__mmForcedAngle)
@@ -31626,12 +31642,16 @@ function __mmToggleCleanup() {
     ? (__mmStopCleanup("C toggled off", !1), !1)
     : __mmStartCleanup();
 }
+function __mmAutoPushManualMovementHeld() {
+  // These input sets are cleared on key release and window blur. Checking
+  // held keys also handles opposite directions, where the move angle is null.
+  return __mmMenuMovementKeys.size > 0 || __mmConfiguredMovementActions.size > 0;
+}
 function __mmCleanupInputKey(__mmKey) {
   const __mmManualMovement =
     __mmKey === "movement" || [87, 65, 83, 68].includes(Number(__mmKey));
   if (__mmManualMovement) {
     __mmVelTickManualUntil = Date.now() + 500;
-    __mmAutoPushManualUntil = Date.now() + 500;
     __mmStopVelTickInsta("manual movement");
     __mmStopAutoPushSetup("manual movement");
     __mmSyncManualMovementPressed("movement");
@@ -31645,12 +31665,8 @@ document.addEventListener(
   function (__mmEvent) {
     if (__mmEvent.isTrusted) {
       __mmVelTickManualUntil = Date.now() + 500;
-      // Setting up a trap normally includes at least one physical swing.
-      // Kitty used to give that click a 500 ms Auto Push lock, then cancelled
-      // the route, so repeated clicks could keep the feature from ever
-      // activating. Glotus resumes its push movement immediately after the
-      // click; retain that behavior here while VelTick keeps its own guard.
-      __mmAutoPushManualUntil = Date.now();
+      // Clicking may reset the route, but must not override a held movement
+      // key's pause. Auto Push reads the live movement input sets each tick.
       __mmStopVelTickInsta("manual click");
       __mmStopAutoPushSetup("manual click");
     }
@@ -36897,7 +36913,7 @@ function __mmAutoPushAlliedSpike(__mmEnemy, __mmTrap) {
     __mmEnemyScale = Number(__mmEnemy.scale) || 35,
     __mmTrapX = Number(__mmTrap.x),
     __mmTrapY = Number(__mmTrap.y),
-    // Keep the candidate budget bounded in crowded bases. The exact geometry
+    // Bound expensive scoring only after finding usable lanes. The geometry
     // below uses a far point 250px beyond the enemy and an overlap
     // stand point enemyScale + 7px beyond it, both measured from the spike.
     // Retain Kitty's scored selection while using Glotus's actual candidate
@@ -36942,9 +36958,10 @@ function __mmAutoPushAlliedSpike(__mmEnemy, __mmTrap) {
               Number(__mmSecond.object.y) - __mmEnemyY,
             ))
         );
-      })
-      .slice(0, __mmFpsBoostEnabled ? 8 : 14);
-  let __mmBest = null;
+      });
+  const __mmLaneBudget = __mmFpsBoostEnabled ? 8 : 14;
+  let __mmBest = null,
+    __mmUsableLanes = 0;
   for (let __mmIndex = 0; __mmIndex < __mmSpikes.length; __mmIndex++) {
     const __mmEntry = __mmSpikes[__mmIndex],
       __mmSpike = __mmEntry.object,
@@ -36960,7 +36977,11 @@ function __mmAutoPushAlliedSpike(__mmEnemy, __mmTrap) {
       __mmNearTrap =
         __mmTrapDistance <=
         __mmTrapScale + __mmSpikeScale + __mmEnemyScale * 2 + 14;
-    if (!__mmNearTrap) continue;
+    // Glotus does not start a push into a hazard already touching the enemy.
+    // Reject it during selection so it cannot monopolize the plan and make
+    // the controller stop while another hazard has an open push lane.
+    if (!__mmNearTrap || __mmEnemyDistance <= __mmEnemyScale + __mmSpikeScale + 1)
+      continue;
     const __mmSpikeToEnemyAngle = Math.atan2(
         __mmEnemyY - Number(__mmSpike.y),
         __mmEnemyX - Number(__mmSpike.x),
@@ -37037,6 +37058,8 @@ function __mmAutoPushAlliedSpike(__mmEnemy, __mmTrap) {
         shieldOpen: __mmShieldOpen,
         score: __mmScore,
       };
+    // Blocked candidates must not consume this budget.
+    if (++__mmUsableLanes >= __mmLaneBudget) break;
   }
   return __mmBest;
 }
@@ -37182,12 +37205,12 @@ function __mmUpdateAutoPushWatchVisual() {
     });
     return;
   }
-  if (__mmNow < __mmAutoPushManualUntil) {
+  if (__mmAutoPushManualMovementHeld()) {
     __mmSetAutoPushVisualState({
       active: !1,
       phase: "waiting",
       stoppedAt: performance.now(),
-      reason: "manual movement or attack has priority",
+      reason: "manual movement held",
       route: [],
     });
     return;
@@ -37609,7 +37632,7 @@ function __mmUpdateAutoPushSetup(
   const __mmNow = Date.now();
   if (
     !__mmAutoPushInstaEnabled ||
-    __mmNow < __mmAutoPushManualUntil ||
+    __mmAutoPushManualMovementHeld() ||
     !__mmEnemy ||
     !__mmIsEnemyPlayer(__mmEnemy) ||
     !__mmTrap ||
