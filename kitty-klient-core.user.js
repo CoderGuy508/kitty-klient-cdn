@@ -2,7 +2,7 @@
 // @name         kitty klient
 // @author       Coder Guy
 // @credits       random4ik — bot script
-// @version      6.8.24
+// @version      6.8.25
 // @icon         https://cdn.discordapp.com/icons/1540876076224356437/ac27c0ce87c4c46b407ebca78e150aeb.webp?size=2048
 // @description  kitty klient — a MooMoo.io client with adaptive zoom, fast autoheal, gear automation, combat tools, predictive placement, visual markers, CC0 background music, manual quick builds, and a fully rebindable keyboard/mouse controls HUD.
 // @match        *://moomoo.io/*
@@ -259,7 +259,7 @@
     const AUTO_PUSH_FINISHER_MIGRATION_KEY = "kitty-klient-auto-push-finisher-v1";
     const ASSASSIN_RANGE_AUTO_MIGRATION_KEY = "kitty-klient-assassin-range-auto-v1";
     const TAB_SYNC_BRIDGE_KEY = "kitty-klient-tab-sync-bridge-v1";
-const KITTY_KLIENT_VERSION = "6.8.24";
+const KITTY_KLIENT_VERSION = "6.8.25";
     const KITTY_SHARED_STORAGE_APPLIED_EVENT = "KittyMooMooSharedStorageApplied";
     // FRVR's v1.8 client changed the game module and now owns its own Altcha
     // verification flow. The legacy runtime patch relies on exact bundle
@@ -20972,9 +20972,9 @@ function __mmInstallMidnightWeaponNativeRenderer() {
           // The Scythe already has its intended authored scale. Every other
           // Midnight retexture gets the same 10% visual size increase.
           __mmUseMidnightScythe || __mmUseCardboardShortSword ? 1 : 1.1,
-          // Nudge Midnight Polearm six units forward and four to the player's
-          // right; native facing and swing rotation carry both offsets.
-          __mmUseMidnightScythe ? 16 : __mmUseMidnightPolearm ? -1 : __mmUseMidnightDaggers ? 0 : -7,
+          // Move Midnight Polearm's head four more units away from the player;
+          // native facing and swing rotation carry the forward/right offsets.
+          __mmUseMidnightScythe ? 16 : __mmUseMidnightPolearm ? 3 : __mmUseMidnightDaggers ? 0 : -7,
           __mmUseMidnightPolearm ? 4 : 0,
         )
       )
