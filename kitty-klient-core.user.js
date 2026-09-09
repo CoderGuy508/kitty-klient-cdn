@@ -2,7 +2,7 @@
 // @name         kitty klient
 // @author       Coder Guy
 // @credits       random4ik — bot script
-// @version      6.8.22
+// @version      6.8.23
 // @icon         https://cdn.discordapp.com/icons/1540876076224356437/ac27c0ce87c4c46b407ebca78e150aeb.webp?size=2048
 // @description  kitty klient — a MooMoo.io client with adaptive zoom, fast autoheal, gear automation, combat tools, predictive placement, visual markers, CC0 background music, manual quick builds, and a fully rebindable keyboard/mouse controls HUD.
 // @match        *://moomoo.io/*
@@ -259,7 +259,7 @@
     const AUTO_PUSH_FINISHER_MIGRATION_KEY = "kitty-klient-auto-push-finisher-v1";
     const ASSASSIN_RANGE_AUTO_MIGRATION_KEY = "kitty-klient-assassin-range-auto-v1";
     const TAB_SYNC_BRIDGE_KEY = "kitty-klient-tab-sync-bridge-v1";
-const KITTY_KLIENT_VERSION = "6.8.22";
+const KITTY_KLIENT_VERSION = "6.8.23";
     const KITTY_SHARED_STORAGE_APPLIED_EVENT = "KittyMooMooSharedStorageApplied";
     // FRVR's v1.8 client changed the game module and now owns its own Altcha
     // verification flow. The legacy runtime patch relies on exact bundle
@@ -4587,7 +4587,7 @@ const KITTY_KLIENT_VERSION = "6.8.22";
         addHudToggle(visuals, "predictionGhost", "Prediction ghost", "A translucent copy projects ahead by half your live ping");
         addHudToggle(visuals, "placementVisuals", "Placement previews", "Shows blocked sample slots, scored legal candidates, predicted pre-places, and the exact slots Kitty selects");
         addHudToggle(visuals, "hotbarPlaceableLocator", "Hotbar placeable locator", "Hover a placeable in the native hotbar to mark every matching structure you own on the minimap");
-        addHudToggle(visuals, "autoPushVisuals", "Auto Push tactical lane", "Draw a lightweight neon route, exact stand point, push lane, target brackets, and live ROUTE / ALIGN / PUSH status");
+        addHudToggle(visuals, "autoPushVisuals", "Auto Push tactical lane", "Draw the Glotus alignment point, close stand point, push lane, target brackets, and live ROUTE / ALIGN / PUSH status");
         addHudToggle(visuals, "cooldownBars", "Tool cooldown bars", "Three refill bars track primary, secondary, and Turret Gear cooldowns independently");
         addHudToggle(visuals, "weaponXpBar", "Weapon XP bar", "Tracks confirmed Food, Wood, Stone, breakable refunds, animal and boss rewards, and native Gold Mine gather XP for every held tool; general Gold never fills it");
         addHudToggle(visuals, "chatHistory", "Stacked chat bubbles", "Shows up to three unexpired messages above each player plus the in-game chat-history panel");
@@ -4648,8 +4648,7 @@ const KITTY_KLIENT_VERSION = "6.8.22";
         addHudToggle(kittyInstas, "spikeSyncHammer", "Spike Sync Hammer", "Find one Great Hammer angle that hits both an enemy and a one-hit breakable, place a legal contact spike, then stack ready Turret and primary damage");
         addHudToggle(kittyInstas, "velTickInsta", "VelTick Insta", "T watches the predicted 220–245px window, leads with Turret, then sends Bull + Polearm on the next tick");
         addHudToggle(kittyInstas, "polearmAids", "Polearm Aids", "Against a target in your or an ally's trap: Tank + Great Hammer, then Bull + Polearm and a legal contact spike");
-        addHudToggle(kittyInstas, "autoPushInsta", "Smart Lethal Auto Push", "Uses Glotus-style trap-to-hazard geometry for your, ally, third-party, or target-hostile spikes and cactuses, then scores a safe route, shield angle, and predicted impact");
-        addHudToggle(kittyInstas, "autoPushFinisher", "Predictive Insta finisher", "Commits just before predicted spike contact when defense-adjusted chain damage would leave the target alive; skips the Insta when the spike lane is already lethal");
+        addHudToggle(kittyInstas, "autoPushInsta", "Auto Push", "Uses Glotus far-point alignment and close-point steering within 250 pixels; pauses while movement keys are held");
         addHudToggle(kittyInstas, "boostSpikeKill", "Boost + Spike", "G uses x-RedDragon's 80 ms pattern: two side spikes, two close diagonals within 150 units, then a forward Boost Pad. Kitty skips any illegal slot.");
 
         const combatStatistics = addHudSection(combatPage, "Session combat statistics");
@@ -9784,10 +9783,8 @@ const __mmCombatCalibration = Object.freeze({
   turretRange: 700,
   bowInstaMin: 660,
   bowInstaMax: 700,
-  // Auto Push has a route planner and a far-approach phase. Keeping target
-  // acquisition at short melee distance meant it never got a chance to use
-  // either one unless the player happened to be already beside the pit.
-  autoPushAcquireRange: 650,
+  // Match Glotus's current-position acquisition radius.
+  autoPushAcquireRange: 250,
   autoPushStandPadding: 7,
   autoPushClearanceScale: 1.3,
 });
@@ -15917,7 +15914,7 @@ const __mmBoostInsta = {
               Math.cos(__mmAngle - this.moveAngle),
             ),
           );
-    if (__mmDifference < 0.035) return;
+    if (__mmDifference < 1e-9) return;
     ((this.moveAngle = __mmAngle), (Kt = __mmAngle), O.send("9", __mmAngle));
   },
   stopMovement() {
@@ -36633,6 +36630,7 @@ function __mmAutoPushSetMovement(__mmAngle) {
     O.send("9", __mmAngle));
 }
 function __mmStopAutoPushSetup(__mmReason) {
+  __mmReleaseAutoPushGear();
   const __mmWasActive = !!__mmAutoPushVisualState.active;
   if (__mmAutoPushMoveAngle != null && O && typeof O.send === "function") {
     try {
@@ -37005,12 +37003,7 @@ function __mmAutoPushAlliedSpike(__mmEnemy, __mmTrap) {
       __mmFarY =
         Number(__mmSpike.y) +
         Math.sin(__mmSpikeToEnemyAngle) * (__mmEnemyDistance + 250),
-      __mmBlockedBy = __mmAutoPushPointBlocked(
-        __mmStandX,
-        __mmStandY,
-        __mmSpike,
-        __mmTrap,
-      );
+      __mmBlockedBy = __mmAutoPushPointBlocked(__mmStandX, __mmStandY, null);
     if (__mmBlockedBy) continue;
     const __mmPlayerToStand = Math.hypot(
         __mmStandX - Number(v.x),
@@ -37138,10 +37131,7 @@ function __mmAutoPushTargetPlan() {
   if (!v || !v.alive || !Array.isArray(E)) return null;
   const __mmNow = performance.now();
   if (__mmNow - __mmAutoPushPlanAt < 55) return __mmAutoPushPlanCache;
-  const __mmAcquireRange = Math.max(
-      180,
-      Number(__mmCombatCalibration.autoPushAcquireRange) || 360,
-    ),
+  const __mmAcquireRange = 250,
     __mmNearby = __mmAutoPushTrappedEntries(__mmAcquireRange)
       .sort(function (__mmFirst, __mmSecond) {
         const __mmFirstLocked =
@@ -37240,7 +37230,7 @@ function __mmUpdateAutoPushWatchVisual() {
     return;
   }
   const __mmCaught = __mmAutoPushTrappedEntries(
-    Math.max(180, Number(__mmCombatCalibration.autoPushAcquireRange) || 360),
+    250,
   );
   let __mmHasSpikeLane = !1,
     __mmHasUsableSpikeLane = !1;
@@ -37624,327 +37614,124 @@ function __mmAutoPushDamageAtImpact(
     needsAdditionalDamage: !__mmSpikeLethal,
   });
 }
-function __mmUpdateAutoPushSetup(
-  __mmEnemy,
-  __mmTrap,
-  __mmSelectedSpike = null,
-) {
-  const __mmNow = Date.now();
-  if (
-    !__mmAutoPushInstaEnabled ||
-    __mmAutoPushManualMovementHeld() ||
-    !__mmEnemy ||
-    !__mmIsEnemyPlayer(__mmEnemy) ||
-    !__mmTrap ||
-    !__mmTrap.active ||
-    !v ||
-    !v.alive ||
-    __mmIsTrapped()
-  ) {
+function __mmReleaseAutoPushGear() {
+  if (!__mmGearArbiter.intents.delete("autoPushGear")) return;
+  // A cancelled push must not leave its speed equipment lease active.
+  // Restoration stays below manual gear, Instas, and defensive gear.
+  if (v && v.alive)
+    __mmEquipGearPair(__mmBestPostCombatHat(), __mmKittyDefaultTail(), !1,
+      !1, "movement:autoPushRestore", __mmGearIntentPriorities.movement);
+}
+function __mmUpdateAutoPushGear(enemy, geometry) {
+  const state = __mmPlayerToolCooldowns[String(enemy.sid)],
+    candidates = [enemy.weapons && enemy.weapons[0], enemy.primaryIndex,
+      state && state.slots && state.slots[0],
+      __mmPlayerWeaponSlot(enemy, enemy.weaponIndex) === 0 ? enemy.weaponIndex : null];
+  let weapon = null;
+  for (const id of candidates) {
+    if (id != null && b && b.weapons && b.weapons[Number(id)]) {
+      weapon = b.weapons[Number(id)];
+      break;
+    }
+  }
+  const projectile = weapon && weapon.projectile != null
+      ? b.projectiles && b.projectiles[weapon.projectile] : null,
+    range = Number((projectile || weapon || {}).range),
+    // Enemy melee reach is measured to our hitbox, not to our center.
+    outside = Number.isFinite(range) && range > 0 &&
+      geometry.targetDistance > range + (Number(v.scale) || 35);
+  if (!outside) {
+    if (__mmGearArbiter.intents.delete("autoPushGear"))
+      __mmEquipGearPair(__mmBestPostCombatHat(), __mmKittyDefaultTail(), !1,
+        !1, "utility:autoPushRestore", __mmGearIntentPriorities.utility);
+    return;
+  }
+  __mmGearArbiter.intents.delete("utility:autoPushRestore");
+  __mmGearArbiter.intents.delete("movement:autoPushRestore");
+  // Use the existing gear arbiter and ownership checks, so emergency gear
+  // and active attacks retain priority over this movement speed request.
+  __mmEquipGearPair(__mmBoosterHat, 11, !1, !1,
+    "autoPushGear", __mmGearIntentPriorities.utility);
+}
+// Glotus AutoPush.postTick uses current server positions for both players.
+function __mmAutoPushGlotusGeometry(__mmEnemy, __mmSpike) {
+  const self = __mmServerEntityPosition(v),
+    enemy = __mmServerEntityPosition(__mmEnemy),
+    spike = __mmSpike.object,
+    enemyScale = Number(__mmEnemy.scale) || 35,
+    spikeScale = Number(__mmSpike.scale) || __mmThreatObjectScale(spike);
+  if (!self || !enemy) return null;
+  const distance = Math.hypot(enemy.x - spike.x, enemy.y - spike.y),
+    angle = Math.atan2(enemy.y - spike.y, enemy.x - spike.x),
+    standX = spike.x + Math.cos(angle) * (distance + enemyScale + 7),
+    standY = spike.y + Math.sin(angle) * (distance + enemyScale + 7),
+    farX = spike.x + Math.cos(angle) * (distance + 250),
+    farY = spike.y + Math.sin(angle) * (distance + 250),
+    angleToEnemy = Math.atan2(enemy.y - self.y, enemy.x - self.x),
+    angleToSpike = Math.atan2(spike.y - self.y, spike.x - self.x),
+    distanceToSpike = Math.hypot(spike.x - self.x, spike.y - self.y),
+    // Deliberately do not clamp: Glotus keeps the far approach when the
+    // ratio exceeds 1 (NaN), rather than permitting a 90-degree close push.
+    offset = Math.asin(2 * (enemyScale * 3.2) / (2 * distanceToSpike)),
+    rawDifference = Math.abs(angleToSpike - angleToEnemy) % (Math.PI * 2),
+    difference = rawDifference > Math.PI ? Math.PI * 2 - rawDifference : rawDifference,
+    aligned = difference <= offset,
+    goalX = aligned ? standX : farX,
+    goalY = aligned ? standY : farY,
+    previous = Number.isFinite(__mmEnemy.x1) && Number.isFinite(__mmEnemy.y1)
+      ? { x: __mmEnemy.x1, y: __mmEnemy.y1 } : enemy,
+    future = { x: enemy.x * 2 - previous.x, y: enemy.y * 2 - previous.y },
+    contactRadius = enemyScale + spikeScale + 1,
+    contact = [previous, enemy, future].some(point =>
+      Math.hypot(point.x - spike.x, point.y - spike.y) <= contactRadius),
+    targetDistance = Math.hypot(enemy.x - self.x, enemy.y - self.y);
+  return { self, enemy, standX, standY, farX, farY, goalX, goalY,
+    aligned, contact, targetDistance,
+    moveAngle: Math.atan2(goalY - self.y, goalX - self.x) };
+}
+function __mmUpdateAutoPushSetup(__mmEnemy, __mmTrap, __mmSelectedSpike = null) {
+  if (!__mmAutoPushInstaEnabled || __mmAutoPushManualMovementHeld() ||
+      !v || !v.alive || !__mmEnemy || !__mmIsEnemyPlayer(__mmEnemy) ||
+      !__mmTrap || !__mmTrap.active || __mmIsTrapped()) {
     __mmStopAutoPushSetup("conditions lost");
     return !1;
   }
-  const __mmSpike =
-    __mmSelectedSpike || __mmAutoPushAlliedSpike(__mmEnemy, __mmTrap);
-  if (!__mmSpike) {
-    __mmStopAutoPushSetup("no allied push spike");
+  const spike = __mmSelectedSpike || __mmAutoPushAlliedSpike(__mmEnemy, __mmTrap),
+    geometry = spike && __mmAutoPushGlotusGeometry(__mmEnemy, spike);
+  if (!geometry || geometry.targetDistance > 250 || geometry.contact) {
+    __mmStopAutoPushSetup(geometry && geometry.contact
+      ? "push contact reached" : "outside Glotus push range");
     return !1;
   }
-  const __mmSpikeObject = __mmSpike.object,
-    __mmEnemyPosition = __mmServerEntityPosition(__mmEnemy) || __mmEnemy,
-    __mmEnemyX = Number(__mmEnemyPosition.x),
-    __mmEnemyY = Number(__mmEnemyPosition.y),
-    __mmEnemyScale = Number(__mmEnemy.scale) || 35,
-    __mmPlayerScale = Number(v.scale) || 35,
-    __mmSpikeScale = Number(__mmSpike.scale) ||
-      __mmThreatObjectScale(__mmSpikeObject),
-    __mmEnemyToSpikeDistance = Math.hypot(
-      __mmEnemyX - Number(__mmSpikeObject.x),
-      __mmEnemyY - Number(__mmSpikeObject.y),
-    ),
-    __mmSpikeToEnemyAngle = Math.atan2(
-      __mmEnemyY - Number(__mmSpikeObject.y),
-      __mmEnemyX - Number(__mmSpikeObject.x),
-    ),
-    __mmPushAngle = __mmSpikeToEnemyAngle + Math.PI,
-    __mmStandX =
-      Number(__mmSpikeObject.x) +
-      Math.cos(__mmSpikeToEnemyAngle) *
-        (__mmEnemyToSpikeDistance +
-          __mmEnemyScale +
-          __mmCombatCalibration.autoPushStandPadding),
-    __mmStandY =
-      Number(__mmSpikeObject.y) +
-      Math.sin(__mmSpikeToEnemyAngle) *
-        (__mmEnemyToSpikeDistance +
-          __mmEnemyScale +
-          __mmCombatCalibration.autoPushStandPadding),
-    __mmFarX =
-      Number(__mmSpikeObject.x) +
-      Math.cos(__mmSpikeToEnemyAngle) * (__mmEnemyToSpikeDistance + 250),
-    __mmFarY =
-      Number(__mmSpikeObject.y) +
-      Math.sin(__mmSpikeToEnemyAngle) * (__mmEnemyToSpikeDistance + 250),
-    __mmDistanceToSpike = Math.max(
-      1,
-      Math.hypot(
-        Number(__mmSpikeObject.x) - Number(v.x),
-        Number(__mmSpikeObject.y) - Number(v.y),
-      ),
-    ),
-    __mmAngleToEnemy = Math.atan2(
-      __mmEnemyY - Number(v.y),
-      __mmEnemyX - Number(v.x),
-    ),
-    __mmAngleToSpike = Math.atan2(
-      Number(__mmSpikeObject.y) - Number(v.y),
-      Number(__mmSpikeObject.x) - Number(v.x),
-    ),
-    __mmActivationOffset = Math.asin(
-      Math.max(
-        -1,
-        Math.min(1, (__mmEnemyScale * 3.2) / __mmDistanceToSpike),
-      ),
-    ),
-    __mmAlignedDifference = Math.abs(
-      Math.atan2(
-        Math.sin(__mmAngleToEnemy - __mmAngleToSpike),
-        Math.cos(__mmAngleToEnemy - __mmAngleToSpike),
-      ),
-    ),
-    __mmAligned = __mmAlignedDifference <= __mmActivationOffset,
-    __mmGoalX = __mmAligned ? __mmStandX : __mmFarX,
-    __mmGoalY = __mmAligned ? __mmStandY : __mmFarY,
-    __mmDistanceToGoal = Math.hypot(
-      __mmGoalX - Number(v.x),
-      __mmGoalY - Number(v.y),
-    ),
-    __mmDistanceToEnemy = Math.hypot(
-      __mmEnemyX - Number(v.x),
-      __mmEnemyY - Number(v.y),
-    ),
-    __mmTouchingEnemy =
-      __mmDistanceToEnemy <= __mmPlayerScale + __mmEnemyScale + 4,
-    __mmContactRadius = __mmEnemyScale + __mmSpikeScale + 1,
-    __mmTouchingSpike = __mmEnemyToSpikeDistance <= __mmContactRadius,
-    __mmBlockedBy = __mmAutoPushPointBlocked(
-      __mmStandX,
-      __mmStandY,
-      __mmSpikeObject,
-      __mmTrap,
-    );
-  if (__mmBlockedBy) {
+  if (__mmAutoPushPointBlocked(geometry.standX, geometry.standY, null)) {
     __mmStopAutoPushSetup("stand point obstructed");
-    __mmSetAutoPushVisualState({
-      active: !1,
-      phase: "blocked",
-      blocked: !0,
-      stoppedAt: performance.now(),
-      enemyX: __mmEnemyX,
-      enemyY: __mmEnemyY,
-      spikeX: Number(__mmSpikeObject.x),
-      spikeY: Number(__mmSpikeObject.y),
-      standX: __mmStandX,
-      standY: __mmStandY,
-      farX: __mmFarX,
-      farY: __mmFarY,
-      reason: "stand point blocked",
-    });
+    __mmSetAutoPushVisualState({ active: !1, phase: "blocked", blocked: !0,
+      reason: "stand point blocked", stoppedAt: performance.now(), route: [] });
     return !1;
   }
-  if (!__mmActionClaim("autoPushSetup", "aligning trapped enemy to spike")) {
+  if (!__mmActionClaim("autoPushSetup", "Glotus push alignment")) {
     __mmStopAutoPushSetup("alignment blocked");
     return !1;
   }
-  const __mmTargetChanged =
-    __mmAutoPushTargetSid == null ||
-    String(__mmAutoPushTargetSid) !== String(__mmEnemy.sid);
   __mmAutoPushTargetSid = __mmEnemy.sid;
-  const __mmImpact =
-      __mmAutoPushImpactForecast(__mmEnemy, __mmSpike) || __mmSpike.impact,
-    __mmPing = Number(window.pingTime),
-    __mmCommitMargin = Math.min(
-      30,
-      Math.max(
-        10,
-        8 +
-          (Number.isFinite(__mmPing) ? __mmPing / 12 : 0) +
-          Math.max(0, Number(__mmImpact && __mmImpact.naturalClosingDistance) || 0),
-      ),
-    ),
-    __mmImminentContact = !!(
-      !__mmTouchingSpike &&
-      __mmAligned &&
-      __mmTouchingEnemy &&
-      __mmImpact &&
-      __mmImpact.contactLikely &&
-      Number(__mmImpact.gap) <= __mmCommitMargin
-    );
-  if (__mmImminentContact && __mmAutoPushFinisherEnabled) {
-    const __mmDamageForecast = __mmAutoPushDamageAtImpact(
-        __mmEnemy,
-        __mmSpikeObject,
-        __mmImpact,
-      ),
-      __mmCanFinish =
-        __mmDamageForecast.needsAdditionalDamage &&
-        __mmKittyProfileReady(__mmEnemy, "autoPush");
-    if (__mmCanFinish) {
-      __mmSetAutoPushVisualState({
-        active: !0,
-        phase: "commit",
-        enemyX: __mmEnemyX,
-        enemyY: __mmEnemyY,
-        spikeX: Number(__mmSpikeObject.x),
-        spikeY: Number(__mmSpikeObject.y),
-        standX: __mmStandX,
-        standY: __mmStandY,
-        farX: __mmFarX,
-        farY: __mmFarY,
-        predictedSpikeDamage: __mmDamageForecast.damage,
-        predictedRemainingHealth: __mmDamageForecast.remaining,
-        spikeLethal: !1,
-        damageDecision: "EARLY FINISH " +
-          (Number.isFinite(__mmDamageForecast.remaining)
-            ? Math.ceil(__mmDamageForecast.remaining)
-            : ""),
-        reason: "one-tick lethal push commitment",
-      });
-      if (
-        __mmStartKittyProfile(
-          "autoPush",
-          __mmEnemy,
-          "predicted spike contact needs finisher",
-        )
-      )
-        return !0;
-    }
-  }
-  if (__mmTouchingSpike) {
-    const __mmDamageForecast = __mmAutoPushDamageAtImpact(
-        __mmEnemy,
-        __mmSpikeObject,
-        __mmImpact,
-      ),
-      __mmCanFinish =
-      __mmAutoPushFinisherEnabled &&
-      __mmDamageForecast.needsAdditionalDamage &&
-      __mmKittyProfileReady(__mmEnemy, "autoPush");
-    __mmStopAutoPushSetup("push contact reached");
-    __mmSetAutoPushVisualState({
-      active: !1,
-      phase: "contact",
-      stoppedAt: performance.now(),
-      enemyX: __mmEnemyX,
-      enemyY: __mmEnemyY,
-      spikeX: Number(__mmSpikeObject.x),
-      spikeY: Number(__mmSpikeObject.y),
-      standX: __mmStandX,
-      standY: __mmStandY,
-      farX: __mmFarX,
-      farY: __mmFarY,
-      predictedSpikeDamage: __mmDamageForecast.damage,
-      predictedRemainingHealth: __mmDamageForecast.remaining,
-      spikeLethal: __mmDamageForecast.spikeLethal,
-      damageDecision: __mmDamageForecast.spikeLethal
-        ? "SPIKES LETHAL"
-        : __mmCanFinish
-          ? "INSTA NEEDED"
-          : "NEEDS " +
-            (Number.isFinite(__mmDamageForecast.remaining)
-              ? Math.ceil(__mmDamageForecast.remaining)
-              : "DAMAGE"),
-      reason: __mmDamageForecast.spikeLethal
-        ? "trap-spam damage is lethal"
-        : "additional finisher damage required",
-    });
-    if (__mmCanFinish)
-      return __mmStartKittyProfile(
-        "autoPush",
-        __mmEnemy,
-        "trapped enemy pushed into allied spike",
-      );
-    return !0;
-  }
-  const __mmPhase = __mmAligned
-      ? __mmTouchingEnemy
-        ? "push"
-        : "align"
-      : "route",
-    __mmProgressMetric = __mmPhase === "push"
-      ? __mmEnemyToSpikeDistance
-      : __mmDistanceToGoal;
-  if (
-    __mmTargetChanged ||
-    __mmAutoPushProgressPhase !== __mmPhase ||
-    !Number.isFinite(__mmAutoPushProgressMetric)
-  ) {
-    ((__mmAutoPushProgressPhase = __mmPhase),
-      (__mmAutoPushProgressMetric = __mmProgressMetric),
-      (__mmAutoPushProgressAt = __mmNow));
-  } else if (__mmProgressMetric < __mmAutoPushProgressMetric - 1.25) {
-    ((__mmAutoPushProgressMetric = __mmProgressMetric),
-      (__mmAutoPushProgressAt = __mmNow));
-  } else if (__mmPhase !== "push" && __mmNow - __mmAutoPushProgressAt > 900) {
-    // A changing crowd can invalidate one route without invalidating the push.
-    // Throw away only the path and retry from the new server positions.
-    ((__mmAutoPushRoute = []),
-      (__mmAutoPushRouteAt = 0),
-      (__mmAutoPushProgressAt = __mmNow),
-      (__mmAutoPushProgressMetric = __mmProgressMetric));
-  }
-  const __mmWaypoint =
-      __mmAutoPushWaypoint(__mmGoalX, __mmGoalY, __mmEnemy, __mmTrap),
-    __mmMoveAngle = __mmWaypoint
-      ? Math.atan2(
-          Number(__mmWaypoint.y) - Number(v.y),
-          Number(__mmWaypoint.x) - Number(v.x),
-        )
-      : null;
-  __mmSetAutoPushVisualState({
-    active: !0,
-    phase: __mmPhase,
-    aligned: __mmAligned,
-    enemyX: __mmEnemyX,
-    enemyY: __mmEnemyY,
-    spikeX: Number(__mmSpikeObject.x),
-    spikeY: Number(__mmSpikeObject.y),
-    trapX: Number(__mmTrap.x),
-    trapY: Number(__mmTrap.y),
-    standX: __mmStandX,
-    standY: __mmStandY,
-    farX: __mmFarX,
-    farY: __mmFarY,
-    goalX: __mmGoalX,
-    goalY: __mmGoalY,
-    waypointX: __mmWaypoint && Number(__mmWaypoint.x),
-    waypointY: __mmWaypoint && Number(__mmWaypoint.y),
-    route: __mmAutoPushRoute.slice(0, __mmFpsBoostEnabled ? 3 : 6).map(
-      function (__mmPoint) {
-        return { x: Number(__mmPoint.x), y: Number(__mmPoint.y) };
-      },
-    ),
-    predictedSpikeDamage: __mmImpact && __mmImpact.damage,
-    predictedRemainingHealth: __mmImpact && __mmImpact.remaining,
-    spikeLethal: !!(__mmImpact && __mmImpact.lethal),
-    damageDecision: __mmImpact && __mmImpact.lethal
-      ? "LETHAL LANE"
-      : __mmImpact && Number(__mmImpact.chainCount) > 1
-        ? "CHAIN x" + Number(__mmImpact.chainCount)
-        : __mmImpact && __mmImpact.contactLikely
-          ? "COMMIT READY"
-          : "PRESSURE",
-    reason: __mmPhase === "push"
-      ? "contact pressure"
-      : __mmAligned
-        ? "closing exact stand point"
-        : "taking far approach",
-  });
-  if (!Number.isFinite(__mmMoveAngle)) {
-    __mmStopAutoPushSetup("no safe route");
-    return !1;
-  }
-  __mmAutoPushSetMovement(__mmMoveAngle);
+  // Glotus steers directly at one of these two points every tick. No cached
+  // waypoint or predictive attack is allowed to cut the alignment short.
+  __mmAutoPushRoute = [{ x: geometry.goalX, y: geometry.goalY }];
+  const phase = !geometry.aligned ? "route"
+    : geometry.targetDistance <= (Number(v.scale) || 35) + (Number(__mmEnemy.scale) || 35) + 4
+      ? "push" : "align";
+  __mmSetAutoPushVisualState({ active: !0, phase, aligned: geometry.aligned,
+    enemyX: geometry.enemy.x, enemyY: geometry.enemy.y,
+    spikeX: spike.object.x, spikeY: spike.object.y,
+    trapX: __mmTrap.x, trapY: __mmTrap.y,
+    standX: geometry.standX, standY: geometry.standY,
+    farX: geometry.farX, farY: geometry.farY,
+    goalX: geometry.goalX, goalY: geometry.goalY,
+    waypointX: geometry.goalX, waypointY: geometry.goalY,
+    route: __mmAutoPushRoute,
+    reason: geometry.aligned ? "Glotus close stand point" : "Glotus far alignment point" });
+  __mmAutoPushSetMovement(geometry.moveAngle);
+  __mmUpdateAutoPushGear(__mmEnemy, geometry);
   return !0;
 }
 function __mmVelTickEnemyWindow(__mmEnemy, __mmNow) {
