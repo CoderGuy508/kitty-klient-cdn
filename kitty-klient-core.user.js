@@ -2,7 +2,7 @@
 // @name         kitty klient
 // @author       Coder Guy
 // @credits       random4ik — bot script
-// @version      6.8.23
+// @version      6.8.24
 // @icon         https://cdn.discordapp.com/icons/1540876076224356437/ac27c0ce87c4c46b407ebca78e150aeb.webp?size=2048
 // @description  kitty klient — a MooMoo.io client with adaptive zoom, fast autoheal, gear automation, combat tools, predictive placement, visual markers, CC0 background music, manual quick builds, and a fully rebindable keyboard/mouse controls HUD.
 // @match        *://moomoo.io/*
@@ -259,7 +259,7 @@
     const AUTO_PUSH_FINISHER_MIGRATION_KEY = "kitty-klient-auto-push-finisher-v1";
     const ASSASSIN_RANGE_AUTO_MIGRATION_KEY = "kitty-klient-assassin-range-auto-v1";
     const TAB_SYNC_BRIDGE_KEY = "kitty-klient-tab-sync-bridge-v1";
-const KITTY_KLIENT_VERSION = "6.8.23";
+const KITTY_KLIENT_VERSION = "6.8.24";
     const KITTY_SHARED_STORAGE_APPLIED_EVENT = "KittyMooMooSharedStorageApplied";
     // FRVR's v1.8 client changed the game module and now owns its own Altcha
     // verification flow. The legacy runtime patch relies on exact bundle
@@ -2849,10 +2849,25 @@ const KITTY_KLIENT_VERSION = "6.8.23";
         return KITTY_MENU_COMPLEXITY_LEVELS.includes(level) ? level : "easy";
     }
 
+    function enforceKittyFpsBoost(settings) {
+        if (!settings.fpsBoost) return settings;
+        // Keep native animation-frame scheduling: timers cannot override the
+        // browser refresh cap and would add work without presenting more frames.
+        settings.fpsBoost = true;
+        for (const key of [
+            "smoothVisuals", "meleeRangeFade", "reloadArcs", "entityDanger",
+            "notificationTracers", "deathAngelAnimation", "groundGrid", "esp",
+            "espLines", "predictionGhost", "placementVisuals", "autoPushVisuals",
+            "cooldownBars", "weaponXpBar", "combatTelemetry", "projectileAimHelper",
+            "debugPanel"
+        ]) settings[key] = false;
+        return settings;
+    }
+
     function normalizeHudSettings(candidate) {
         const settings = { ...HUD_DEFAULTS };
         settings.keybinds = { ...KITTY_DEFAULT_KEYBINDS };
-        if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return settings;
+        if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return enforceKittyFpsBoost(settings);
 
         settings.menuComplexity = normalizeKittyMenuComplexity(candidate.menuComplexity);
         HUD_BOOLEAN_KEYS.forEach((key) => {
@@ -2920,7 +2935,7 @@ const KITTY_KLIENT_VERSION = "6.8.23";
                 );
             });
         }
-        return settings;
+        return enforceKittyFpsBoost(settings);
     }
  
     function readStoredHudSettings(storageKey) {
@@ -4349,7 +4364,7 @@ const KITTY_KLIENT_VERSION = "6.8.23";
         addHudCompactGroup(mediumPlacementSection, "reactivePlace", "Reactive Place", "Preplace, replacements, boost defense, and Insta utility slots");
         const mediumVisualSection = addHudSection(mediumVisuals, "Visual essentials");
         addHudCompactGroup(mediumVisualSection, "combatOverlay", "Combat Overlay", "ESP, prediction, placement, cooldown, and XP overlays");
-        addHudCompactToggle(mediumVisualSection, "fpsBoost", "FPS Boost", "Prefer the lower-cost visual path");
+        addHudCompactToggle(mediumVisualSection, "fpsBoost", "FPS Boost", "Maximize rendering speed by disabling expensive visual overlays");
         addHudCompactToggle(mediumVisualSection, "groundGrid", "Ground Grid", "Draw a map-position grid under the game");
         const mediumColorStack = document.createElement("div");
         mediumColorStack.className = "mm-hud-color-stack";
@@ -4573,7 +4588,7 @@ const KITTY_KLIENT_VERSION = "6.8.23";
         addHudSlider(syncTuning, "syncMoveRefreshMs", "Move refresh", "How often Kitty refreshes the target movement direction");
  
         const visuals = addHudSection(visualsPage, "Visuals");
-        addHudToggle(visuals, "fpsBoost", "FPS boost", "Uses cheaper Kitty visual effects and bounded overlay budgets without slowing combat checks");
+        addHudToggle(visuals, "fpsBoost", "FPS boost", "Uses cheaper rendering and disables expensive visual overlays. Turn off to customize visuals; Firefox frame caps still apply.");
         addHudToggle(visuals, "adaptiveZoom", "Adaptive zoom", "Uses your scroll zoom as a baseline: opens gently only during fast travel, draws in as enemies approach, and tightens further in close combat. Automatic changes stay silent.");
         addHudToggle(visuals, "smoothVisuals", "Polished entity styling", "Layered translucent markers, soft outlines, and relation-colored depth without covering the playfield");
         addHudToggle(visuals, "meleeRangeFade", "Melee reach highlight", "Marks only the exact tree, resource, breakable, animal, or non-team player inside your held melee weapon's real range and aim sector; your player sprite is never part of the highlight");
@@ -10314,6 +10329,7 @@ let __mmSoldierAutoTimer = 0,
   __mmAnimalWeaponPathCacheResult = !1;
 let __mmShieldDefenseTimer = 0,
   __mmShieldDefenseWeapon = null;
+let __mmShieldGuardAngle = null, __mmAutoPushShieldAngle = null, __mmShieldProjectile = null;
 let __mmTrapKnockbackReleaseTimer = 0,
   __mmTrapKnockbackLastAt = 0,
   __mmTrapKnockbackRestoreTool = null,
@@ -12728,6 +12744,8 @@ function __mmRunServerTacticalTick() {
     __mmOperationStage("tick-defense", function () {
       (__mmUpdateAntiSync(),
         __mmUpdateAntiInsta(),
+        __mmUpdateProjectileShield(),
+        __mmUpdateAutoPushPressure(),
         __mmUpdatePlacementDefense(),
         __mmUpdateTeammateTrapRescue(),
         __mmUpdateAntiCollision());
@@ -12863,6 +12881,8 @@ function __mmRunOperationPipeline() {
       __mmOperationStage("defense", function () {
         (__mmUpdateAntiSync(),
           __mmUpdateAntiInsta(),
+        __mmUpdateProjectileShield(),
+        __mmUpdateAutoPushPressure(),
           __mmUpdatePlacementDefense(),
           __mmUpdateTeammateTrapRescue(),
           __mmUpdateAntiCollision());
@@ -13203,6 +13223,8 @@ Ci = function () {
     ? __mmLocalVisualAimAngle
     : __mmTrapAttackActive && Number.isFinite(__mmTrapAimAngle)
     ? __mmTrapAimAngle
+    : Number.isFinite(__mmShieldGuardAngle) ? __mmShieldGuardAngle
+    : Number.isFinite(__mmAutoPushShieldAngle) ? __mmAutoPushShieldAngle
     : Number.isFinite(__mmPlacementDefenseShieldAngle)
       ? __mmPlacementDefenseShieldAngle
     : __mmSecondaryShieldActive && Number.isFinite(__mmSecondaryShieldAngle)
@@ -13920,6 +13942,8 @@ function __mmForcedDirectionStillActive() {
       __mmPrimaryHeld &&
       Number.isFinite(__mmAutoAimAngle)) ||
     (__mmTrapAttackActive && Number.isFinite(__mmTrapAimAngle)) ||
+    Number.isFinite(__mmShieldGuardAngle) ||
+    Number.isFinite(__mmAutoPushShieldAngle) ||
     Number.isFinite(__mmPlacementDefenseShieldAngle) ||
     (__mmSecondaryShieldActive && Number.isFinite(__mmSecondaryShieldAngle)) ||
     Number.isFinite(__mmMatThiefAimAngle) ||
@@ -27825,6 +27849,9 @@ function __mmEnemyWithinCombatRange() {
   return !1;
 }
 function __mmCombatSafeHat(__mmHat) {
+  if (Number(__mmHat) === 11 && (Date.now() < __mmAntiInstaUntil ||
+      (__mmCombatThreatCache && __mmCombatThreatCache.lethal && Date.now()-__mmCombatThreatCalculatedAt < 150)))
+    return v && v.skins && v.skins[6] ? 6 : 0;
   return Number(__mmHat) === Number(__mmEmpHelmet) &&
     !__mmRightClickTankLeaseActive() &&
     __mmEnemyWithinCombatRange()
@@ -29418,31 +29445,15 @@ function __mmCombatHatPacketAllowed(__mmHat) {
   // result mid-tick. Safety/insta paths above are the explicit exceptions.
   return !1;
 }
+function __mmMovementInputActive() {
+  return __mmPlayerMoving() || __mmMenuMovementKeys.size > 0 ||
+    __mmConfiguredMovementActions.size > 0 || Number.isFinite(Kt);
+}
 function __mmDefaultMovementSample() {
-  const __mmElapsed = Number(v && v.t2) - Number(v && v.t1),
-    __mmVelocityX =
-      (Number(v && v.x2) - Number(v && v.x1)) / __mmElapsed,
-    __mmVelocityY =
-      (Number(v && v.y2) - Number(v && v.y1)) / __mmElapsed,
-    __mmValid = !!(
-      __mmElapsed > 0 &&
-      __mmElapsed <= 500 &&
-      Number.isFinite(__mmVelocityX) &&
-      Number.isFinite(__mmVelocityY)
-    ),
-    __mmTickMs = __mmServerTickMs();
-  return {
-    velocityX: __mmValid ? __mmVelocityX : 0,
-    velocityY: __mmValid ? __mmVelocityY : 0,
-    // Treat five units per server tick as the stationary threshold.
-    speed: __mmValid
-      ? Math.hypot(__mmVelocityX, __mmVelocityY) * __mmTickMs
-      : __mmPlayerMoving()
-        ? 6
-        : 0,
-    futureY:
-      Number(v && v.y) + (__mmValid ? __mmVelocityY * __mmTickMs : 0),
-  };
+  // Gear follows commanded movement, including automation. Knockback and
+  // sliding without input must never activate the speed-hat branch.
+  return { speed: __mmMovementInputActive() ? 6 : 0,
+    velocityX: 0, velocityY: 0, futureY: Number(v && v.y) };
 }
 function __mmDangerAnimalNearby() {
   if (!v || !v.alive) return !1;
@@ -29529,7 +29540,7 @@ function __mmResolveDefaultHat() {
       ? Number(__mmActualHat)
       : 0,
     __mmMovement = __mmDefaultMovementSample(),
-    __mmStationary = !__mmPlayerMoving() && __mmMovement.speed <= 5,
+    __mmStationary = !__mmMovementInputActive(),
     __mmActualOwned = __mmCanEquipHat(__mmActual);
 
   // Animal combat gets Soldier before stationary/manual or movement gear. Exact
@@ -29628,6 +29639,8 @@ function __mmRestorePostCombatGear(__mmTailRestore) {
   // between Bull/Tank and the next weapon stage.
   if (
     __mmCombatHatAntiInstaActive() ||
+    Date.now() < __mmAntiInstaUntil ||
+    !!__mmLethalCombatThreat() ||
     __mmInsta.isActive() ||
     __mmBoostInsta.isActive() ||
     __mmInstaSyncPending ||
@@ -30761,6 +30774,7 @@ function __mmKittyDefaultTail(__mmNearest = __mmAutoAimNearestEntity()) {
     );
   if (!__mmDetectedEnemy && !__mmCloseEntity) {
     if (__mmCalmIdle && v.tails[__mmAngelWings]) return __mmAngelWings;
+    if (!__mmMovementInputActive()) return __mmKittyActualTail();
     return v.tails[11] ? 11 : 0;
   }
   // Fixed Kitty's enabled anti-enemy branch uses Corrupt X Wings only when
@@ -36630,6 +36644,7 @@ function __mmAutoPushSetMovement(__mmAngle) {
     O.send("9", __mmAngle));
 }
 function __mmStopAutoPushSetup(__mmReason) {
+  __mmAutoPushShieldAngle = null;
   __mmReleaseAutoPushGear();
   const __mmWasActive = !!__mmAutoPushVisualState.active;
   if (__mmAutoPushMoveAngle != null && O && typeof O.send === "function") {
@@ -36692,6 +36707,7 @@ function __mmAutoPushTargetHazards(__mmEnemy) {
         damage: __mmAutoSpikeKillDamage(__mmObject),
         scale: __mmThreatObjectScale(__mmObject),
         cactus: !!__mmCactus,
+        spike: !__mmCactus,
       });
     };
   // Glotus accepts any spike hostile to the caught target, rather than only
@@ -36899,6 +36915,108 @@ function __mmAutoPushImpactForecast(
     lethal: __mmKnownHealth && __mmDamage + 0.001 >= __mmHealth,
   };
 }
+const __mmPushContactSamples = new WeakMap(), __mmPushReplacementAttempts = new WeakMap();
+function __mmAutoPushContactSample(enemy, trap, spike) {
+  const now = Date.now(), tick = Math.max(1, __mmServerTickMs());
+  let samples = __mmPushContactSamples.get(enemy);
+  if (!samples) __mmPushContactSamples.set(enemy, samples = new WeakMap());
+  const pos = __mmServerEntityPosition(enemy) || enemy;
+  const touching = Math.hypot(pos.x-spike.x, pos.y-spike.y) <= (Number(enemy.scale)||35)+(Number(spike.scale)||49)+1;
+  let sample = samples.get(spike);
+  if (!sample || sample.trap !== trap || now-sample.seen > tick*6 || !touching) {
+    sample = {trap, health:Number(enemy.health), changed:now, seen:now, hits:0, lastDamage:0};
+    samples.set(spike, sample);
+  }
+  const health = Number(enemy.health);
+  if (Number.isFinite(health) && health !== sample.health) {
+    if (health < sample.health) {
+      sample.hits = now-sample.lastDamage <= tick*3 ? sample.hits+1 : 1;
+      sample.lastDamage=now; sample.changed=now;
+    }
+    sample.health=health;
+  }
+  sample.seen=now;
+  return {stalled:touching && Number.isFinite(health) && health>0 && now-sample.changed >= tick*2,
+    spam:touching && health>0 && sample.hits>=2 && now-sample.lastDamage <= tick*3};
+}
+function __mmAutoPushContactStalled(enemy, trap, spike) {
+  return __mmAutoPushContactSample(enemy, trap, spike).stalled;
+}
+// Only count a second spike already intersecting the first collision's
+// separation endpoint. Do not assume an arbitrary long knockback flight.
+function __mmAutoPushReplacementLethal(enemy, candidate, hazards) {
+  const pos = __mmServerEntityPosition(enemy) || enemy, health=Number(enemy.health);
+  const dx=pos.x-candidate.x, dy=pos.y-candidate.y, distance=Math.hypot(dx,dy);
+  const radius=(Number(enemy.scale)||35)+Number(candidate.scale);
+  if (!(health>0) || !(distance>0.001) || distance>radius+1) return false;
+  const endX=candidate.x+dx/distance*(radius+1), endY=candidate.y+dy/distance*(radius+1);
+  const firstDamage=Number(candidate.data && candidate.data.dmg)||0;
+  if (!(firstDamage>0)) return false;
+  return hazards.some(h => {
+    const object=h.object;
+    if (!object || !object.active || !h.spike || Math.hypot(object.x-candidate.x,object.y-candidate.y)<1) return false;
+    const secondDamage=Number(h.damage || object.dmg || (b.list[object.id] && b.list[object.id].dmg))||0;
+    return Math.hypot(endX-object.x,endY-object.y) <= (Number(enemy.scale)||35)+(Number(h.scale)||49) &&
+      (firstDamage+secondDamage)*__mmAutoPushTargetDamageMultiplier(enemy) >= health;
+  });
+}
+function __mmAutoPushReplacementAffordable(item, object) {
+  if (!v || !Array.isArray(v.items) || !v.items.includes(item)) return false;
+  if (__mmCanUseBuildItem(item)) return true;
+  const data=b && b.list && b.list[item], old=b && b.list && b.list[object.id];
+  // Reclaim one occupied group slot only when our own structure is removed.
+  return !!(data && old && data.group && old.group && data.group.id===old.group.id &&
+    __mmOwnStructure(object) && Array.isArray(data.req) &&
+    data.req.every((value,index)=>index%2===1 || Number(v[value]||0)>=Number(data.req[index+1])));
+}
+function __mmAutoPushPredictReplacement(enemy, trap, spike, hazards) {
+  if (!__mmSmartAutoReplaceEnabled || __mmAutoPushManualMovementHeld() ||
+      (!["idle", "movementGear", "soldierGear", "autoPushSetup"].includes(__mmActionOwner)) || !__mmServerTrapContact(enemy,trap)) return;
+  const sample=__mmAutoPushContactSample(enemy,trap,spike);
+  if (!sample.spam) return;
+  const now=Date.now(), origin=__mmServerEntityPosition(v)||v;
+  for (const object of [trap,spike]) {
+    const state=__mmBreakableState(object);
+    // Structure-hit observations, not the victim's health ticks, establish
+    // that this particular object is predicted to disappear.
+    if (!state || !(Number(state.health)<=0.001) || !(Number(state.lastPredictionAt)>0) ||
+        now-Number(state.lastPredictionAt)>__mmServerTickMs()*2 ||
+        now-(__mmPushReplacementAttempts.get(object)||0)<Math.max(150,__mmServerTickMs()*2)) continue;
+    let item=object===trap ? __mmSmartTrapReplaceAffordableItem() : __mmSpikeItem();
+    if (item==null || !__mmAutoPushReplacementAffordable(item,object)) continue;
+    const angle=Math.atan2(object.y-origin.y,object.x-origin.x);
+    let candidate=__mmSmartCandidateForExpectedRemoval(item,angle,object), lethal=false;
+    if (object===trap) {
+      const spikeItem=__mmSpikeItem();
+      const alternative=spikeItem!=null && __mmAutoPushReplacementAffordable(spikeItem,object) && __mmSmartCandidateForExpectedRemoval(spikeItem,angle,object);
+      if (alternative && Math.hypot(alternative.x-object.x,alternative.y-object.y)<=14 &&
+          __mmAutoPushReplacementLethal(enemy,alternative,hazards)) {
+        item=spikeItem;candidate=alternative;lethal=true;
+      }
+    }
+    if (!candidate || !candidate.preplace || Math.hypot(candidate.x-object.x,candidate.y-object.y)>14 ||
+        !__mmReserveTacticalChannel("placement","smartAutoPlace",64) ||
+        !__mmTacticalPlacementKey("smartAutoPlace",candidate)) continue;
+    if (!__mmSendPredictedSmartTrapReplace(item,candidate,__mmSelectedTool())) continue;
+    __mmPushReplacementAttempts.set(object,now);
+    __mmAutoSpikeSpamReservations.push({item,x:candidate.x,y:candidate.y,scale:candidate.scale,expiresAt:now+650});
+    __mmSmartPlacementLastAt=now;
+    __mmSmartPlacementSentTick=__mmCurrentTacticalTick();
+    if (lethal && __mmFullInstaReadyFor(enemy)) __mmInsta.start({automatic:!0,targetSid:enemy.sid});
+    return;
+  }
+}
+function __mmUpdateAutoPushPressure() {
+  if (!__mmAutoPushInstaEnabled || !v || !v.alive || __mmAutoPushManualMovementHeld()) return;
+  for (const entry of __mmAutoPushTrappedEntries(250).slice(0,4)) {
+    const hazards=__mmAutoPushTargetHazards(entry.enemy);
+    for (const hazard of hazards.slice(0,14)) {
+      if (!hazard.object || !hazard.object.active) continue;
+      __mmAutoPushContactSample(entry.enemy,entry.trap,hazard.object);
+      if (hazard.spike) __mmAutoPushPredictReplacement(entry.enemy,entry.trap,hazard.object,hazards);
+    }
+  }
+}
 function __mmAutoPushAlliedSpike(__mmEnemy, __mmTrap) {
   if (!v || !v.alive || !__mmEnemy || !__mmTrap) return null;
   const __mmEnemyPosition = __mmServerEntityPosition(__mmEnemy) || __mmEnemy,
@@ -36978,7 +37096,8 @@ function __mmAutoPushAlliedSpike(__mmEnemy, __mmTrap) {
     // Glotus does not start a push into a hazard already touching the enemy.
     // Reject it during selection so it cannot monopolize the plan and make
     // the controller stop while another hazard has an open push lane.
-    if (!__mmNearTrap || __mmEnemyDistance <= __mmEnemyScale + __mmSpikeScale + 1)
+    if (!__mmNearTrap || (__mmEnemyDistance <= __mmEnemyScale + __mmSpikeScale + 1 &&
+        !__mmAutoPushContactStalled(__mmEnemy, __mmTrap, __mmSpike)))
       continue;
     const __mmSpikeToEnemyAngle = Math.atan2(
         __mmEnemyY - Number(__mmSpike.y),
@@ -37638,7 +37757,7 @@ function __mmUpdateAutoPushGear(enemy, geometry) {
       ? b.projectiles && b.projectiles[weapon.projectile] : null,
     range = Number((projectile || weapon || {}).range),
     // Enemy melee reach is measured to our hitbox, not to our center.
-    outside = Number.isFinite(range) && range > 0 &&
+    outside = __mmMovementInputActive() && Number.isFinite(range) && range > 0 &&
       geometry.targetDistance > range + (Number(v.scale) || 35);
   if (!outside) {
     if (__mmGearArbiter.intents.delete("autoPushGear"))
@@ -37698,7 +37817,8 @@ function __mmUpdateAutoPushSetup(__mmEnemy, __mmTrap, __mmSelectedSpike = null) 
   }
   const spike = __mmSelectedSpike || __mmAutoPushAlliedSpike(__mmEnemy, __mmTrap),
     geometry = spike && __mmAutoPushGlotusGeometry(__mmEnemy, spike);
-  if (!geometry || geometry.targetDistance > 250 || geometry.contact) {
+  if (!geometry || geometry.targetDistance > 250 || (geometry.contact &&
+      !__mmAutoPushContactStalled(__mmEnemy, __mmTrap, spike.object))) {
     __mmStopAutoPushSetup(geometry && geometry.contact
       ? "push contact reached" : "outside Glotus push range");
     return !1;
@@ -37732,6 +37852,7 @@ function __mmUpdateAutoPushSetup(__mmEnemy, __mmTrap, __mmSelectedSpike = null) 
     reason: geometry.aligned ? "Glotus close stand point" : "Glotus far alignment point" });
   __mmAutoPushSetMovement(geometry.moveAngle);
   __mmUpdateAutoPushGear(__mmEnemy, geometry);
+  __mmUpdateAutoPushShield(__mmEnemy, geometry);
   return !0;
 }
 function __mmVelTickEnemyWindow(__mmEnemy, __mmNow) {
@@ -42342,7 +42463,7 @@ function __mmHoldPlacementDefenseShield(
       (__mmPlacementDefenseShieldRestoreTool = __mmRestoreTool || __mmSelectedTool()),
       (__mmPlacementDefenseShieldAngle = Number(__mmAngle)),
       je(__mmShieldWeapon, !0),
-      O.send("9", __mmAngle),
+      O.send("D", __mmAngle),
       (__mmPlacementDefenseTimer = setTimeout(function () {
         const __mmRestore = __mmPlacementDefenseShieldRestoreTool;
         ((__mmPlacementDefenseTimer = 0),
@@ -42757,6 +42878,7 @@ function __mmUpdateAntiInsta() {
   if (__mmNow - __mmAntiInstaLastAt < 450) return;
   const __mmThreat = __mmLethalCombatThreat();
   if (!__mmThreat) return;
+  __mmResetSpikeGearCounter(!0);
   // Defense owns healing and interruption only. Combat placement is handled
   // exclusively by the unified tick-scoped placer below, so Anti Insta can no
   // longer race it by injecting an unrelated emergency spike.
@@ -42764,6 +42886,7 @@ function __mmUpdateAntiInsta() {
   __mmHammerPolearmInsta.isActive() &&
     __mmHammerPolearmInsta.cancel("lethal-combat-threat");
   __mmInstaSyncPending || __mmInstaSyncFiring ? __mmStopInstaSync() : null;
+  __mmUseShieldDefense(null, {angle: __mmThreat.angle, reason: "lethal combat threat"});
   (__mmAutoHeal(!0),
     (__mmAntiInstaLastAt = __mmNow),
     (__mmAntiInstaUntil = __mmNow + Math.max(140, __mmServerTickMs())),
@@ -48336,6 +48459,12 @@ function __mmAutoPushTrapContact(__mmEntity, __mmTrap) {
     return __mmDx * __mmDx + __mmDy * __mmDy <= __mmRadiusSquared;
   });
 }
+function __mmTrapSafeToWalkOver(trap) {
+  return __mmOwnStructure(trap) || __mmStructureOwnedByTeammate(trap);
+}
+function __mmSavedFriendLockingTrap(trap) {
+  return !!(trap && !__mmTrapSafeToWalkOver(trap) && __mmFriendlyStructure(trap));
+}
 function __mmPlayerCenterTouchesLockingTrap(__mmTrap) {
   if (
     !v ||
@@ -48345,10 +48474,8 @@ function __mmPlayerCenterTouchesLockingTrap(__mmTrap) {
     !__mmTrap.trap
   )
     return !1;
-  // Friendly pits are intentional map control, not escape targets. Treating
-  // their collision as danger made the trap breaker tear down our own or a
-  // teammate's pit as soon as we brushed its center.
-  if (__mmFriendlyStructure(__mmTrap)) return !1;
+  // Saved friends outside our game team can still trap us.
+  if (__mmTrapSafeToWalkOver(__mmTrap)) return !1;
   // A pit can catch the outer edge of the player before the client flips
   // lockMove. Check authoritative, rendered, and previous positions against
   // the collision circles so the first possible escape tick is not skipped.
@@ -48581,6 +48708,7 @@ function __mmTrapEmergencyItemKind(__mmItem) {
   if (__mmData.trap) return "trap";
   if (__mmName.includes("spikes")) return "spike";
   if (__mmName.includes("mill")) return "windmill";
+  if (__mmName.includes("wall")) return "wall";
   return null;
 }
 function __mmTrapEmergencyItemAvailable(__mmItem) {
@@ -48699,6 +48827,13 @@ function __mmTrapEmergencyFallbackItem(
 }
 function __mmTrapEmergencyBuildPlan(__mmTrap) {
   if (!v || !v.alive) return [];
+  if (__mmSavedFriendLockingTrap(__mmTrap)) {
+    const wall = Array.isArray(v.items) && v.items.find(item =>
+      /wall/i.test(String(b && b.list && b.list[item] && b.list[item].name)) &&
+      __mmTrapEmergencyItemAvailable(item));
+    return wall != null && wall !== false && __mmTrapBuildPlacedCount < 1
+      ? [{ item: wall, angle: __mmRawMouseAimDirection() + Math.PI }] : [];
+  }
   const __mmEnemy = __mmNearestEnemy(),
     // Use the raw pointer direction, not the forced trap-break aim. On the
     // second escape tick Ci() points at the pit, which made a "behind me"
@@ -49109,16 +49244,15 @@ function __mmTrapBreakPlan(__mmTrap) {
         ? __mmState.health
         : __mmTrap.health ?? (__mmItem && __mmItem.health),
     ),
-    // Escape attacks use Tank when it is owned, so rank weapons by their
-    // actual Tank structure damage and Tank-adjusted reload instead of an
-    // arbitrary Great Hammer/main-hand order.
+    // Great Hammer secondary always owns escape; otherwise use primary.
     __mmDamagePlayer = {
       weaponVariant: v.weaponVariant,
       skinIndex: v.skins && v.skins[40] ? 40 : v.skinIndex,
     },
     __mmSeen = new Set();
   let __mmBest = null;
-  for (let __mmIndex = 0; __mmIndex < v.weapons.length; __mmIndex += 1) {
+  const __mmPreferredSlot = Number(v.weapons[1]) === __mmGreatHammer ? 1 : 0;
+  for (const __mmIndex of [__mmPreferredSlot]) {
     const __mmWeapon = Number(v.weapons[__mmIndex]),
       __mmData = b && b.weapons && b.weapons[__mmWeapon];
     if (
@@ -49150,8 +49284,8 @@ function __mmTrapBreakPlan(__mmTrap) {
           ? Math.max(0, __mmTrapManualReadyAt - Date.now())
           : 0,
       // The first hit waits only for its current reload; every subsequent hit
-      // pays the selected tool's full cooldown. This chooses the shortest
-      // actual break time, not merely the largest damage number.
+      // pays the selected tool's full cooldown. These are timing estimates;
+      // reload and damage never override the required inventory slot.
       __mmTimeToBreak =
         Math.max(0, __mmReload, __mmReserved) +
         Math.max(0, __mmHits - 1) * __mmCooldown,
@@ -49206,7 +49340,7 @@ function __mmTryTrapEscapeOwnReplace(__mmTrap) {
     !v ||
     !v.alive ||
     !Array.isArray(v.weapons) ||
-    !v.weapons.includes(__mmGreatHammer) ||
+    Number(v.weapons[1]) !== __mmGreatHammer ||
     !__mmWeaponReady(__mmGreatHammer) ||
     Date.now() - __mmTrapEscapeOwnReplaceLastAt < __mmServerTickMs()
   )
@@ -49582,15 +49716,14 @@ function __mmTrapEscapeSpikeTickTarget(__mmTrap, __mmTrapTarget) {
     : null;
 }
 function __mmTrapEscapeBreakTarget(__mmTrap) {
-  // Only the hostile pit currently catching us, or its tightly bounded
-  // just-confirmed continuation, may own this breaker. This guards against
-  // stale targets and makes an owned/friendly spike or trap in the same area
-  // ineligible for the escape attack.
+  // Only the pit currently catching us, including a saved friend's pit,
+  // or its tightly bounded just-confirmed continuation may own this breaker.
+  // Own/team pits are walkable and must never become escape targets.
   if (
     !__mmTrap ||
     !__mmTrap.active ||
     !__mmTrap.trap ||
-    __mmFriendlyStructure(__mmTrap)
+    __mmTrapSafeToWalkOver(__mmTrap)
   )
     return null;
   if (__mmPlayerCenterTouchesLockingTrap(__mmTrap)) return __mmTrap;
@@ -49934,7 +50067,7 @@ function __mmBreakTrap() {
   // When an opponent replaces this locking pit in rapid succession, claim
   // the just-opened slot instead of continuing the rear-spike build loop.
   // The helper only proceeds for a reachable, one-hit Great Hammer break.
-  if (__mmTryTrapEscapeOwnReplace(__mmTrapTarget)) return;
+  if (!__mmSavedFriendLockingTrap(__mmTrapTarget) && __mmTryTrapEscapeOwnReplace(__mmTrapTarget)) return;
   // Reserve and send the rear escape placement while this exact hostile pit
   // still owns the movement lock. The build helper retries a blocked rear arc
   // and the breaker resumes its per-swing Tank pulse afterwards.
@@ -49970,12 +50103,13 @@ function __mmBreakTrap() {
   if (!__mmPlan) return;
   // Do not chase the fastest currently-ready hand while trapped. That made
   // the escape path oscillate between main and secondary on every reload.
-  // Keep the first valid melee breaker for this pit; only replace it when the
-  // game no longer lets us use it at all.
+  // Keep the required breaker through reloads; switch immediately if the
+  // inventory changes which slot is required (secondary Hammer or main).
   const __mmLockedWeapon = Number(__mmTrapAttackHeldWeapon),
     __mmLockedData = b && b.weapons && b.weapons[__mmLockedWeapon],
     __mmKeepLockedWeapon =
       __mmTrapAttackHeldWeapon != null &&
+      __mmLockedWeapon === __mmPlan.weapon &&
       v.weapons.includes(__mmLockedWeapon) &&
       __mmLockedData &&
       __mmLockedData.projectile == null &&
@@ -50105,7 +50239,7 @@ document.addEventListener("keyup", __mmQueueTrapEscapeResume, !0);
 function __mmWithinTrapAlertRange(__mmTrap) {
   return !!(
     __mmTrap &&
-    !__mmFriendlyStructure(__mmTrap) &&
+    !__mmTrapSafeToWalkOver(__mmTrap) &&
     __mmPlayerCenterTouchesLockingTrap(__mmTrap)
   );
 }
@@ -50283,6 +50417,52 @@ function __mmPublishAiContext() {
   );
 }
 window.addEventListener("MooMooAIRequestContext", __mmPublishAiContext);
+// Choose the widest compatible group while always covering the first impact.
+function __mmShieldImpactPlan(entries, halfArc) {
+  const hits = entries.filter(e => Number.isFinite(e.angle) && Number.isFinite(e.impactMs) && e.impactMs >= 0)
+    .slice().sort((a,b) => a.impactMs-b.impactMs);
+  if (!hits.length) return null;
+  const first = hits[0], wrap = a => Math.atan2(Math.sin(a), Math.cos(a));
+  const candidates = [first.angle];
+  for (const hit of hits) candidates.push(hit.angle-halfArc, hit.angle+halfArc);
+  let best = null;
+  for (const angle of candidates) {
+    if (Math.abs(wrap(angle-first.angle)) > halfArc+1e-7) continue;
+    const covered = hits.filter(h => Math.abs(wrap(h.angle-angle)) <= halfArc+1e-7);
+    const margin = Math.min(...covered.map(h => halfArc-Math.abs(wrap(h.angle-angle))));
+    if (!best || covered.length > best.covered.length || (covered.length === best.covered.length && margin > best.margin))
+      best = {angle:wrap(angle), covered, margin, first};
+  }
+  // Center the selected arc for tolerance to network position jitter.
+  const offsets = best.covered.map(h => wrap(h.angle-first.angle));
+  best.angle = wrap(first.angle+(Math.min(...offsets)+Math.max(...offsets))/2);
+  return best;
+}
+function __mmUpdateProjectileShield() {
+  if (!__mmCanUseShieldDefense() || (!["idle", "movementGear", "soldierGear", "shieldDefense"].includes(__mmActionOwner))) return;
+  const snapshot = __mmCombatThreatSnapshot();
+  const hits = (snapshot.entries || []).filter(e => (e.type === "projectile" || e.type === "turret") && e.source && e.source.active && e.impactMs <= 750);
+  // Keep the first projectile until it collides/disappears or is no longer on
+  // a collision course. Never rotate merely because its estimated timer ran out.
+  const held = hits.find(e => e.source === __mmShieldProjectile);
+  const ordered = hits.map(e => ({...e, impactMs: held && e === held ? 0 : e.impactMs}));
+  const plan = __mmShieldImpactPlan(ordered, Math.max(0.1, Number(y && y.shieldAngle) || Math.PI/3));
+  if (!plan) return;
+  if (__mmUseShieldDefense(null, {angle:plan.angle, holdMs:750, reason:"incoming projectile"}))
+    __mmShieldProjectile = plan.first.source;
+}
+function __mmUpdateAutoPushShield(enemy, geometry) {
+  __mmAutoPushShieldAngle = null;
+  if (!v || !Array.isArray(v.weapons) || __mmPrimaryHeld || __mmSecondaryHeld || __mmInsta.isActive()) return;
+  const nearEnd = geometry.aligned && Math.hypot(geometry.self.x-geometry.standX, geometry.self.y-geometry.standY) <= (Number(v.scale)||35)+15;
+  const weapon = nearEnd && v.weapons.includes(__mmShieldWeapon) ? __mmShieldWeapon : v.weapons[0];
+  if (weapon == null) return;
+  if (__mmSelectedWeapon() !== weapon) je(weapon, !0);
+  if (weapon === __mmShieldWeapon) {
+    __mmAutoPushShieldAngle = Math.atan2(geometry.enemy.y-geometry.self.y, geometry.enemy.x-geometry.self.x);
+    O.send("D", __mmAutoPushShieldAngle);
+  }
+}
 function __mmCanUseShieldDefense() {
   return (
     __mmShieldDefenseEnabled &&
@@ -50302,6 +50482,8 @@ function __mmStopShieldDefense(__mmReason) {
   ((__mmShieldDefenseTimer && clearTimeout(__mmShieldDefenseTimer),
     (__mmShieldDefenseTimer = 0),
     (__mmShieldDefenseWeapon = null),
+    (__mmShieldGuardAngle = null),
+    (__mmShieldProjectile = null),
     __mmRestore &&
       !__mmPrimaryHeld &&
       !__mmSecondaryHeld &&
@@ -50382,7 +50564,7 @@ function __mmShieldDefenseAngle(__mmPrimaryThreat) {
 function __mmUseShieldDefense(__mmPlayer, __mmOptions = {}) {
   if (!__mmCanUseShieldDefense()) return !1;
   const __mmExplicitAngle = Number(__mmOptions && __mmOptions.angle),
-    __mmHasExplicitAngle = Number.isFinite(__mmExplicitAngle);
+    __mmHasExplicitAngle = __mmOptions.angle != null && Number.isFinite(__mmExplicitAngle);
   if (!__mmHasExplicitAngle) {
     if (!__mmPlayer) return !1;
     const __mmDistance = (__mmPlayer.x - v.x) ** 2 + (__mmPlayer.y - v.y) ** 2;
@@ -50410,7 +50592,8 @@ function __mmUseShieldDefense(__mmPlayer, __mmOptions = {}) {
   (__mmShieldDefenseTimer && clearTimeout(__mmShieldDefenseTimer),
     __mmShieldDefenseWeapon == null && (__mmShieldDefenseWeapon = __mmWeapon),
     je(__mmShieldWeapon, !0),
-    O.send("9", __mmShieldAngle),
+    (__mmShieldGuardAngle = __mmShieldAngle),
+    O.send("D", __mmShieldAngle),
     (__mmShieldDefenseTimer = setTimeout(function () {
       __mmStopShieldDefense("defense complete");
     }, __mmHoldMs)));
