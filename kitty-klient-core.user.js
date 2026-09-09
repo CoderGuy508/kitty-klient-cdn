@@ -2,7 +2,7 @@
 // @name         kitty klient
 // @author       Coder Guy
 // @credits       random4ik — bot script
-// @version      6.8.25
+// @version      6.8.26
 // @icon         https://cdn.discordapp.com/icons/1540876076224356437/ac27c0ce87c4c46b407ebca78e150aeb.webp?size=2048
 // @description  kitty klient — a MooMoo.io client with adaptive zoom, fast autoheal, gear automation, combat tools, predictive placement, visual markers, CC0 background music, manual quick builds, and a fully rebindable keyboard/mouse controls HUD.
 // @match        *://moomoo.io/*
@@ -259,7 +259,7 @@
     const AUTO_PUSH_FINISHER_MIGRATION_KEY = "kitty-klient-auto-push-finisher-v1";
     const ASSASSIN_RANGE_AUTO_MIGRATION_KEY = "kitty-klient-assassin-range-auto-v1";
     const TAB_SYNC_BRIDGE_KEY = "kitty-klient-tab-sync-bridge-v1";
-const KITTY_KLIENT_VERSION = "6.8.25";
+const KITTY_KLIENT_VERSION = "6.8.26";
     const KITTY_SHARED_STORAGE_APPLIED_EVENT = "KittyMooMooSharedStorageApplied";
     // FRVR's v1.8 client changed the game module and now owns its own Altcha
     // verification flow. The legacy runtime patch relies on exact bundle
@@ -762,12 +762,12 @@ const KITTY_KLIENT_VERSION = "6.8.25";
         ownColor: "#d8b4fe",
         selfColor: "#e9d5ff",
         animalColor: "#48df79",
-        accentColor: "#a855f7",
-        glowColor: "#8b5cf6",
+        accentColor: "#ef4444",
+        glowColor: "#dc2626",
         textColor: "#ffffff",
-        panelColor: "#140c20",
-        backgroundColor: "#08050d",
-        brandGlowColor: "#c084fc",
+        panelColor: "#200c0c",
+        backgroundColor: "#0d0505",
+        brandGlowColor: "#f87171",
         bullHelmet: true,
         tankRightClick: true,
         instaKill: true,
@@ -1180,7 +1180,7 @@ const KITTY_KLIENT_VERSION = "6.8.25";
     function kittyRuntimeHudCommand(detail) {
         if (!detail || typeof detail !== "object" || kittyMasterAutomationEnabled()) return detail;
         if (detail.type === "hydrate" && detail.settings && typeof detail.settings === "object") {
-            return { ...detail, settings: kittyRuntimeHudSettings(detail.settings) };
+            return { ...detail, settings: kittyRuntimeHudSettings({ ...detail.settings, masterAutomationEnabled: false }) };
         }
         if (detail.type === "set" && KITTY_MASTER_MOD_DISABLED_KEYS.has(detail.key)) {
             return { ...detail, value: false };
@@ -1658,7 +1658,7 @@ const KITTY_KLIENT_VERSION = "6.8.25";
                 const previousFillStyle = this.fillStyle;
                 const lowCost = window.__KittyCanvasTextLowCost !== false;
                 const textColor = normalizeHudColor(window.__KittyCanvasTextColor, "#ffffff");
-                const glowColor = normalizeHudColor(window.__KittyCanvasGlowColor, "#8b5cf6");
+                const glowColor = normalizeHudColor(window.__KittyCanvasGlowColor, "#dc2626");
                 let nextFillStyle = previousFillStyle;
                 if (
                     method === "fillText" &&
@@ -2146,7 +2146,7 @@ const KITTY_KLIENT_VERSION = "6.8.25";
         const style = document.createElement("style");
         style.id = "kitty-klient-theme";
         style.textContent = [
-            ":root{--kitty-purple:#a855f7;--kitty-purple-deep:#6d28d9;--kitty-black:#08050d}",
+            ":root{--kitty-purple:#ef4444;--kitty-purple-deep:#b91c1c;--kitty-black:#0d0505}",
             "#kitty-klient-metrics.kitty-main-menu-hidden,#kitty-klient-chat-history.kitty-main-menu-hidden,#kitty-klient-hud-launcher.kitty-main-menu-hidden{display:none!important}",
             "#upgradeHolder[data-kitty-no-upgrades='1'],#upgradeCounter[data-kitty-no-upgrades='1']{display:none!important}",
             "body,button,input,select,textarea,label,#gameUI,#mainMenu,#menuCardHolder,.menuCard,.menuButton,.settingRadio,.leaderboardItem,.leaderScore,.notificationText,.allianceItem,.storeItem,#itemInfoHolder,#loadingText,#diedText{color:#fff!important;text-shadow:0 0 4px #8b5cf6,0 0 11px rgba(168,85,247,.9)!important}",
@@ -2748,14 +2748,17 @@ const KITTY_KLIENT_VERSION = "6.8.25";
     }, { capture: true, passive: false });
  
     window.addEventListener("MooMooScrollZoomAutoheal", (event) => {
+        if (kittyHudSettingsDispatchDepth > 0) return;
         showZoomIndicator(`Autoheal: ${event.detail ? "On" : "Off"}`);
     });
  
     window.addEventListener("MooMooScrollZoomMonkeyTail", (event) => {
+        if (kittyHudSettingsDispatchDepth > 0) return;
         showZoomIndicator(event.detail);
     });
  
     window.addEventListener("MooMooScrollZoomStatus", (event) => {
+        if (kittyHudSettingsDispatchDepth > 0) return;
         showZoomIndicator(event.detail);
     });
 
@@ -3063,7 +3066,10 @@ const KITTY_KLIENT_VERSION = "6.8.25";
         }, []);
     }
 
+    let kittyHudSettingsDispatchDepth = 0;
+
     function applyHudSettings(nextSettings) {
+        const previousSettings = { ...hudState };
         const requested = nextSettings && typeof nextSettings === "object" ? nextSettings : {};
         const masterWasEnabled = kittyMasterAutomationEnabled();
         const masterChangeRequested = Object.prototype.hasOwnProperty.call(requested, "masterAutomationEnabled");
@@ -3095,7 +3101,15 @@ const KITTY_KLIENT_VERSION = "6.8.25";
             friends: normalizeHudFriends(hudState.friends)
         };
         saveHudSettings();
-        sendHudCommand({ type: "hydrate", settings: { ...hudState } });
+        // Master pause/resume changes effective values across the whole menu.
+        // Ordinary edits send only their normalized delta, never restart every feature.
+        const changedSettings = Object.fromEntries(Object.entries(hudState).filter(([key, value]) =>
+            key !== "debugText" && key !== "friends" &&
+            JSON.stringify(value) !== JSON.stringify(previousSettings[key])
+        ));
+        if (Object.keys(changedSettings).length) sendHudCommand({
+            type: "hydrate", settings: masterChangeRequested ? { ...hudState } : changedSettings
+        });
         renderHud();
         clipFarmApplySettings("HUD settings changed");
     }
@@ -3238,7 +3252,13 @@ const KITTY_KLIENT_VERSION = "6.8.25";
                 );
             }
         }
-        window.dispatchEvent(new CustomEvent("MooMooOPHudCommand", { detail }));
+        const applyingSettings = detail && detail.type === "hydrate";
+        if (applyingSettings) kittyHudSettingsDispatchDepth++;
+        try {
+            window.dispatchEvent(new CustomEvent("MooMooOPHudCommand", { detail }));
+        } finally {
+            if (applyingSettings) kittyHudSettingsDispatchDepth--;
+        }
     }
 
     function kittyMusicTrack(id = hudState.musicTrack) {
@@ -3695,6 +3715,8 @@ const KITTY_KLIENT_VERSION = "6.8.25";
                 return;
             }
             applyHudSettings({ [key]: input.checked });
+            const paused = !kittyMasterAutomationEnabled() && KITTY_MASTER_MOD_DISABLED_KEYS.has(key);
+            showZoomIndicator(label + ": " + (hudState[key] ? "On" : "Off") + (paused ? " (Master Mod paused)" : ""));
         });
         row.append(text, input);
         container.appendChild(row);
@@ -3908,6 +3930,8 @@ const KITTY_KLIENT_VERSION = "6.8.25";
                 return;
             }
             applyHudSettings({ [key]: input.checked });
+            const paused = !kittyMasterAutomationEnabled() && KITTY_MASTER_MOD_DISABLED_KEYS.has(key);
+            showZoomIndicator(label + ": " + (hudState[key] ? "On" : "Off") + (paused ? " (Master Mod paused)" : ""));
         });
         row.append(text, input);
         container.appendChild(row);
@@ -4632,7 +4656,7 @@ const KITTY_KLIENT_VERSION = "6.8.25";
         addHudToggle(combatTelemetry, "telemetrySpikeKnockback", "Spike knockback", "Mark predicted hostile spike follow-up damage from incoming attacks");
         addHudToggle(combatTelemetry, "telemetryActualAim", "Actual aim", "Draw the server-facing weapon direction and reach for visible players");
         addHudToggle(combatTelemetry, "telemetryBuildingOwners", "Building owners", "Label nearby breakables with their resolved owner name or server id");
-        addHudToggle(combatTelemetry, "telemetryShameCount", "Shame count", "Show Kitty's locally tracked rapid-heal shame value beside your player");
+        addHudToggle(combatTelemetry, "telemetryShameCount", "Shame number", "Show a large translucent Shame number above your player, independently of combat telemetry");
         addHudToggle(combatTelemetry, "telemetryDamageHealing", "Damage & healing values", "Stack recent health losses and gains above affected visible players");
  
         const actions = addHudSection(combatPage, "Gear & boost controls");
@@ -11571,6 +11595,7 @@ const __mmActionPriorities = Object.freeze({
   bowUpgradeInsta: 86,
   velTickSetup: 79,
   autoPushSetup: 78,
+  placementStep: 79,
   boostInsta: 84,
   boostSpike: 77,
   spikeTickStrike: 82,
@@ -11710,6 +11735,8 @@ function __mmActionClaim(__mmOwner, __mmReason) {
     __mmStopSpikeSync("preempted by " + __mmOwner);
   if (__mmIncomingHigher && __mmActionOwner === "autoSteal")
     __mmStopAutoSteal("preempted by " + __mmOwner);
+  if (__mmIncomingHigher && __mmActionOwner === "placementStep")
+    __mmStopPlacementStep();
   if (__mmIncomingHigher && __mmActionOwner === "dashMovement")
     __mmStopDashMovement("preempted by " + __mmOwner);
   if (
@@ -12746,6 +12773,7 @@ function __mmRunServerTacticalTick() {
         __mmUpdateAntiInsta(),
         __mmUpdateProjectileShield(),
         __mmUpdateAutoPushPressure(),
+        __mmUpdatePlacementStep(),
         __mmUpdatePlacementDefense(),
         __mmUpdateTeammateTrapRescue(),
         __mmUpdateAntiCollision());
@@ -12883,6 +12911,7 @@ function __mmRunOperationPipeline() {
           __mmUpdateAntiInsta(),
         __mmUpdateProjectileShield(),
         __mmUpdateAutoPushPressure(),
+        __mmUpdatePlacementStep(),
           __mmUpdatePlacementDefense(),
           __mmUpdateTeammateTrapRescue(),
           __mmUpdateAntiCollision());
@@ -24098,21 +24127,17 @@ function __mmDrawTelemetryBuildingOwners(__mmLeft, __mmTop) {
   }
 }
 function __mmDrawTelemetryShame(__mmLeft, __mmTop) {
-  if (!__mmTelemetryShameCountEnabled) return;
-  const __mmX = Number(v.x) - __mmLeft,
-    __mmY =
-      Number(v.y) -
-      __mmTop +
-      (Number(v.scale) || 35) +
-      (Number(y && y.nameY) || 0) +
-      58;
-  __mmTelemetryText(
-    "SHAME " + Math.max(0, Math.round(__mmAutoHealShameCount)),
-    __mmX,
-    __mmY,
-    __mmAutoHealShameCount > 0 ? "#facc15" : "#c4b5fd",
-    9,
-  );
+  if (!__mmTelemetryShameCountEnabled || !v || !v.alive || !k) return;
+  const x=Number(v.x)-__mmLeft, y=Number(v.y)-__mmTop-(Number(v.scale)||35)-18;
+  k.save();
+  try {
+    k.globalAlpha=0.45;
+    k.font="bold 34px sans-serif";
+    k.textAlign="center";
+    k.textBaseline="bottom";
+    k.fillStyle=__mmAutoHealShameCount>0 ? "#facc15" : "#c4b5fd";
+    k.fillText(String(Math.max(0,Math.round(__mmAutoHealShameCount))),x,y);
+  } finally { k.restore(); }
 }
 function __mmDrawTelemetryDeltas(__mmLeft, __mmTop) {
   if (!__mmTelemetryDamageHealingEnabled) return;
@@ -24180,7 +24205,6 @@ function __mmDrawCombatTelemetry() {
         __mmDrawTelemetryActualAim(__mmLeft, __mmTop),
       __mmPressure === 0 &&
         __mmDrawTelemetryBuildingOwners(__mmLeft, __mmTop),
-      __mmDrawTelemetryShame(__mmLeft, __mmTop),
       __mmDrawTelemetryDeltas(__mmLeft, __mmTop),
       k.restore());
   } catch (__mmTelemetryError) {
@@ -26778,6 +26802,7 @@ Cl = function () {
       __mmDrawWeaponXpBar(),
       __mmDrawResourceGainFloaters(),
       __mmDrawCombatTelemetry(),
+      __mmDrawTelemetryShame(oe - _ / 2, ae - L / 2),
       __mmDrawBreakableHitCounts(),
       __mmDrawAntiCollisionPopups(),
       __mmDrawInstaTypePopups(),
@@ -27849,6 +27874,9 @@ function __mmEnemyWithinCombatRange() {
   return !1;
 }
 function __mmCombatSafeHat(__mmHat) {
+  if (Number(__mmHat) === 0 && v &&
+      (Number(v.skinIndex) === __mmAssassinGear || Number(__mmPendingHat) === __mmAssassinGear))
+    return __mmAssassinReplacementHat(__mmAssassinPreviousHat);
   if (Number(__mmHat) === 11 && (Date.now() < __mmAntiInstaUntil ||
       (__mmCombatThreatCache && __mmCombatThreatCache.lethal && Date.now()-__mmCombatThreatCalculatedAt < 150)))
     return v && v.skins && v.skins[6] ? 6 : 0;
@@ -28273,7 +28301,9 @@ function __mmHudState() {
     }),
   };
 }
+let __mmHudSettingsApplyDepth = 0;
 function __mmPublishHudState() {
+  if (__mmHudSettingsApplyDepth > 0) { __mmHudPublishPending = !0; return; }
   __mmHudPublishPending = !0;
   const __mmNow = performance.now(),
     __mmMinimumGap = __mmHudMenuOpen || __mmDebugPanelEnabled ? 90 : 500,
@@ -29318,11 +29348,19 @@ function __mmApplyHudSettings(__mmSettings) {
     // an automatic worker after testing mode has already cancelled it.
     "instaTestingMode",
   ];
-  for (let __mmIndex = 0; __mmIndex < __mmKeys.length; __mmIndex++) {
-    const __mmKey = __mmKeys[__mmIndex];
-    Object.prototype.hasOwnProperty.call(__mmSettings, __mmKey) &&
-      __mmSetHudValue(__mmKey, __mmSettings[__mmKey]);
-  }
+  __mmHudSettingsApplyDepth++;
+  try {
+    // Exit testing mode before applying an OFF batch: its Autoheal override
+    // would otherwise turn Autoheal back on while Master Mod is pausing it.
+    if (__mmSettings.instaTestingMode === false && __mmInstaTestingModeEnabled)
+      __mmSetHudValue("instaTestingMode", false);
+    for (const __mmKey of __mmKeys) {
+      if (!Object.prototype.hasOwnProperty.call(__mmSettings,__mmKey)) continue;
+      const __mmCurrent = __mmHudState()[__mmKey];
+      if (JSON.stringify(__mmCurrent) === JSON.stringify(__mmSettings[__mmKey])) continue;
+      __mmSetHudValue(__mmKey,__mmSettings[__mmKey]);
+    }
+  } finally { __mmHudSettingsApplyDepth--; }
   // Hydration can arrive synchronously while the injected client is mounting.
   // Reconcile every placement worker once at the end so a saved ON toggle
   // cannot be displayed without its controller actually running.
@@ -33971,6 +34009,14 @@ function __mmAssassinSafe() {
     )
   );
 }
+function __mmAssassinReplacementHat(preferred) {
+  const candidates = [6, preferred, __mmActualHat, ...Object.keys((v && v.skins) || {}).map(Number)];
+  for (const candidate of candidates) {
+    const hat=Number(candidate);
+    if (Number.isInteger(hat) && hat>0 && hat!==__mmAssassinGear && __mmCanEquipHat(hat)) return hat;
+  }
+  return __mmAssassinGear;
+}
 function __mmRestoreAssassinGear() {
   const __mmRestore = __mmAssassinPreviousHat,
     __mmWasAutomated = __mmAssassinConcealed || __mmRestore != null;
@@ -33989,14 +34035,7 @@ function __mmRestoreAssassinGear() {
     (Number(v.skinIndex) === __mmAssassinGear ||
       Number(__mmPendingHat) === __mmAssassinGear)
   ) {
-    const __mmHat =
-      __mmRestore != null &&
-      __mmRestore !== __mmAssassinGear &&
-      __mmCanEquipHat(__mmRestore)
-        ? __mmRestore
-        : v.skins && v.skins[6]
-          ? 6
-          : 0;
+    const __mmHat = __mmAssassinReplacementHat(__mmRestore);
     __mmEquipHatNow(__mmHat, !0);
   }
 }
@@ -37017,6 +37056,110 @@ function __mmUpdateAutoPushPressure() {
     }
   }
 }
+let __mmPlacementStep = null, __mmPlacementStepTimer = 0, __mmPlacementStepLastScan = 0;
+function __mmStopPlacementStep() {
+  if (__mmPlacementStepTimer) clearTimeout(__mmPlacementStepTimer);
+  __mmPlacementStepTimer=0;
+  if (__mmPlacementStep && !__mmAutoPushManualMovementHeld() && __mmActionOwner === "placementStep" && Kt === __mmPlacementStep.angle) {
+    Kt=null; O.send("9",null);
+  }
+  __mmPlacementStep=null;
+  __mmActionRelease("placementStep","placement step complete");
+}
+function __mmPlacementStepSafe(from, to, objects) {
+  const radius=(Number(v.scale)||35)+8;
+  if (!Number.isFinite(to.x) || !Number.isFinite(to.y) || to.x<radius || to.y<radius ||
+      to.x>Number(y.mapScale)-radius || to.y>Number(y.mapScale)-radius) return false;
+  // Include a short braking margin beyond the destination.
+  const distance=Math.hypot(to.x-from.x,to.y-from.y);
+  const end={x:to.x+(to.x-from.x)/Math.max(1,distance)*12,y:to.y+(to.y-from.y)/Math.max(1,distance)*12};
+  for (const object of objects) {
+    if (!object || !object.active) continue;
+    const spike=__mmCleanupIsSpike(object);
+    if (!spike && (object.ignoreCollision || (object.trap && __mmTrapSafeToWalkOver(object)))) continue;
+    const clearance=radius+__mmThreatObjectScale(object);
+    if (__mmSegmentDistanceSquared(from.x,from.y,end.x,end.y,Number(object.x),Number(object.y))<clearance*clearance) return false;
+  }
+  for (const player of E || []) {
+    if (!player || player===v || !player.alive) continue;
+    const pos=__mmServerEntityPosition(player)||player;
+    const clearance=radius+(Number(player.scale)||35);
+    if (__mmSegmentDistanceSquared(from.x,from.y,end.x,end.y,pos.x,pos.y)<clearance*clearance) return false;
+  }
+  return true;
+}
+function __mmPlacementStepPlan() {
+  const from=__mmServerEntityPosition(v)||v, objects=__mmActiveObjectSnapshot(!0).all;
+  const targets=__mmAutoSpikeSpamTargets().slice(0,4), spikeItem=__mmSpikeItem();
+  let best=null;
+  for (const target of targets) {
+    const enemy=target.enemy, trap=target.trap;
+    if (!enemy || !trap || !trap.active) continue;
+    const position=__mmServerEntityPosition(enemy)||enemy, slots=[];
+    if (__mmSmartAutoReplaceEnabled && __mmDedicatedTrapReleasePrediction(trap)) {
+      const item=__mmSmartTrapReplaceAffordableItem();
+      if (item!=null) slots.push({item,x:trap.x,y:trap.y,removed:trap});
+    }
+    if (__mmSmartAutoPlaceEnabled && spikeItem!=null && __mmCanUseBuildItem(spikeItem) &&
+        !(__mmSmartTrappedSpikeCandidate(target,spikeItem,Date.now()) || {}).valid) {
+      const data=b.list[spikeItem], radius=(Number(enemy.scale)||35)+(Number(data.scale)||49)-2;
+      for (let i=0;i<24;i++) {
+        const angle=i*Math.PI/12;
+        const x=position.x+Math.cos(angle)*radius, yy=position.y+Math.sin(angle)*radius;
+        if (__mmSmartPositionClear(spikeItem,x,yy,Number(data.scale)||49)) slots.push({item:spikeItem,x,y:yy,removed:null});
+      }
+    }
+    for (const slot of slots) {
+      const radius=__mmReferencePlaceRadius(slot.item), dx=from.x-slot.x,dy=from.y-slot.y,distance=Math.hypot(dx,dy);
+      if (distance<1) continue;
+      const goal={x:slot.x+dx/distance*radius,y:slot.y+dy/distance*radius};
+      const travel=Math.hypot(goal.x-from.x,goal.y-from.y);
+      if (travel<6 || travel>48 || (best && travel>=best.travel) || !__mmPlacementStepSafe(from,goal,objects)) continue;
+      best={...slot,goal,enemy,trap,travel,started:Date.now(),angle:null};
+    }
+  }
+  return best;
+}
+function __mmUpdatePlacementStep() {
+  if (!v || !v.alive || __mmIsTrapped() || __mmAutoPushManualMovementHeld() ||
+      __mmPrimaryHeld || __mmSecondaryHeld || __mmInsta.isActive() ||
+      (!__mmSmartAutoReplaceEnabled && !__mmSmartAutoPlaceEnabled) || __mmLethalCombatThreat() ||
+      !["idle","movementGear","soldierGear","autoPushSetup","placementStep"].includes(__mmActionOwner)) {
+    if (__mmPlacementStep) __mmStopPlacementStep();
+    return;
+  }
+  const now=Date.now();
+  if (!__mmPlacementStep) {
+    if (now-__mmPlacementStepLastScan<100) return;
+    __mmPlacementStepLastScan=now;
+    const plan=__mmPlacementStepPlan();
+    if (!plan || !__mmActionClaim("placementStep","safe placement approach")) return;
+    __mmPlacementStep=plan;
+    __mmPlacementStepTimer=setTimeout(__mmStopPlacementStep,650);
+  }
+  const plan=__mmPlacementStep, from=__mmServerEntityPosition(v)||v;
+  if (now-plan.started>600 || !__mmIsEnemyPlayer(plan.enemy) ||
+      (!plan.removed && (!plan.trap.active || !__mmServerTrapContact(plan.enemy,plan.trap))) ||
+      !__mmPlacementStepSafe(from,plan.goal,__mmActiveObjectSnapshot(!0).all)) return void __mmStopPlacementStep();
+  if (Math.hypot(from.x-plan.goal.x,from.y-plan.goal.y)<=5) {
+    const angle=Math.atan2(plan.y-from.y,plan.x-from.x);
+    const candidate=plan.removed && plan.removed.active
+      ? __mmSmartCandidateForExpectedRemoval(plan.item,angle,plan.removed)
+      : __mmSmartCandidateForAngle(plan.item,angle);
+    if (candidate && Math.hypot(candidate.x-plan.x,candidate.y-plan.y)<=7 &&
+        __mmAutoPushReplacementAffordable(plan.item,plan.removed||{}) &&
+        __mmReserveTacticalChannel("placement","smartAutoPlace",64) && __mmTacticalPlacementKey("smartAutoPlace",candidate)) {
+      const tool=__mmSelectedTool();
+      const sent=candidate.preplace
+        ? !!__mmDedicatedTrapReleasePrediction(plan.removed) && __mmSendPredictedSmartTrapReplace(plan.item,candidate,tool)
+        : __mmSendAutomaticPlacement(plan.item,angle,tool);
+      if (sent) __mmAutoSpikeSpamReservations.push({item:plan.item,x:candidate.x,y:candidate.y,scale:candidate.scale,expiresAt:now+650});
+    }
+    return void __mmStopPlacementStep();
+  }
+  plan.angle=Math.atan2(plan.goal.y-from.y,plan.goal.x-from.x);
+  Kt=plan.angle; O.send("9",plan.angle);
+}
 function __mmAutoPushAlliedSpike(__mmEnemy, __mmTrap) {
   if (!v || !v.alive || !__mmEnemy || !__mmTrap) return null;
   const __mmEnemyPosition = __mmServerEntityPosition(__mmEnemy) || __mmEnemy,
@@ -38225,8 +38368,8 @@ function __mmStartAutoTrapInsta() {
 // Local, evidence-based player-behavior detector. It deliberately never trusts a name,
 // rank, or one fast action: a player must produce three separate anomalous
 // episodes before the red label or the Soldier predictor can treat them as a
-// hacker. Quiet players leave the short scan phase without any visible label;
-// later suspicious behaviour reopens that scan rather than being ignored.
+// hacker. Unflagged players remain visibly under observation for as long as
+// they are present; time alone never counts as evidence.
 const __mmHackDetector = {
   records: Object.create(null),
   objects: new Map(),
@@ -38452,7 +38595,8 @@ const __mmHackDetector = {
     return !!(
       __mmRecord &&
       !__mmRecord.hacker &&
-      __mmNow < __mmRecord.scanUntil
+      __mmPlayer !== v && __mmPlayer.alive !== !1 &&
+      __mmNow - __mmRecord.lastSeenAt <= 30000
     );
   },
   reset() {
@@ -40554,6 +40698,27 @@ function __mmStartSpikeTickStrike(__mmEnemy, __mmPrediction) {
     }, Math.max(1, __mmFireDelay))));
   return !0;
 }
+function __mmTryDamageSpamInsta(enemy) {
+  if (!__mmAutoSpikeInstaEnabled || !__mmAutoInstaEnabled || __mmInstaTestingModeEnabled ||
+      !v || !v.alive || !__mmIsEnemyPlayer(enemy)) return false;
+  const primary=__mmInsta.supportedPrimary();
+  if (primary==null || !__mmInsta.inRange(primary,enemy)) return false;
+  const trap=__mmAutoSpikeSpamTrapForEnemy(enemy);
+  let spam=false;
+  for (const hazard of __mmAutoPushTargetHazards(enemy)) {
+    if (!hazard.spike || !hazard.object || !hazard.object.active) continue;
+    if (__mmAutoPushContactSample(enemy,trap,hazard.object).spam) spam=true;
+  }
+  // Keep observing during reload, then act on the first ready combat update.
+  // Do not wait for a trap break, replacement, or a predicted lethal spike.
+  if (!spam || __mmInsta.state!=="idle" || !__mmInsta.runtimeReady() ||
+      __mmInsta.isPriorityConflict() || __mmLethalCombatThreat()) return false;
+  const profile=__mmInsta.fullBurstReady(enemy,"normal",false) ? "normal"
+    : __mmInsta.fullBurstReady(enemy,"autoPush",false) ? "autoPush" : null;
+  if (!profile) return false;
+  return !!__mmInsta.start({automatic:true,targetSid:enemy.sid,profile,
+    profileSource:"nearby repeated spike damage",syncScheduled:true});
+}
 function __mmUpdateAutoSpikeInsta() {
   if (__mmInstaTestingModeEnabled) return;
   const __mmNow = Date.now(),
@@ -40582,6 +40747,10 @@ function __mmUpdateAutoSpikeInsta() {
       __mmDx * __mmDx + __mmDy * __mmDy > __mmActionRange * __mmActionRange
     )
       continue;
+    if (__mmTryDamageSpamInsta(__mmEnemy)) {
+      __mmAutoSpikeInstaLastAt=__mmNow;
+      return;
+    }
     const __mmSid = String(__mmEnemy.sid),
       __mmPrediction = __mmPredictEnemyNextTick(__mmEnemy, __mmNow);
     __mmSeen[__mmSid] = !0;
@@ -48825,6 +48994,34 @@ function __mmTrapEmergencyFallbackItem(
   }
   return null;
 }
+function __mmTrapIncomingSpikeBlockPlan(trap) {
+  if (!__mmPlacementDefenseEnabled || !v || !trap || __mmSavedFriendLockingTrap(trap)) return null;
+  const enemy=__mmNearestEnemy();
+  if (!enemy || !__mmIsEnemyPlayer(enemy)) return null;
+  const self=__mmServerEntityPosition(v)||v, attacker=__mmServerEntityPosition(enemy)||enemy;
+  if (Math.hypot(attacker.x-self.x,attacker.y-self.y)>230) return null;
+  const walls=(v.items||[]).filter(item=>/wall|mill|trap/i.test(String(b.list[item] && b.list[item].name)) && __mmTrapEmergencyItemAvailable(item));
+  if (!walls.length) return null;
+  const toward=Math.atan2(self.y-attacker.y,self.x-attacker.x);
+  // Evaluate the opponent's actual placement ring using known item geometry.
+  // A legal spike that contacts us identifies a slot worth occupying first.
+  for (const spike of b.list) {
+    if (!spike || !/spike/i.test(String(spike.name)) || !(Number(spike.dmg)>0)) continue;
+    const enemyRadius=(Number(enemy.scale)||35)+Number(spike.scale)+(Number(spike.placeOffset)||0);
+    for (let i=0;i<24;i++) {
+      const angle=toward+i*Math.PI/12, x=attacker.x+Math.cos(angle)*enemyRadius, yy=attacker.y+Math.sin(angle)*enemyRadius;
+      if (Math.hypot(x-self.x,yy-self.y)>(Number(v.scale)||35)+Number(spike.scale) ||
+          !__mmSmartPositionClear(spike.id,x,yy,Number(spike.scale))) continue;
+      const blockAngle=Math.atan2(yy-self.y,x-self.x);
+      for (const item of walls) for (const offset of [0,-0.12,0.12]) {
+        const candidate=__mmSmartCandidateForAngle(item,blockAngle+offset);
+        if (candidate && candidate.valid && Math.hypot(candidate.x-x,candidate.y-yy)<candidate.scale+Number(spike.scale)-4)
+          return {item,angle:candidate.angle};
+      }
+    }
+  }
+  return null;
+}
 function __mmTrapEmergencyBuildPlan(__mmTrap) {
   if (!v || !v.alive) return [];
   if (__mmSavedFriendLockingTrap(__mmTrap)) {
@@ -48834,6 +49031,8 @@ function __mmTrapEmergencyBuildPlan(__mmTrap) {
     return wall != null && wall !== false && __mmTrapBuildPlacedCount < 1
       ? [{ item: wall, angle: __mmRawMouseAimDirection() + Math.PI }] : [];
   }
+  const __mmBlock = __mmTrapIncomingSpikeBlockPlan(__mmTrap);
+  if (__mmBlock && __mmTrapBuildPlacedCount < 2) return [__mmBlock];
   const __mmEnemy = __mmNearestEnemy(),
     // Use the raw pointer direction, not the forced trap-break aim. On the
     // second escape tick Ci() points at the pit, which made a "behind me"
@@ -49689,31 +49888,19 @@ function __mmTrapEscapeLethalSpike(__mmTrap) {
   return __mmBest;
 }
 function __mmTrapEscapeSpikeTickTarget(__mmTrap, __mmTrapTarget) {
-  if (!__mmTrap || !__mmTrapTarget) return null;
-  const __mmThreat = __mmCombatThreatSnapshot(!0),
-    // A spike may be potentially dangerous without actually ticking us. Only
-    // leave the pit aim for the currently lethal, contact-confirmed spike;
-    // otherwise the escape swing must keep removing the lock.
-    __mmSpike = __mmTrapEscapeLethalSpike(__mmTrap),
-    __mmTrapState = __mmBreakableState(__mmTrapTarget),
-    __mmSpikeState = __mmBreakableState(__mmSpike),
-    __mmTrapHealth = Number(__mmTrapState && __mmTrapState.health),
-    __mmSpikeHealth = Number(__mmSpikeState && __mmSpikeState.health),
-    __mmSpikeTickSpam = !!(
-      __mmSpike &&
-      __mmSpike === __mmThreat.lethalSpike &&
-      Number(__mmThreat.spikeDamage) > 0 &&
-      Number(__mmThreat.damage) > 0
-    );
-  // No inferred/missing health comparisons: if the spike is not explicitly
-  // lower-health than the trapping pit, keep aiming at the trap as the safe
-  // fallback.
-  return __mmSpikeTickSpam &&
-    Number.isFinite(__mmTrapHealth) &&
-    Number.isFinite(__mmSpikeHealth) &&
-    __mmSpikeHealth + 0.001 < __mmTrapHealth
-    ? __mmSpike
-    : null;
+  if (!v || !__mmTrap || !__mmTrapTarget) return null;
+  const position=__mmServerEntityPosition(v)||v;
+  let best=null, distance=Infinity;
+  for (const spike of __mmActiveObjectSnapshot(!0).spikes) {
+    if (!spike || !spike.active || __mmFriendlyStructure(spike)) continue;
+    const d=Math.hypot(spike.x-position.x,spike.y-position.y);
+    // Act on present contact, before the damage becomes lethal. Retain the
+    // user's secondary-Hammer/main rule for every escape swing.
+    if (d>(Number(v.scale)||35)+__mmThreatObjectScale(spike)+3 ||
+        d>=distance || !__mmTrapBreakPlan(spike)) continue;
+    best=spike;distance=d;
+  }
+  return best;
 }
 function __mmTrapEscapeBreakTarget(__mmTrap) {
   // Only the pit currently catching us, including a saved friend's pit,
@@ -50072,10 +50259,8 @@ function __mmBreakTrap() {
   // still owns the movement lock. The build helper retries a blocked rear arc
   // and the breaker resumes its per-swing Tank pulse afterwards.
   __mmStartTrapBuildEscape(__mmTrapTarget);
-  // The locking pit is the one and only attack target. A nearby spike can be
-  // dangerous, but turning away for it creates the exact dead right-click
-  // window this emergency path is supposed to eliminate.
-  const __mmBreakTarget = __mmTrapTarget,
+  // Contact spikes take priority so the next swing can stop repeated damage.
+  const __mmBreakTarget = __mmTrapEscapeSpikeTickTarget(__mmTrap, __mmTrapTarget) || __mmTrapTarget,
     __mmTargetKey =
       "trap:" +
       String(
