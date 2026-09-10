@@ -2,7 +2,7 @@
 // @name         kitty klient
 // @author       Coder Guy
 // @credits       random4ik — bot script
-// @version      6.8.27
+// @version      6.8.28
 // @icon         https://cdn.discordapp.com/icons/1540876076224356437/ac27c0ce87c4c46b407ebca78e150aeb.webp?size=2048
 // @description  kitty klient — a MooMoo.io client with adaptive zoom, fast autoheal, gear automation, combat tools, predictive placement, visual markers, CC0 background music, manual quick builds, and a fully rebindable keyboard/mouse controls HUD.
 // @match        *://moomoo.io/*
@@ -259,7 +259,7 @@
     const AUTO_PUSH_FINISHER_MIGRATION_KEY = "kitty-klient-auto-push-finisher-v1";
     const ASSASSIN_RANGE_AUTO_MIGRATION_KEY = "kitty-klient-assassin-range-auto-v1";
     const TAB_SYNC_BRIDGE_KEY = "kitty-klient-tab-sync-bridge-v1";
-const KITTY_KLIENT_VERSION = "6.8.27";
+const KITTY_KLIENT_VERSION = "6.8.28";
     const KITTY_SHARED_STORAGE_APPLIED_EVENT = "KittyMooMooSharedStorageApplied";
     // FRVR's v1.8 client changed the game module and now owns its own Altcha
     // verification flow. The legacy runtime patch relies on exact bundle
@@ -12822,6 +12822,7 @@ function __mmRunServerTacticalTick() {
     });
     __mmOperationStage("tick-gear", function () {
       (__mmUpdateAssassinAutomation(),
+        __mmUpdateDefaultTailMacro(),
         __mmUpdateMovementGear(),
         __mmUpdateSoldier());
     });
@@ -12977,6 +12978,7 @@ function __mmRunOperationPipeline() {
     __mmOperationStageDue("gear", __mmActiveCombat ? 22 : 35, __mmNow) &&
       __mmOperationStage("gear", function () {
         (__mmUpdateAssassinAutomation(),
+          __mmUpdateDefaultTailMacro(),
           __mmUpdateMovementGear(),
           __mmUpdateSoldier());
       });
@@ -27860,19 +27862,41 @@ function __mmStopAutoPurchase() {
     (__mmAutoPurchaseTimer = 0),
     (__mmAutoPurchasePending = null));
 }
-function __mmEnemyWithinCombatRange() {
-  if (!v || !v.alive) return !1;
-  if (__mmLiveStateFresh())
-    return __mmLiveState.nearestEnemyDistance <= __mmCombatRange;
-  for (let __mmEnemyIndex = 0; __mmEnemyIndex < E.length; __mmEnemyIndex++) {
-    const __mmEnemy = E[__mmEnemyIndex];
-    if (!__mmIsEnemyPlayer(__mmEnemy)) continue;
-    const __mmDx = __mmEnemy.x - v.x,
-      __mmDy = __mmEnemy.y - v.y;
-    if (__mmDx * __mmDx + __mmDy * __mmDy <= __mmCombatRange * __mmCombatRange)
-      return !0;
+function __mmGlotusEnemyDangerRange(enemy) {
+  const remembered=__mmPlayerToolCooldowns[String(enemy.sid)], weapons=enemy.weapons || (remembered && remembered.slots) || [];
+  const primary=weapons[0] ?? enemy.primaryIndex ?? enemy.weaponIndex;
+  const secondary=weapons[1];
+  const trapped=!!__mmAutoSpikeSpamTrapForEnemy(enemy), margin=trapped ? 20 : 115;
+  const boost=!trapped && (__mmEnemyNearBoostPad(enemy) || enemy.usingBoost === true);
+  const hitScale=(Number(enemy.scale)||35)*1.8;
+  const primaryData=b && b.weapons && b.weapons[primary];
+  const secondaryData=b && b.weapons && b.weapons[secondary];
+  const primaryRange=(Number(primaryData && primaryData.range)||0)+hitScale+(boost ? 430 : margin);
+  // Glotus tests ranged secondaries inside the primary threat envelope.
+  const secondaryRange=secondaryData && secondaryData.projectile == null && !secondaryData.shield
+    ? (Number(secondaryData.range)||0)+hitScale+margin : 0;
+  return Math.max(primaryRange,secondaryRange);
+}
+function __mmEnemyWithinGlotusDangerRange(limit) {
+  if (!v || !v.alive || !Array.isArray(E)) return false;
+  const positions=player=>{
+    const current=__mmServerEntityPosition(player)||player;
+    const previous=Number.isFinite(player.x1) && Number.isFinite(player.y1) ? {x:player.x1,y:player.y1} : current;
+    return [previous,current,{x:2*current.x-previous.x,y:2*current.y-previous.y}];
+  };
+  const self=positions(v);
+  for (const enemy of E) {
+    if (!__mmIsEnemyPlayer(enemy)) continue;
+    const range=__mmGlotusEnemyDangerRange(enemy);
+    // Preserve the expanded boost envelope. The menu radius only narrows
+    // ordinary approach threats; actual incoming projectiles remain separate.
+    const cutoff=range>400 ? range : Math.min(limit,range);
+    if (self.some(a=>positions(enemy).some(c=>Math.hypot(a.x-c.x,a.y-c.y)<=cutoff))) return true;
   }
-  return !1;
+  return false;
+}
+function __mmEnemyWithinCombatRange() {
+  return __mmEnemyWithinGlotusDangerRange(__mmCombatRange);
 }
 function __mmCombatSafeHat(__mmHat) {
   if (Number(__mmHat) === 0 && v &&
@@ -29540,8 +29564,7 @@ function __mmDefaultSoldierThreat() {
     __mmEnemyDanger = !!(
       __mmEnemyWithinCombatRange() ||
       (__mmThreat &&
-        (Number(__mmThreat.nearbyEnemies) > 0 ||
-          Number(__mmThreat.damage) > 0 ||
+        (Number(__mmThreat.damage) > 0 ||
           Number(__mmThreat.potentialDamage) > 0))
     ),
     __mmShameDanger = !!(
@@ -30491,12 +30514,15 @@ const __mmGearArbiter = {
       ),
       __mmSendTail = !!(
         __mmTail != null &&
-        Number(v.tailIndex) !== Number(__mmTail) &&
+        (Number(v.tailIndex) !== Number(__mmTail) ||
+          (__mmPendingTail != null && Number(__mmPendingTail) !== Number(__mmTail))) &&
         !(
           Number(__mmPendingTail) === Number(__mmTail) &&
           __mmNow - __mmPendingTailAt < __mmTailRetryAfter
         ) &&
-        (this.lastTailTick !== __mmTick || __mmTailUrgent)
+        (this.lastTailTick !== __mmTick || __mmTailUrgent ||
+          (__mmPendingTail != null && Number(__mmPendingTail) !== Number(__mmTail) &&
+            __mmNow - __mmPendingTailAt >= 25))
       );
     if (!__mmSendHat && !__mmSendTail) return !1;
     const __mmWasPairing = __mmSyncGearPairDispatch,
@@ -34216,6 +34242,21 @@ function __mmRestoreMovementGear(__mmForceNoMonkey) {
   ((__mmMovementGearPreviousHat = null),
     (__mmMovementGearPreviousTail = null),
     __mmEquipGearPair(__mmHat, __mmTail));
+}
+function __mmUpdateDefaultTailMacro() {
+  const source="movement:default-tail";
+  if (!__mmMovementGearEnabled || __mmInstaTestingModeEnabled || !v || !v.alive ||
+      __mmAssassinConcealed || __mmBushModeEnabled || __mmPrimaryHeld || __mmSecondaryHeld ||
+      __mmTrapAttackActive || __mmBoostBreakHeld || __mmSyncFollowerEnabled ||
+      __mmInsta.isActive() || __mmBoostInsta.isActive() ||
+      !["idle","movementGear","soldierGear","weaponRecharge","placementStep"].includes(__mmActionOwner)) {
+    __mmGearArbiter.release(source);
+    return;
+  }
+  // A hat acknowledgement/hold must not delay a changed movement or threat tail.
+  const tail=__mmKittyDefaultTail();
+  if (tail==null) return;
+  __mmGearArbiter.request(source,{tail},{priority:__mmGearIntentPriorities.movement});
 }
 function __mmUpdateMovementGear() {
   if (__mmInstaTestingModeEnabled) return;
@@ -50512,21 +50553,7 @@ function __mmCanAutoSoldier() {
   );
 }
 function __mmEnemyWithinSoldierRange() {
-  if (!v || !v.alive) return !1;
-  if (__mmLiveStateFresh())
-    return __mmLiveState.nearestEnemyDistance <= __mmSoldierRange;
-  for (let __mmPlayerIndex = 0; __mmPlayerIndex < E.length; __mmPlayerIndex++) {
-    const __mmPlayer = E[__mmPlayerIndex];
-    if (!__mmIsEnemyPlayer(__mmPlayer)) continue;
-    const __mmDx = __mmPlayer.x - v.x,
-      __mmDy = __mmPlayer.y - v.y;
-    if (
-      __mmDx * __mmDx + __mmDy * __mmDy <=
-      __mmSoldierRange * __mmSoldierRange
-    )
-      return !0;
-  }
-  return !1;
+  return __mmEnemyWithinGlotusDangerRange(__mmSoldierRange);
 }
 function __mmEquipSoldier() {
   if (!__mmCanAutoSoldier() || v.skinIndex === 6) return;
