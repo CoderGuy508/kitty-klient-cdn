@@ -2,7 +2,7 @@
 // @name         kitty klient
 // @author       Coder Guy
 // @credits       random4ik — bot script
-// @version      6.8.26
+// @version      6.8.27
 // @icon         https://cdn.discordapp.com/icons/1540876076224356437/ac27c0ce87c4c46b407ebca78e150aeb.webp?size=2048
 // @description  kitty klient — a MooMoo.io client with adaptive zoom, fast autoheal, gear automation, combat tools, predictive placement, visual markers, CC0 background music, manual quick builds, and a fully rebindable keyboard/mouse controls HUD.
 // @match        *://moomoo.io/*
@@ -259,7 +259,7 @@
     const AUTO_PUSH_FINISHER_MIGRATION_KEY = "kitty-klient-auto-push-finisher-v1";
     const ASSASSIN_RANGE_AUTO_MIGRATION_KEY = "kitty-klient-assassin-range-auto-v1";
     const TAB_SYNC_BRIDGE_KEY = "kitty-klient-tab-sync-bridge-v1";
-const KITTY_KLIENT_VERSION = "6.8.26";
+const KITTY_KLIENT_VERSION = "6.8.27";
     const KITTY_SHARED_STORAGE_APPLIED_EVENT = "KittyMooMooSharedStorageApplied";
     // FRVR's v1.8 client changed the game module and now owns its own Altcha
     // verification flow. The legacy runtime patch relies on exact bundle
@@ -2258,7 +2258,7 @@ const KITTY_KLIENT_VERSION = "6.8.26";
         const mainMenu = document.getElementById("mainMenu");
         const mainMenuVisible = !mainMenu || window.getComputedStyle(mainMenu).display !== "none";
         if (mainMenuVisible) mountKittyMainAccountPanel();
-        document.getElementById("kitty-klient-main-account-host")?.toggleAttribute("hidden", !mainMenuVisible);
+        document.getElementById("kitty-klient-main-account-host")?.toggleAttribute("hidden", !mainMenuVisible || !!readKittyAccountSession());
         if (document.documentElement) {
             const nextValue = mainMenuVisible ? "1" : "0";
             if (document.documentElement.getAttribute("data-kitty-main-menu-open") !== nextValue) {
@@ -4656,7 +4656,7 @@ const KITTY_KLIENT_VERSION = "6.8.26";
         addHudToggle(combatTelemetry, "telemetrySpikeKnockback", "Spike knockback", "Mark predicted hostile spike follow-up damage from incoming attacks");
         addHudToggle(combatTelemetry, "telemetryActualAim", "Actual aim", "Draw the server-facing weapon direction and reach for visible players");
         addHudToggle(combatTelemetry, "telemetryBuildingOwners", "Building owners", "Label nearby breakables with their resolved owner name or server id");
-        addHudToggle(combatTelemetry, "telemetryShameCount", "Shame number", "Show a large translucent Shame number above your player, independently of combat telemetry");
+        addHudToggle(combatTelemetry, "telemetryShameCount", "Shame number", "Show a large translucent Shame number centered on your player, independently of combat telemetry");
         addHudToggle(combatTelemetry, "telemetryDamageHealing", "Damage & healing values", "Stack recent health losses and gains above affected visible players");
  
         const actions = addHudSection(combatPage, "Gear & boost controls");
@@ -7301,6 +7301,7 @@ const KITTY_KLIENT_VERSION = "6.8.26";
         if (!window.__KittyKlientAccountGateListener) {
             window.__KittyKlientAccountGateListener = true;
             window.addEventListener("KittyKlientAccountState", () => {
+                syncKittyMainAccountDrawer();
                 syncKittyAccountFeatureLocks();
                 if (readKittyAccountSession()) {
                     void refreshKittyAccountCombatRecords(true).catch(() => {});
@@ -24128,13 +24129,13 @@ function __mmDrawTelemetryBuildingOwners(__mmLeft, __mmTop) {
 }
 function __mmDrawTelemetryShame(__mmLeft, __mmTop) {
   if (!__mmTelemetryShameCountEnabled || !v || !v.alive || !k) return;
-  const x=Number(v.x)-__mmLeft, y=Number(v.y)-__mmTop-(Number(v.scale)||35)-18;
+  const x=Number(v.x)-__mmLeft, y=Number(v.y)-__mmTop;
   k.save();
   try {
     k.globalAlpha=0.45;
     k.font="bold 34px sans-serif";
     k.textAlign="center";
-    k.textBaseline="bottom";
+    k.textBaseline="middle";
     k.fillStyle=__mmAutoHealShameCount>0 ? "#facc15" : "#c4b5fd";
     k.fillText(String(Math.max(0,Math.round(__mmAutoHealShameCount))),x,y);
   } finally { k.restore(); }
