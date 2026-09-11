@@ -2,7 +2,7 @@
 // @name         kitty klient
 // @author       Coder Guy
 // @credits       random4ik — bot script
-// @version      6.8.28
+// @version      6.8.29
 // @icon         https://cdn.discordapp.com/icons/1540876076224356437/ac27c0ce87c4c46b407ebca78e150aeb.webp?size=2048
 // @description  kitty klient — a MooMoo.io client with adaptive zoom, fast autoheal, gear automation, combat tools, predictive placement, visual markers, CC0 background music, manual quick builds, and a fully rebindable keyboard/mouse controls HUD.
 // @match        *://moomoo.io/*
@@ -259,7 +259,7 @@
     const AUTO_PUSH_FINISHER_MIGRATION_KEY = "kitty-klient-auto-push-finisher-v1";
     const ASSASSIN_RANGE_AUTO_MIGRATION_KEY = "kitty-klient-assassin-range-auto-v1";
     const TAB_SYNC_BRIDGE_KEY = "kitty-klient-tab-sync-bridge-v1";
-const KITTY_KLIENT_VERSION = "6.8.28";
+const KITTY_KLIENT_VERSION = "6.8.29";
     const KITTY_SHARED_STORAGE_APPLIED_EVENT = "KittyMooMooSharedStorageApplied";
     // FRVR's v1.8 client changed the game module and now owns its own Altcha
     // verification flow. The legacy runtime patch relies on exact bundle
@@ -2852,25 +2852,10 @@ const KITTY_KLIENT_VERSION = "6.8.28";
         return KITTY_MENU_COMPLEXITY_LEVELS.includes(level) ? level : "easy";
     }
 
-    function enforceKittyFpsBoost(settings) {
-        if (!settings.fpsBoost) return settings;
-        // Keep native animation-frame scheduling: timers cannot override the
-        // browser refresh cap and would add work without presenting more frames.
-        settings.fpsBoost = true;
-        for (const key of [
-            "smoothVisuals", "meleeRangeFade", "reloadArcs", "entityDanger",
-            "notificationTracers", "deathAngelAnimation", "groundGrid", "esp",
-            "espLines", "predictionGhost", "placementVisuals", "autoPushVisuals",
-            "cooldownBars", "weaponXpBar", "combatTelemetry", "projectileAimHelper",
-            "debugPanel"
-        ]) settings[key] = false;
-        return settings;
-    }
-
     function normalizeHudSettings(candidate) {
         const settings = { ...HUD_DEFAULTS };
         settings.keybinds = { ...KITTY_DEFAULT_KEYBINDS };
-        if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return enforceKittyFpsBoost(settings);
+        if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return settings;
 
         settings.menuComplexity = normalizeKittyMenuComplexity(candidate.menuComplexity);
         HUD_BOOLEAN_KEYS.forEach((key) => {
@@ -2938,7 +2923,7 @@ const KITTY_KLIENT_VERSION = "6.8.28";
                 );
             });
         }
-        return enforceKittyFpsBoost(settings);
+        return settings;
     }
  
     function readStoredHudSettings(storageKey) {
@@ -4388,7 +4373,7 @@ const KITTY_KLIENT_VERSION = "6.8.28";
         addHudCompactGroup(mediumPlacementSection, "reactivePlace", "Reactive Place", "Preplace, replacements, boost defense, and Insta utility slots");
         const mediumVisualSection = addHudSection(mediumVisuals, "Visual essentials");
         addHudCompactGroup(mediumVisualSection, "combatOverlay", "Combat Overlay", "ESP, prediction, placement, cooldown, and XP overlays");
-        addHudCompactToggle(mediumVisualSection, "fpsBoost", "FPS Boost", "Maximize rendering speed by disabling expensive visual overlays");
+        addHudCompactToggle(mediumVisualSection, "fpsBoost", "FPS Boost", "Use cheaper rendering while keeping your individual visual switches editable");
         addHudCompactToggle(mediumVisualSection, "groundGrid", "Ground Grid", "Draw a map-position grid under the game");
         const mediumColorStack = document.createElement("div");
         mediumColorStack.className = "mm-hud-color-stack";
@@ -4612,7 +4597,7 @@ const KITTY_KLIENT_VERSION = "6.8.28";
         addHudSlider(syncTuning, "syncMoveRefreshMs", "Move refresh", "How often Kitty refreshes the target movement direction");
  
         const visuals = addHudSection(visualsPage, "Visuals");
-        addHudToggle(visuals, "fpsBoost", "FPS boost", "Uses cheaper rendering and disables expensive visual overlays. Turn off to customize visuals; Firefox frame caps still apply.");
+        addHudToggle(visuals, "fpsBoost", "FPS boost", "Uses cheaper rendering without overriding individual visual switches. Browser frame caps still apply.");
         addHudToggle(visuals, "adaptiveZoom", "Adaptive zoom", "Uses your scroll zoom as a baseline: opens gently only during fast travel, draws in as enemies approach, and tightens further in close combat. Automatic changes stay silent.");
         addHudToggle(visuals, "smoothVisuals", "Polished entity styling", "Layered translucent markers, soft outlines, and relation-colored depth without covering the playfield");
         addHudToggle(visuals, "meleeRangeFade", "Melee reach highlight", "Marks only the exact tree, resource, breakable, animal, or non-team player inside your held melee weapon's real range and aim sector; your player sprite is never part of the highlight");
@@ -14296,6 +14281,15 @@ const __mmInsta = {
   normalStageMs() {
     return this.redDragonPolearmMusket ? 120 : this.tick();
   },
+  glotusNormalMusket() {
+    // Keep the special X-RedDragon timing isolated. This is the ordinary
+    // Bull + primary -> Turret + Musket sequence used by Glotus.
+    return !!(
+      !this.redDragonPolearmMusket &&
+      this.profile === "normal" &&
+      Number(this.secondaryFollowup()) === Number(__mmMusket)
+    );
+  },
   reverseProfile() {
     return [
       "reverse",
@@ -15451,7 +15445,11 @@ const __mmInsta = {
     // Combo stage one: Bull + primary, with a short tap instead of a
     // full-tick held attack.
     const __mmGearHat = this.selectDamageGear();
-    if (!__mmGearArbiter.acknowledged(__mmGearHat))
+    const __mmGlotusMusket = this.glotusNormalMusket();
+    // A normal Musket burst must not wait for the server's cosmetic echo.
+    // Commit Bull before F=1 so the equipment packet still precedes the hit.
+    __mmGlotusMusket && __mmGearArbiter.commit();
+    if (!__mmGlotusMusket && !__mmGearArbiter.acknowledged(__mmGearHat))
       return void this.schedule(
         () => this.executeBurst(),
         Math.max(8, __mmFastCheckMs()),
@@ -15459,7 +15457,7 @@ const __mmInsta = {
     if (!this.sendAttack(__mmContext.primary, !0, __mmContext.target))
       return void this.cleanup("primary-send-failed");
     this.countActivation();
-    this.scheduleRelease();
+    __mmGlotusMusket ? this.releaseAttack() : this.scheduleRelease();
     this.schedule(() => this.executeFollowup(), this.normalStageMs());
   },
   secondaryFollowup() {
@@ -15596,16 +15594,13 @@ const __mmInsta = {
       return void this.cleanup("secondary-or-turret-unavailable");
     this.pendingSecondaryWeapon = __mmSecondary;
     const __mmGearHat = this.selectSecondaryDamageGear();
-    const __mmAutomaticMusketFollowup =
-      this.automatic &&
-      this.profile === "normal" &&
-      Number(__mmSecondary) === Number(__mmMusket);
-    // Glotus dispatches the secondary projectile on the next game phase.  For
-    // Kitty's automatic Musket path, keep that timing: the Turret selection
-    // and the weapon attack are already sent in this same phase, so waiting
-    // for a cosmetic-state acknowledgement can turn a ready shot into a miss.
+    const __mmGlotusMusket = this.glotusNormalMusket();
+    // Glotus dispatches the projectile on the next game phase without waiting
+    // for the Turret visual acknowledgement. Commit the gear packet now so it
+    // remains ordered ahead of the Musket attack for both manual and Auto Insta.
+    __mmGlotusMusket && __mmGearArbiter.commit();
     if (
-      !__mmAutomaticMusketFollowup &&
+      !__mmGlotusMusket &&
       !__mmGearArbiter.acknowledged(__mmGearHat)
     )
       return void this.schedule(
@@ -15642,7 +15637,7 @@ const __mmInsta = {
     )
       return void this.cleanup("secondary-send-failed");
     ((this.pendingSecondaryWeapon = null),
-      this.scheduleRelease(),
+      __mmGlotusMusket ? this.releaseAttack() : this.scheduleRelease(),
       this.schedule(() => this.finishNormalBurst(), this.normalStageMs()));
   },
   finishNormalBurst() {
@@ -15651,6 +15646,12 @@ const __mmInsta = {
     if (!v || !v.alive || this.primaryWeapon == null)
       return void this.cleanup("finish-context-lost");
     const __mmTarget = this.target() || this.postSpikeTarget;
+    // The normal Glotus Musket combo ends once the secondary packet has been
+    // sent. Do not spend 170 ms in Kitty's Soldier/main recovery state; the
+    // regular cleanup restores the captured loadout while safety actions can
+    // still preempt that restore.
+    if (this.glotusNormalMusket())
+      return void this.cleanup("complete");
     if (this.redDragonPolearmMusket) {
       // Third X-RedDragon phase: Soldier + two immediate Polearm selects,
       // then the original 170 ms settle before its Musket reload hold.
@@ -29519,28 +29520,28 @@ function __mmDefaultMovementSample() {
     velocityX: 0, velocityY: 0, futureY: Number(v && v.y) };
 }
 function __mmDangerAnimalNearby() {
-  if (!v || !v.alive) return !1;
-  const __mmAnimals = __mmLiveStateFresh() ? __mmLiveState.animals : N,
-    // Animal pressure should only override normal movement gear at contact
-    // distance. Player Soldier range remains separately configurable.
-    __mmRange = 50,
-    __mmRangeSquared = __mmRange * __mmRange;
-  if (!Array.isArray(__mmAnimals)) return !1;
-  for (let __mmIndex = 0; __mmIndex < __mmAnimals.length; __mmIndex++) {
-    const __mmAnimal = __mmAnimals[__mmIndex];
-    if (
-      !__mmAnimal ||
-      __mmAnimal.active === !1 ||
-      __mmAnimal.alive === !1 ||
-      !__mmAnimal.visible ||
-      !__mmAnimal.hostile
-    )
-      continue;
-    const __mmDx = Number(__mmAnimal.x) - Number(v.x),
-      __mmDy = Number(__mmAnimal.y) - Number(v.y);
-    if (__mmDx * __mmDx + __mmDy * __mmDy <= __mmRangeSquared) return !0;
+  if (!v || !v.alive) return false;
+  const animals = __mmLiveStateFresh() ? __mmLiveState.animals : N,
+    self = __mmServerEntityPosition(v) || v,
+    selfVelocity = __mmThreatEntityVelocity(v), tick = __mmServerTickMs();
+  if (!Array.isArray(animals)) return false;
+  for (const animal of animals) {
+    if (!animal || animal.active === false || animal.alive === false ||
+        !animal.visible || !animal.hostile) continue;
+    // A fleeing hostile mob is harmless until it turns back. Moostafa can
+    // still hurt us while retreating, so retain its contact prediction.
+    if (__mmThreatTrapAnimalName(animal) !== "moostafa" &&
+        __mmThreatAnimalRunningAwayFromPlayer(animal)) continue;
+    const position = __mmServerEntityPosition(animal) || animal,
+      velocity = __mmThreatEntityVelocity(animal),
+      dx = position.x - self.x, dy = position.y - self.y,
+      endX = dx + (velocity.x - selfVelocity.x) * tick,
+      endY = dy + (velocity.y - selfVelocity.y) * tick,
+      radius = (Number(v.scale) || 35) + (Number(animal.scale) || 35);
+    if (__mmSegmentDistanceSquared(dx, dy, endX, endY, 0, 0) <= radius * radius)
+      return true;
   }
-  return !1;
+  return false;
 }
 function __mmUpdateFreeAnimalSoldierCheck() {
   // Position packets run the full gear resolver only once per server tick.
@@ -37023,6 +37024,9 @@ function __mmAutoPushContactSample(enemy, trap, spike) {
 function __mmAutoPushContactStalled(enemy, trap, spike) {
   return __mmAutoPushContactSample(enemy, trap, spike).stalled;
 }
+function __mmAutoPushContactSpam(enemy, trap, spike) {
+  return __mmAutoPushContactSample(enemy, trap, spike).spam;
+}
 // Only count a second spike already intersecting the first collision's
 // separation endpoint. Do not assume an arbitrary long knockback flight.
 function __mmAutoPushReplacementLethal(enemy, candidate, hazards) {
@@ -37282,7 +37286,8 @@ function __mmAutoPushAlliedSpike(__mmEnemy, __mmTrap) {
     // Reject it during selection so it cannot monopolize the plan and make
     // the controller stop while another hazard has an open push lane.
     if (!__mmNearTrap || (__mmEnemyDistance <= __mmEnemyScale + __mmSpikeScale + 1 &&
-        !__mmAutoPushContactStalled(__mmEnemy, __mmTrap, __mmSpike)))
+        !__mmAutoPushContactStalled(__mmEnemy, __mmTrap, __mmSpike) &&
+        !__mmAutoPushContactSpam(__mmEnemy, __mmTrap, __mmSpike)))
       continue;
     const __mmSpikeToEnemyAngle = Math.atan2(
         __mmEnemyY - Number(__mmSpike.y),
@@ -37565,8 +37570,45 @@ function __mmUpdateAutoPushWatchVisual() {
     route: [],
   });
 }
+const __mmAutoPushBreakAttempts = new WeakMap();
+function __mmAutoPushOneSwingPlan(object) {
+  if (!v || !v.alive || !object || !object.active || !object.isItem ||
+      __mmFriendlyStructure(object) || !Number.isFinite(object.health) || object.health <= 0 ||
+      Number(v.buildIndex) >= 0) return null;
+  const weapon = Number(__mmSelectedWeapon()), data = b && b.weapons && b.weapons[weapon];
+  if (!data || data.projectile != null || data.shield ||
+      __mmKittyManualBreakReloadRemaining(weapon) > 0 ||
+      __mmWeaponStructureDamage(v, weapon, object) + 0.001 < object.health) return null;
+  const scale = __mmThreatObjectScale(object), reach = Number(data.range) + scale - 5;
+  if (reach <= scale + (Number(v.scale) || 35) + 18) return null;
+  // Do not repeatedly trust an unconfirmed destruction prediction.
+  if (__mmAutoPushBreakAttempts.has(object)) return null;
+  return { weapon, reach };
+}
+function __mmAutoPushClearRoute(waypoint, trap) {
+  const self = __mmServerEntityPosition(v) || v;
+  const obstacles = __mmAutoPushPathObstacles(waypoint.x, waypoint.y, trap)
+    .filter(o => __mmSegmentDistanceSquared(self.x, self.y, waypoint.x, waypoint.y, o.x, o.y) < o.radius ** 2)
+    .sort((a, b) => Math.hypot(a.x-self.x,a.y-self.y)-a.radius - (Math.hypot(b.x-self.x,b.y-self.y)-b.radius));
+  for (const obstacle of obstacles) {
+    const object = obstacle.object, distance = Math.hypot(object.x-self.x,object.y-self.y);
+    const plan = __mmAutoPushOneSwingPlan(object);
+    if (plan && distance <= plan.reach) {
+      const angle = Math.atan2(object.y-self.y,object.x-self.x);
+      O.send("D", angle);
+      O.send("F", 1, angle);
+      O.send("F", 0, angle);
+      __mmTrackPlayerToolCooldown(v.sid, plan.weapon, "auto-push-clear");
+      __mmAutoPushBreakAttempts.set(object, Date.now());
+    }
+    // Keep moving while the swing travels, but never enter a live obstacle.
+    if (distance <= obstacle.radius + 18 && object.active) return false;
+  }
+  return true;
+}
 function __mmAutoPushPathObstacles(__mmGoalX, __mmGoalY, __mmTrap) {
-  const __mmObjects = __mmActiveObjectSnapshot().all,
+  const self = __mmServerEntityPosition(v) || v,
+    __mmObjects = __mmActiveObjectSnapshot().all,
     __mmPlayerScale = Number(v && v.scale) || 35,
     __mmCandidates = [];
   for (let __mmIndex = 0; __mmIndex < __mmObjects.length; __mmIndex++) {
@@ -37585,8 +37627,8 @@ function __mmAutoPushPathObstacles(__mmGoalX, __mmGoalY, __mmTrap) {
         __mmPlayerScale * __mmCombatCalibration.autoPushClearanceScale,
       __mmCorridorDistance = Math.sqrt(
         __mmSegmentDistanceSquared(
-          Number(v.x),
-          Number(v.y),
+          Number(self.x),
+          Number(self.y),
           __mmGoalX,
           __mmGoalY,
           Number(__mmObject.x),
@@ -37594,12 +37636,15 @@ function __mmAutoPushPathObstacles(__mmGoalX, __mmGoalY, __mmTrap) {
         ),
       ),
       __mmEndpointDistance = Math.min(
-        Math.hypot(Number(__mmObject.x) - Number(v.x), Number(__mmObject.y) - Number(v.y)),
+        Math.hypot(Number(__mmObject.x) - Number(self.x), Number(__mmObject.y) - Number(self.y)),
         Math.hypot(Number(__mmObject.x) - __mmGoalX, Number(__mmObject.y) - __mmGoalY),
       );
     if (__mmCorridorDistance > __mmRadius + 210 && __mmEndpointDistance > 300)
       continue;
     __mmCandidates.push({
+      object: __mmObject,
+      breakable: !!__mmAutoPushOneSwingPlan(__mmObject) ||
+        (Date.now() - (__mmAutoPushBreakAttempts.get(__mmObject) || 0) < 250),
       x: Number(__mmObject.x),
       y: Number(__mmObject.y),
       radius: __mmRadius,
@@ -37607,7 +37652,7 @@ function __mmAutoPushPathObstacles(__mmGoalX, __mmGoalY, __mmTrap) {
     });
   }
   __mmCandidates.sort((__mmA, __mmB) => __mmA.score - __mmB.score);
-  return __mmCandidates.slice(0, __mmFpsBoostEnabled ? 7 : 11);
+  return __mmCandidates;
 }
 function __mmAutoPushSegmentClear(__mmA, __mmB, __mmObstacles) {
   for (let __mmIndex = 0; __mmIndex < __mmObstacles.length; __mmIndex++) {
@@ -37638,19 +37683,20 @@ function __mmAutoPushSegmentClear(__mmA, __mmB, __mmObstacles) {
         0
     )
       continue;
-    if (__mmDistanceSquared < (__mmObstacle.radius - 1) ** 2) return !1;
+    if (!__mmObstacle.breakable && __mmDistanceSquared < (__mmObstacle.radius - 1) ** 2) return !1;
   }
   return !0;
 }
 function __mmAutoPushSolveRoute(__mmGoalX, __mmGoalY, __mmTrap) {
-  const __mmStart = { x: Number(v.x), y: Number(v.y) },
+  const self = __mmServerEntityPosition(v) || v,
+    __mmStart = { x: Number(self.x), y: Number(self.y) },
     __mmGoal = { x: __mmGoalX, y: __mmGoalY },
     __mmObstacles = __mmAutoPushPathObstacles(__mmGoalX, __mmGoalY, __mmTrap);
   if (__mmAutoPushSegmentClear(__mmStart, __mmGoal, __mmObstacles))
     return [__mmGoal];
   const __mmNodes = [__mmStart, __mmGoal],
     __mmMapScale = Number(y && y.mapScale) || Infinity;
-  for (let __mmObstacleIndex = 0; __mmObstacleIndex < __mmObstacles.length; __mmObstacleIndex++) {
+  for (let __mmObstacleIndex = 0; __mmObstacleIndex < Math.min(20, __mmObstacles.length); __mmObstacleIndex++) {
     const __mmObstacle = __mmObstacles[__mmObstacleIndex];
     for (let __mmStep = 0; __mmStep < 8; __mmStep++) {
       const __mmAngle = (__mmStep * Math.PI) / 4,
@@ -37731,7 +37777,9 @@ function __mmAutoPushSolveRoute(__mmGoalX, __mmGoalY, __mmTrap) {
   return __mmRoute;
 }
 function __mmAutoPushWaypoint(__mmGoalX, __mmGoalY, __mmEnemy, __mmTrap) {
-  const __mmNow = performance.now(),
+  const self = __mmServerEntityPosition(v) || v,
+    obstacles = __mmAutoPushPathObstacles(__mmGoalX, __mmGoalY, __mmTrap),
+    __mmNow = performance.now(),
     __mmGoalMoved =
       __mmAutoPushRouteGoalX == null ||
       Math.hypot(
@@ -37744,6 +37792,9 @@ function __mmAutoPushWaypoint(__mmGoalX, __mmGoalY, __mmEnemy, __mmTrap) {
     __mmGoalMoved ||
     __mmTargetChanged ||
     !__mmAutoPushRouteAt ||
+    !__mmAutoPushRoute.length ||
+    !__mmAutoPushRoute.every((point, index) => __mmAutoPushSegmentClear(
+      index ? __mmAutoPushRoute[index - 1] : self, point, obstacles)) ||
     __mmNow - __mmAutoPushRouteAt > 75
   ) {
     ((__mmAutoPushRoute = __mmAutoPushSolveRoute(__mmGoalX, __mmGoalY, __mmTrap)),
@@ -37752,13 +37803,9 @@ function __mmAutoPushWaypoint(__mmGoalX, __mmGoalY, __mmEnemy, __mmTrap) {
       (__mmAutoPushRouteGoalY = __mmGoalY),
       (__mmAutoPushRouteTargetSid = __mmEnemy.sid));
   }
-  while (
-    __mmAutoPushRoute.length > 1 &&
-    Math.hypot(
-      __mmAutoPushRoute[0].x - Number(v.x),
-      __mmAutoPushRoute[0].y - Number(v.y),
-    ) <= 18
-  )
+  // Only skip corners when the shortcut is collision-free.
+  while (__mmAutoPushRoute.length > 1 &&
+    __mmAutoPushSegmentClear(self, __mmAutoPushRoute[1], obstacles))
     __mmAutoPushRoute.shift();
   return __mmAutoPushRoute[0] || null;
 }
@@ -38002,10 +38049,14 @@ function __mmUpdateAutoPushSetup(__mmEnemy, __mmTrap, __mmSelectedSpike = null) 
   }
   const spike = __mmSelectedSpike || __mmAutoPushAlliedSpike(__mmEnemy, __mmTrap),
     geometry = spike && __mmAutoPushGlotusGeometry(__mmEnemy, spike);
+  const __mmContactSample = geometry && geometry.contact
+    ? __mmAutoPushContactSample(__mmEnemy, __mmTrap, spike.object)
+    : null;
   if (!geometry || geometry.targetDistance > 250 || (geometry.contact &&
-      !__mmAutoPushContactStalled(__mmEnemy, __mmTrap, spike.object))) {
+      (__mmContactSample.spam || !__mmContactSample.stalled))) {
     __mmStopAutoPushSetup(geometry && geometry.contact
-      ? "push contact reached" : "outside Glotus push range");
+      ? (__mmContactSample.spam ? "spike damage spam detected" : "push contact reached")
+      : "outside Glotus push range");
     return !1;
   }
   if (__mmAutoPushPointBlocked(geometry.standX, geometry.standY, null)) {
@@ -38019,10 +38070,14 @@ function __mmUpdateAutoPushSetup(__mmEnemy, __mmTrap, __mmSelectedSpike = null) 
     return !1;
   }
   __mmAutoPushTargetSid = __mmEnemy.sid;
-  // Glotus steers directly at one of these two points every tick. No cached
-  // waypoint or predictive attack is allowed to cut the alignment short.
-  __mmAutoPushRoute = [{ x: geometry.goalX, y: geometry.goalY }];
-  const phase = !geometry.aligned ? "route"
+  const waypoint = __mmAutoPushWaypoint(geometry.goalX, geometry.goalY, __mmEnemy, __mmTrap);
+  if (!waypoint) {
+    __mmStopAutoPushSetup("no safe alignment route");
+    __mmSetAutoPushVisualState({ active: !1, phase: "blocked", blocked: !0,
+      reason: "no safe alignment route", stoppedAt: performance.now(), route: [] });
+    return !1;
+  }
+  const phase = __mmAutoPushRoute.length > 1 || !geometry.aligned ? "route"
     : geometry.targetDistance <= (Number(v.scale) || 35) + (Number(__mmEnemy.scale) || 35) + 4
       ? "push" : "align";
   __mmSetAutoPushVisualState({ active: !0, phase, aligned: geometry.aligned,
@@ -38032,10 +38087,16 @@ function __mmUpdateAutoPushSetup(__mmEnemy, __mmTrap, __mmSelectedSpike = null) 
     standX: geometry.standX, standY: geometry.standY,
     farX: geometry.farX, farY: geometry.farY,
     goalX: geometry.goalX, goalY: geometry.goalY,
-    waypointX: geometry.goalX, waypointY: geometry.goalY,
+    waypointX: waypoint.x, waypointY: waypoint.y,
     route: __mmAutoPushRoute,
     reason: geometry.aligned ? "Glotus close stand point" : "Glotus far alignment point" });
-  __mmAutoPushSetMovement(geometry.moveAngle);
+  if (__mmAutoPushClearRoute(waypoint, __mmTrap))
+    __mmAutoPushSetMovement(Math.atan2(waypoint.y - geometry.self.y, waypoint.x - geometry.self.x));
+  else if (__mmAutoPushMoveAngle != null) {
+    __mmAutoPushMoveAngle = null;
+    Kt = null;
+    O.send("9", null);
+  }
   __mmUpdateAutoPushGear(__mmEnemy, geometry);
   __mmUpdateAutoPushShield(__mmEnemy, geometry);
   return !0;
@@ -50559,7 +50620,40 @@ function __mmEquipSoldier() {
   if (!__mmCanAutoSoldier() || v.skinIndex === 6) return;
   __mmEquipHatNow(6);
 }
+function __mmPredictedContactSoldier() {
+  const source = "safety:contact-soldier";
+  if (!__mmSoldierAutoEnabled || __mmInstaTestingModeEnabled || !v || !v.alive ||
+      !v.skins || !v.skins[6]) {
+    __mmGearArbiter.release(source);
+    return false;
+  }
+  const self = __mmServerEntityPosition(v) || v,
+    velocity = __mmPassiveSpikeVelocity(), tick = __mmServerTickMs(),
+    endX = self.x + velocity.x * tick, endY = self.y + velocity.y * tick,
+    snapshot = __mmActiveObjectSnapshot(), spikes = new Set(snapshot.spikes);
+  let contact = __mmDangerAnimalNearby();
+  for (const object of snapshot.all) {
+    if (!object || !object.active) continue;
+    const data = b && b.list && b.list[object.id],
+      cactus = object.isCactus || /cactus/i.test(String(data && data.name || ""));
+    if (!cactus && (!spikes.has(object) || __mmSpikeOwnedByUsOrAlly(object))) continue;
+    const radius = (Number(v.scale) || 35) + __mmThreatObjectScale(object);
+    if (__mmSegmentDistanceSquared(self.x, self.y, endX, endY, object.x, object.y) <= radius * radius) {
+      contact = true;
+      break;
+    }
+  }
+  if (!contact) {
+    __mmGearArbiter.release(source);
+    return false;
+  }
+  // Contact defense must override movement and attack hats on this tick.
+  __mmGearArbiter.request(source, { hat: 6 }, { priority: __mmGearIntentPriorities.safety });
+  __mmGearArbiter.commit();
+  return true;
+}
 function __mmUpdateSoldier() {
+  if (__mmPredictedContactSoldier()) return;
   if (__mmInstaTestingModeEnabled) return;
   __mmEquipSoldier();
 }
