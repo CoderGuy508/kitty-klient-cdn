@@ -2,7 +2,7 @@
 // @name         kitty klient
 // @author       Coder Guy
 // @credits       random4ik — bot script
-// @version      6.8.29
+// @version      6.9.0
 // @icon         https://cdn.discordapp.com/icons/1540876076224356437/ac27c0ce87c4c46b407ebca78e150aeb.webp?size=2048
 // @description  kitty klient — a MooMoo.io client with adaptive zoom, fast autoheal, gear automation, combat tools, predictive placement, visual markers, CC0 background music, manual quick builds, and a fully rebindable keyboard/mouse controls HUD.
 // @match        *://moomoo.io/*
@@ -259,7 +259,7 @@
     const AUTO_PUSH_FINISHER_MIGRATION_KEY = "kitty-klient-auto-push-finisher-v1";
     const ASSASSIN_RANGE_AUTO_MIGRATION_KEY = "kitty-klient-assassin-range-auto-v1";
     const TAB_SYNC_BRIDGE_KEY = "kitty-klient-tab-sync-bridge-v1";
-const KITTY_KLIENT_VERSION = "6.8.29";
+const KITTY_KLIENT_VERSION = "6.9.0";
     const KITTY_SHARED_STORAGE_APPLIED_EVENT = "KittyMooMooSharedStorageApplied";
     // FRVR's v1.8 client changed the game module and now owns its own Altcha
     // verification flow. The legacy runtime patch relies on exact bundle
@@ -297,6 +297,11 @@ const KITTY_KLIENT_VERSION = "6.8.29";
     const KITTY_ACCOUNT_DRAWER_SEEN_VERSION_KEY = "kitty-klient-account-drawer-seen-version-v1";
     const KITTY_ACCOUNT_DRAWER_REMINDER_MS = 12 * 60 * 1000;
     const KITTY_ACCOUNT_PRESENCE_MS = 20_000;
+    const KITTY_PET_STATE_MS = 5_000;
+    const KITTY_PET_HOSTING_KEY = "kitty-klient-pets-enabled-v1";
+    const KITTY_PET_MODAL_ID = "kitty-pet-player-picker";
+    const KITTY_PET_HOST_PANEL_ID = "kitty-pet-host-panel";
+    const KITTY_PET_MODE_PANEL_ID = "kitty-pet-mode-panel";
     const KITTY_COMBAT_STAT_FIELDS = Object.freeze([
         Object.freeze({ key: "totalKills", label: "Kills", recordLabel: "Best kills" }),
         Object.freeze({ key: "deaths", label: "Deaths", recordLabel: "Most deaths" }),
@@ -2136,6 +2141,7 @@ const KITTY_KLIENT_VERSION = "6.8.29";
         });
         mountKittyHomeTutorial();
         mountKittyHomeDiscord();
+        mountKittyPetHomeAction();
         clipFarmMountHomeButton();
         mountKittyMainAccountPanel();
         watchKittyAuxPanelVisibility();
@@ -5043,6 +5049,14 @@ const KITTY_KLIENT_VERSION = "6.8.29";
     let kittySupportEventsSession = "";
     let kittySupportReadBusy = false;
 
+    let kittyPetStateTimer = 0;
+    let kittyPetStateBusy = false;
+    let kittyPetLastStateAt = 0;
+    let kittyPetRosterBusy = false;
+    let kittyPetState = { self: null, pets: [] };
+    let kittyPetLastRole = "";
+    let kittyPetInputLockInstalled = false;
+
     let kittyAccountSupportRequest = null;
 
     function kittyAccountApiBase() {
@@ -5593,6 +5607,9 @@ const KITTY_KLIENT_VERSION = "6.8.29";
         kittyAccountAppealState = null;
         kittyAccountSupportState = null;
         kittyAccountSupportRequest = null;
+        kittyPetLastStateAt = 0;
+        kittyPetState = { self: null, pets: [] };
+        publishKittyPetOverlayState();
         window.__KittyKlientAccountSignedIn = false;
         window.dispatchEvent(new CustomEvent("KittyKlientAccountState", { detail: { signedIn: false } }));
     }
@@ -5620,6 +5637,699 @@ const KITTY_KLIENT_VERSION = "6.8.29";
         } finally {
             window.clearTimeout(timeout);
         }
+    }
+
+    function kittyPetHostingEnabled() {
+        try {
+            return localStorage.getItem(KITTY_PET_HOSTING_KEY) !== "0";
+        } catch {
+            return true;
+        }
+    }
+
+    function writeKittyPetHostingEnabled(enabled) {
+        try {
+            localStorage.setItem(KITTY_PET_HOSTING_KEY, enabled ? "1" : "0");
+        } catch {}
+    }
+
+    function kittyPetModeActive() {
+        return !!(kittyPetState && kittyPetState.self && kittyPetState.self.role === "pet");
+    }
+
+    function kittyPetHostSessions() {
+        const self = kittyPetState && kittyPetState.self;
+        return self && self.role === "host" && Array.isArray(self.pets) ? self.pets : [];
+    }
+
+    function installKittyPetStyles() {
+        if (document.getElementById("kitty-pet-mode-style")) return;
+        const style = document.createElement("style");
+        style.id = "kitty-pet-mode-style";
+        style.textContent = [
+            "#kitty-klient-home-actions .kitty-play-as-pet{position:relative;grid-column:1/-1;isolation:isolate;overflow:hidden;min-height:46px;border-color:#f0abfc!important;background:linear-gradient(135deg,#3b0764,#7e22ce 44%,#4c1d95)!important;box-shadow:0 0 18px rgba(217,70,239,.45)!important;cursor:pointer}",
+            "#kitty-klient-home-actions .kitty-play-as-pet .kitty-pet-hat-fragment{position:absolute;z-index:0;display:grid;place-items:center;min-width:28px;min-height:22px;color:rgba(255,255,255,.24);font:900 8px/1 system-ui,sans-serif;letter-spacing:.08em;white-space:nowrap;pointer-events:none;transform:translate(-50%,-50%) rotate(var(--kitty-pet-tilt));text-shadow:0 1px 0 rgba(45,0,74,.75)}#kitty-klient-home-actions .kitty-play-as-pet .kitty-pet-hat-fragment img{display:block;width:34px;height:30px;object-fit:contain;image-rendering:auto;filter:drop-shadow(0 1px 1px rgba(45,0,74,.75));opacity:.68}",
+            "#kitty-klient-home-actions .kitty-play-as-pet .kitty-pet-button-label{position:relative;z-index:1;font:900 13px/1 system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;letter-spacing:.12em;text-shadow:0 0 9px #fff,0 0 18px #f0abfc}",
+            "#kitty-pet-player-picker{position:fixed;z-index:2147483647;inset:0;display:grid;place-items:center;padding:16px;background:rgba(5,2,13,.78);backdrop-filter:blur(8px);color:#fff;font:600 12px/1.4 system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}",
+            "#kitty-pet-player-picker[hidden]{display:none!important}#kitty-pet-player-picker *{box-sizing:border-box}#kitty-pet-player-picker .kitty-pet-picker-card{width:min(570px,calc(100vw - 24px));max-height:min(690px,calc(100vh - 24px));display:grid;gap:12px;overflow:auto;padding:17px;border:1px solid #f0abfc;border-radius:15px;background:linear-gradient(145deg,rgba(36,7,62,.98),rgba(12,5,26,.98));box-shadow:0 24px 70px rgba(0,0,0,.7),0 0 28px rgba(217,70,239,.35)}",
+            "#kitty-pet-player-picker .kitty-pet-picker-top{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}#kitty-pet-player-picker h2{margin:0;color:#fff;font-size:20px;line-height:1.1}#kitty-pet-player-picker p{margin:5px 0 0;color:#e9d5ff;font-size:11px}#kitty-pet-player-picker button{min-height:34px;padding:0 10px;border:1px solid rgba(240,171,252,.7);border-radius:8px;background:rgba(49,10,75,.76);color:#fff;font:800 11px/1 system-ui,sans-serif;cursor:pointer;text-shadow:none}#kitty-pet-player-picker button:hover:not(:disabled){filter:brightness(1.15)}#kitty-pet-player-picker button:disabled{opacity:.5;cursor:wait}#kitty-pet-player-picker .kitty-pet-picker-close{min-width:32px;padding:0;border-color:transparent;background:transparent;font-size:20px}",
+            "#kitty-pet-player-picker .kitty-pet-picker-list{display:grid;gap:8px;max-height:410px;overflow:auto;padding-right:2px}#kitty-pet-player-picker .kitty-pet-host-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center;padding:10px;border:1px solid rgba(240,171,252,.28);border-radius:10px;background:rgba(23,7,42,.65)}#kitty-pet-player-picker .kitty-pet-host-row strong{display:block;color:#fff;font-size:12px;overflow-wrap:anywhere}#kitty-pet-player-picker .kitty-pet-host-row span{display:block;margin-top:3px;color:#d8b4fe;font-size:10px;overflow-wrap:anywhere}#kitty-pet-player-picker .kitty-pet-picker-status{min-height:17px;margin:0;color:#e9d5ff;font-size:11px}#kitty-pet-player-picker .kitty-pet-picker-status[data-kind='error']{color:#fda4af}#kitty-pet-player-picker .kitty-pet-picker-status[data-kind='ok']{color:#bbf7d0}",
+            "#kitty-pet-mode-panel,#kitty-pet-host-panel{position:fixed;z-index:2147483645;width:min(300px,calc(100vw - 22px));display:grid;gap:9px;padding:12px;border:1px solid rgba(240,171,252,.74);border-radius:12px;background:linear-gradient(145deg,rgba(35,6,59,.96),rgba(10,4,23,.96));box-shadow:0 12px 32px rgba(0,0,0,.48),0 0 18px rgba(217,70,239,.3);color:#fff;font:600 11px/1.35 system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;text-shadow:none}#kitty-pet-mode-panel{right:12px;top:12px}#kitty-pet-host-panel{left:12px;top:12px}#kitty-pet-mode-panel[hidden],#kitty-pet-host-panel[hidden]{display:none!important}#kitty-pet-mode-panel *,#kitty-pet-host-panel *{box-sizing:border-box}#kitty-pet-mode-panel h3,#kitty-pet-host-panel h3{margin:0;color:#fff;font-size:13px;letter-spacing:.05em}#kitty-pet-mode-panel p,#kitty-pet-host-panel p{margin:0;color:#e9d5ff;font-size:10px;line-height:1.4}#kitty-pet-mode-panel select,#kitty-pet-mode-panel input,#kitty-pet-mode-panel button,#kitty-pet-host-panel button{min-width:0;min-height:31px;padding:0 8px;border:1px solid rgba(240,171,252,.55);border-radius:7px;background:rgba(14,4,29,.82);color:#fff;font:800 10px/1 system-ui,sans-serif;text-shadow:none}#kitty-pet-mode-panel button,#kitty-pet-host-panel button{cursor:pointer;background:linear-gradient(135deg,#701a75,#a21caf)}#kitty-pet-mode-panel button:hover,#kitty-pet-host-panel button:hover{filter:brightness(1.14)}#kitty-pet-mode-panel .kitty-pet-select-grid{display:grid;grid-template-columns:1fr 1fr;gap:7px}#kitty-pet-mode-panel label,#kitty-pet-host-panel label{display:grid;gap:4px;color:#f5d0fe;font-size:9px;font-weight:900;letter-spacing:.04em;text-transform:uppercase}#kitty-pet-mode-panel .kitty-pet-chat{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px}#kitty-pet-mode-panel .kitty-pet-leave{border-color:rgba(251,113,133,.7);background:linear-gradient(135deg,#7f1d1d,#be123c)}#kitty-pet-host-panel .kitty-pet-host-toggle{display:flex;align-items:center;gap:7px;color:#f5d0fe;font-size:10px;font-weight:800;text-transform:none;letter-spacing:0}#kitty-pet-host-panel .kitty-pet-host-toggle input{accent-color:#e879f9}#kitty-pet-host-panel .kitty-pet-host-list{display:grid;gap:6px}#kitty-pet-host-panel .kitty-pet-host-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px;align-items:center;padding:7px;border:1px solid rgba(240,171,252,.2);border-radius:7px;background:rgba(8,2,17,.42)}#kitty-pet-host-panel .kitty-pet-host-row strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#fff;font-size:10px}#kitty-pet-host-panel .kitty-pet-host-row button{min-height:27px;padding:0 7px;border-color:rgba(251,113,133,.6);background:rgba(127,29,29,.55);font-size:9px}",
+            "html[data-kitty-pet-mode='1'] #kitty-klient-hud-launcher,html[data-kitty-pet-mode='1'] #moomoo-op-hud,html[data-kitty-pet-mode='1'] #kitty-bot-float-menu,html[data-kitty-pet-mode='1'] #kitty-bot-mouse-lock-indicator,html[data-kitty-pet-mode='1'] #kitty-bot-circle-guide{display:none!important}html[data-kitty-pet-mode='1'] #mainMenu #enterGame{display:none!important}@media(max-width:620px){#kitty-pet-mode-panel{top:auto;right:10px;bottom:10px}#kitty-pet-host-panel{left:10px;top:10px;width:min(280px,calc(100vw - 20px))}#kitty-pet-mode-panel{width:min(280px,calc(100vw - 20px))}#kitty-pet-mode-panel .kitty-pet-select-grid{grid-template-columns:1fr}}"
+        ].join("");
+        (document.head || document.documentElement).appendChild(style);
+    }
+
+    function mountKittyPetHomeAction() {
+        const actions = kittyHomeActions();
+        if (!actions) return false;
+        installKittyPetStyles();
+        let button = document.getElementById("kitty-play-as-pet");
+        if (!button) {
+            button = document.createElement("button");
+            button.id = "kitty-play-as-pet";
+            button.type = "button";
+            button.className = "kitty-play-as-pet";
+            const label = document.createElement("span");
+            label.className = "kitty-pet-button-label";
+            label.textContent = "PLAY AS PET";
+            [
+                ["BULL", "12%", "24%", "-18deg"], ["TANK", "82%", "28%", "15deg"],
+                ["BOOST", "25%", "76%", "11deg"], ["SAMURAI", "75%", "73%", "-12deg"],
+                ["WINTER", "48%", "14%", "8deg"], ["CROWN", "49%", "84%", "-8deg"],
+                ["FLIPPER", "6%", "54%", "-7deg"], ["TURBAN", "94%", "55%", "12deg"]
+            ].forEach(([text, left, top, tilt]) => {
+                const fragment = document.createElement("span");
+                fragment.className = "kitty-pet-hat-fragment";
+                fragment.dataset.kittyPetHatFragment = "1";
+                fragment.dataset.kittyPetHatFallback = text;
+                fragment.textContent = text;
+                fragment.style.left = left;
+                fragment.style.top = top;
+                fragment.style.setProperty("--kitty-pet-tilt", tilt);
+                button.appendChild(fragment);
+            });
+            button.appendChild(label);
+            button.addEventListener("click", () => { void openKittyPetPlayerPicker(); });
+        }
+        refreshKittyPetHomeActionArt(button);
+        if (button.parentElement !== actions) actions.prepend(button);
+        return true;
+    }
+
+    function refreshKittyPetHomeActionArt(button = document.getElementById("kitty-play-as-pet")) {
+        if (!button) return;
+        const catalog = kittyPetCatalog();
+        const hats = Array.isArray(catalog && catalog.hats) ? catalog.hats : [];
+        const selected = [];
+        [7, 40, 12, 6, 22, 53, 45, 55].forEach((id) => {
+            const hat = hats.find((entry) => Number(entry && entry.id) === id);
+            if (hat && !selected.some((entry) => Number(entry.id) === Number(hat.id))) selected.push(hat);
+        });
+        hats.forEach((hat) => {
+            if (selected.length >= 8 || selected.some((entry) => Number(entry.id) === Number(hat && hat.id))) return;
+            selected.push(hat);
+        });
+        button.querySelectorAll("[data-kitty-pet-hat-fragment]").forEach((fragment, index) => {
+            const hat = selected[index];
+            const imageUrl = String(hat && hat.image || "");
+            if (!imageUrl || fragment.dataset.kittyPetHatImage === imageUrl) return;
+            const image = document.createElement("img");
+            image.alt = String(hat && hat.label || fragment.dataset.kittyPetHatFallback || "MooMoo hat");
+            image.decoding = "async";
+            image.addEventListener("error", () => {
+                fragment.dataset.kittyPetHatImage = "";
+                fragment.replaceChildren(document.createTextNode(fragment.dataset.kittyPetHatFallback || "HAT"));
+            }, { once: true });
+            image.src = imageUrl;
+            fragment.dataset.kittyPetHatImage = imageUrl;
+            fragment.replaceChildren(image);
+            fragment.title = image.alt;
+        });
+    }
+
+    function kittyPetCatalog() {
+        const fallback = (length, prefix) => Array.from({ length }, (_entry, index) => ({ id: index, label: index ? `${prefix} #${index}` : `No ${prefix}` }));
+        try {
+            const runtime = window.__KittyGameRuntime;
+            const catalog = runtime && typeof runtime.getPetCatalog === "function"
+                ? runtime.getPetCatalog()
+                : null;
+            const safeImage = (value) => {
+                try {
+                    const url = new URL(String(value || ""), location.href);
+                    return url.protocol === "https:" || url.protocol === "http:" ? url.href : "";
+                } catch {
+                    return "";
+                }
+            };
+            const clean = (entries, fallbackEntries) => Array.isArray(entries) && entries.length
+                ? entries.map((entry) => ({
+                    id: Number(entry && entry.id),
+                    label: String(entry && entry.label || "").replace(/[\u0000-\u001f]/g, " ").trim().slice(0, 48),
+                    image: safeImage(entry && entry.image)
+                })).filter((entry) => Number.isInteger(entry.id) && entry.id >= 0 && entry.label)
+                : fallbackEntries;
+            return {
+                hats: clean(catalog && catalog.hats, fallback(64, "Hat")),
+                tails: clean(catalog && catalog.tails, fallback(32, "Tail")),
+                weapons: clean(catalog && catalog.weapons, fallback(32, "Weapon")),
+                variants: clean(catalog && catalog.variants, [
+                    { id: 0, label: "Normal" }, { id: 1, label: "Gold" },
+                    { id: 2, label: "Diamond" }, { id: 3, label: "Ruby" }
+                ])
+            };
+        } catch {
+            return {
+                hats: fallback(64, "Hat"), tails: fallback(32, "Tail"), weapons: fallback(32, "Weapon"),
+                variants: [{ id: 0, label: "Normal" }, { id: 1, label: "Gold" }, { id: 2, label: "Diamond" }, { id: 3, label: "Ruby" }]
+            };
+        }
+    }
+
+    function kittyPetSelectOptions(select, entries, selected) {
+        if (!select) return;
+        const desired = Number(selected);
+        const current = String(select.dataset.kittyPetEntries || "");
+        const signature = entries.map((entry) => `${entry.id}:${entry.label}`).join("|");
+        if (current !== signature) {
+            select.replaceChildren();
+            entries.forEach((entry) => {
+                const option = document.createElement("option");
+                option.value = String(entry.id);
+                option.textContent = entry.label;
+                select.appendChild(option);
+            });
+            select.dataset.kittyPetEntries = signature;
+        }
+        const match = entries.some((entry) => Number(entry.id) === desired);
+        select.value = String(match ? desired : Number(entries[0] && entries[0].id) || 0);
+    }
+
+    function setKittyPetPanelStatus(panel, message, kind = "") {
+        const status = panel && panel.querySelector("[data-kitty-pet-status]");
+        if (!status) return;
+        status.textContent = String(message || "");
+        status.dataset.kind = kind;
+    }
+
+    function publishKittyPetOverlayState() {
+        const self = kittyPetState && kittyPetState.self;
+        const role = self && self.role === "pet" ? "pet" : self && self.role === "host" ? "host" : "";
+        const pets = Array.isArray(kittyPetState && kittyPetState.pets)
+            ? kittyPetState.pets.map((pet) => ({
+                id: String(pet && pet.id || ""),
+                hostSid: String(pet && pet.hostSid || ""),
+                petUsername: String(pet && pet.petUsername || "").slice(0, 20),
+                hatId: Number(pet && pet.hatId) || 0,
+                tailId: Number(pet && pet.tailId) || 0,
+                weaponId: Number(pet && pet.weaponId) || 0,
+                weaponVariant: Number(pet && pet.weaponVariant) || 0,
+                orbitSlot: Math.max(0, Number(pet && pet.orbitSlot) || 0),
+                orbitPhase: Number(pet && pet.orbitPhase) || 0,
+                chat: String(pet && pet.chat || "").slice(0, 60),
+                chatSentAt: pet && pet.chatSentAt || null
+            })).filter((pet) => pet.id && pet.hostSid && pet.petUsername)
+            : [];
+        window.__KittyPetOverlayState = { pets, updatedAt: Date.now() };
+        window.__KittyPetMode = role === "pet";
+        document.documentElement?.setAttribute("data-kitty-pet-mode", role === "pet" ? "1" : "0");
+        if (role === "pet") {
+            try { setKittyHudOpen(false); } catch (_) {}
+        }
+        if (role !== kittyPetLastRole) {
+            kittyPetLastRole = role;
+            window.dispatchEvent(new CustomEvent("KittyKlientPetMode", { detail: { active: role === "pet", role } }));
+        }
+        renderKittyPetPanels();
+    }
+
+    function installKittyPetInputLock() {
+        if (kittyPetInputLockInstalled) return;
+        kittyPetInputLockInstalled = true;
+        const withinPetUi = (target) => target && typeof target.closest === "function" && Boolean(
+            target.closest(`#${KITTY_PET_MODE_PANEL_ID},#${KITTY_PET_MODAL_ID}`)
+        );
+        const blockGameInput = (event) => {
+            if (!kittyPetModeActive() || withinPetUi(event.target)) return;
+            event.preventDefault();
+            event.stopImmediatePropagation();
+        };
+        ["keydown", "keyup", "keypress", "mousedown", "mouseup", "pointerdown", "pointerup", "contextmenu"].forEach((type) => {
+            window.addEventListener(type, blockGameInput, true);
+        });
+        document.addEventListener("click", (event) => {
+            if (!kittyPetModeActive() || withinPetUi(event.target)) return;
+            const target = event.target;
+            if (target && typeof target.closest === "function" && target.closest("#enterGame,#moomoo-op-hud,#kitty-bot-float-menu")) {
+                event.preventDefault();
+                event.stopImmediatePropagation();
+            }
+        }, true);
+    }
+
+    async function updateKittyPetCosmetics(changes, panel = document.getElementById(KITTY_PET_MODE_PANEL_ID)) {
+        if (!kittyPetModeActive()) return;
+        try {
+            const result = await kittyAccountRequest("/v1/pets/configure", changes);
+            if (result && result.self) {
+                kittyPetState = { ...kittyPetState, self: result.self };
+                const index = (kittyPetState.pets || []).findIndex((pet) => String(pet.id) === String(result.self.id));
+                const replica = {
+                    id: result.self.id,
+                    hostSid: result.self.hostSid,
+                    petUsername: result.self.petUsername,
+                    hatId: result.self.hatId,
+                    tailId: result.self.tailId,
+                    weaponId: result.self.weaponId,
+                    weaponVariant: result.self.weaponVariant,
+                    orbitSlot: result.self.orbitSlot,
+                    orbitPhase: result.self.orbitPhase,
+                    chat: result.self.chat,
+                    chatSentAt: result.self.chatSentAt
+                };
+                const pets = Array.isArray(kittyPetState.pets) ? kittyPetState.pets.slice() : [];
+                if (index >= 0) pets[index] = replica;
+                kittyPetState = { ...kittyPetState, pets };
+                publishKittyPetOverlayState();
+            }
+            setKittyPetPanelStatus(panel, "Pet appearance saved.", "ok");
+        } catch (error) {
+            setKittyPetPanelStatus(panel, String(error && error.message || "Could not save pet appearance."), "error");
+        }
+    }
+
+    async function sendKittyPetChat(panel = document.getElementById(KITTY_PET_MODE_PANEL_ID)) {
+        if (!kittyPetModeActive() || !panel) return;
+        const input = panel.querySelector("[data-kitty-pet-chat-input]");
+        const message = String(input && input.value || "").trim().slice(0, 60);
+        if (!message) return;
+        const send = panel.querySelector("[data-kitty-pet-chat-send]");
+        if (send) send.disabled = true;
+        try {
+            const result = await kittyAccountRequest("/v1/pets/chat", { message });
+            if (input) input.value = "";
+            const self = kittyPetState.self && { ...kittyPetState.self, chat: result.message || message, chatSentAt: result.sentAt || new Date().toISOString() };
+            kittyPetState = { ...kittyPetState, self };
+            publishKittyPetOverlayState();
+            setKittyPetPanelStatus(panel, "Tiny message sent.", "ok");
+        } catch (error) {
+            setKittyPetPanelStatus(panel, String(error && error.message || "Could not send pet chat."), "error");
+        } finally {
+            if (send) send.disabled = false;
+        }
+    }
+
+    async function leaveKittyPetMode(panel = document.getElementById(KITTY_PET_MODE_PANEL_ID)) {
+        try {
+            await kittyAccountRequest("/v1/pets/leave", {});
+            kittyPetState = { self: null, pets: [] };
+            publishKittyPetOverlayState();
+            panel?.setAttribute("hidden", "");
+        } catch (error) {
+            setKittyPetPanelStatus(panel, String(error && error.message || "Could not leave Pet Mode."), "error");
+        }
+    }
+
+    function mountKittyPetModePanel() {
+        if (!document.body) return null;
+        installKittyPetStyles();
+        installKittyPetInputLock();
+        let panel = document.getElementById(KITTY_PET_MODE_PANEL_ID);
+        if (panel) return panel;
+        panel = document.createElement("section");
+        panel.id = KITTY_PET_MODE_PANEL_ID;
+        panel.setAttribute("aria-label", "Kitty Pet Mode");
+        const title = document.createElement("h3");
+        title.textContent = "PET MODE";
+        const copy = document.createElement("p");
+        copy.dataset.kittyPetCopy = "1";
+        const selectGrid = document.createElement("div");
+        selectGrid.className = "kitty-pet-select-grid";
+        const selectors = [
+            ["Hat", "hatId", "hats"], ["Tail", "tailId", "tails"],
+            ["Main weapon", "weaponId", "weapons"], ["Upgrade", "weaponVariant", "variants"]
+        ];
+        selectors.forEach(([labelText, property, catalogKey]) => {
+            const label = document.createElement("label");
+            label.textContent = labelText;
+            const select = document.createElement("select");
+            select.dataset.kittyPetSelect = property;
+            select.addEventListener("change", () => {
+                void updateKittyPetCosmetics({ [property]: Number(select.value) }, panel);
+            });
+            label.appendChild(select);
+            selectGrid.appendChild(label);
+        });
+        const chat = document.createElement("div");
+        chat.className = "kitty-pet-chat";
+        const input = document.createElement("input");
+        input.type = "text";
+        input.maxLength = 60;
+        input.placeholder = "Tiny pet chat…";
+        input.setAttribute("aria-label", "Tiny pet chat");
+        input.dataset.kittyPetChatInput = "1";
+        input.addEventListener("keydown", (event) => {
+            if (event.key !== "Enter") return;
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            void sendKittyPetChat(panel);
+        });
+        const send = document.createElement("button");
+        send.type = "button";
+        send.textContent = "Say";
+        send.dataset.kittyPetChatSend = "1";
+        send.addEventListener("click", () => { void sendKittyPetChat(panel); });
+        chat.append(input, send);
+        const leave = document.createElement("button");
+        leave.type = "button";
+        leave.className = "kitty-pet-leave";
+        leave.textContent = "Leave Pet Mode";
+        leave.addEventListener("click", () => { void leaveKittyPetMode(panel); });
+        const status = document.createElement("p");
+        status.dataset.kittyPetStatus = "1";
+        panel.append(title, copy, selectGrid, chat, leave, status);
+        document.body.appendChild(panel);
+        return panel;
+    }
+
+    async function setKittyPetHosting(enabled, panel = document.getElementById(KITTY_PET_HOST_PANEL_ID)) {
+        writeKittyPetHostingEnabled(enabled);
+        try {
+            const result = await kittyAccountRequest("/v1/pets/hosting", { enabled: !!enabled });
+            if (!enabled || Number(result && result.kicked || 0) > 0) {
+                kittyPetState = { ...kittyPetState, self: null, pets: [] };
+            }
+            publishKittyPetOverlayState();
+            setKittyPetPanelStatus(panel, enabled ? "Pet hosting is on." : "Pets are off and current pets were sent home.", "ok");
+            void syncKittyAccountPresence(true);
+        } catch (error) {
+            writeKittyPetHostingEnabled(!enabled);
+            const toggle = panel?.querySelector("[data-kitty-pet-host-toggle]");
+            if (toggle) toggle.checked = !enabled;
+            setKittyPetPanelStatus(panel, String(error && error.message || "Could not change pet hosting."), "error");
+        }
+    }
+
+    async function kickKittyPet(petUsername, panel = document.getElementById(KITTY_PET_HOST_PANEL_ID)) {
+        try {
+            await kittyAccountRequest("/v1/pets/kick", { petUsername });
+            setKittyPetPanelStatus(panel, `${petUsername} was sent home.`, "ok");
+            await syncKittyPetState(true);
+        } catch (error) {
+            setKittyPetPanelStatus(panel, String(error && error.message || "Could not remove that pet."), "error");
+        }
+    }
+
+    function mountKittyPetHostPanel() {
+        if (!document.body) return null;
+        installKittyPetStyles();
+        let panel = document.getElementById(KITTY_PET_HOST_PANEL_ID);
+        if (panel) return panel;
+        panel = document.createElement("section");
+        panel.id = KITTY_PET_HOST_PANEL_ID;
+        panel.setAttribute("aria-label", "Kitty pet host controls");
+        const title = document.createElement("h3");
+        title.textContent = "PET HOST";
+        const toggleLabel = document.createElement("label");
+        toggleLabel.className = "kitty-pet-host-toggle";
+        const toggle = document.createElement("input");
+        toggle.type = "checkbox";
+        toggle.dataset.kittyPetHostToggle = "1";
+        toggle.addEventListener("change", () => { void setKittyPetHosting(toggle.checked, panel); });
+        toggleLabel.append(toggle, document.createTextNode("Allow compatible Kitty users to join as pets"));
+        const list = document.createElement("div");
+        list.className = "kitty-pet-host-list";
+        list.dataset.kittyPetHostList = "1";
+        const status = document.createElement("p");
+        status.dataset.kittyPetStatus = "1";
+        panel.append(title, toggleLabel, list, status);
+        document.body.appendChild(panel);
+        return panel;
+    }
+
+    function renderKittyPetPanels() {
+        const signedIn = !!readKittyAccountSession();
+        const petActive = kittyPetModeActive();
+        const runtime = window.__KittyGameRuntime;
+        const snapshot = runtime && typeof runtime.getPlayerSessionSnapshot === "function"
+            ? runtime.getPlayerSessionSnapshot()
+            : null;
+        const modePanel = mountKittyPetModePanel();
+        if (modePanel) {
+            modePanel.toggleAttribute("hidden", !petActive);
+            if (petActive) {
+                const self = kittyPetState.self || {};
+                const copy = modePanel.querySelector("[data-kitty-pet-copy]");
+                if (copy) copy.textContent = `Floating with ${String(self.hostUsername || "your host")} · normal game, bots, and Esc HUD controls are locked.`;
+                const catalog = kittyPetCatalog();
+                [
+                    ["hatId", "hats"], ["tailId", "tails"],
+                    ["weaponId", "weapons"], ["weaponVariant", "variants"]
+                ].forEach(([property, catalogKey]) => {
+                    kittyPetSelectOptions(
+                        modePanel.querySelector(`[data-kitty-pet-select='${property}']`),
+                        catalog[catalogKey],
+                        self[property]
+                    );
+                });
+            }
+        }
+        const hostPanel = mountKittyPetHostPanel();
+        if (!hostPanel) return;
+        const inGame = !!(snapshot && snapshot.self && snapshot.self.sid);
+        hostPanel.toggleAttribute("hidden", !signedIn || petActive || !inGame);
+        if (!signedIn || petActive || !inGame) return;
+        const toggle = hostPanel.querySelector("[data-kitty-pet-host-toggle]");
+        if (toggle && document.activeElement !== toggle) toggle.checked = kittyPetHostingEnabled();
+        const list = hostPanel.querySelector("[data-kitty-pet-host-list]");
+        if (!list) return;
+        list.replaceChildren();
+        const pets = kittyPetHostSessions();
+        if (!pets.length) {
+            const empty = document.createElement("p");
+            empty.textContent = kittyPetHostingEnabled()
+                ? "No one is floating with you yet."
+                : "Pet hosting is currently off.";
+            list.appendChild(empty);
+            return;
+        }
+        pets.forEach((pet) => {
+            const row = document.createElement("div");
+            row.className = "kitty-pet-host-row";
+            const name = document.createElement("strong");
+            name.textContent = String(pet && pet.petUsername || "Pet");
+            const kick = document.createElement("button");
+            kick.type = "button";
+            kick.textContent = "Kick";
+            kick.addEventListener("click", () => { void kickKittyPet(String(pet && pet.petUsername || ""), hostPanel); });
+            row.append(name, kick);
+            list.appendChild(row);
+        });
+    }
+
+    function closeKittyPetPlayerPicker() {
+        document.getElementById(KITTY_PET_MODAL_ID)?.setAttribute("hidden", "");
+    }
+
+    function kittyPetPickerStatus(root, message, kind = "") {
+        const status = root?.querySelector("[data-kitty-pet-picker-status]");
+        if (!status) return;
+        status.textContent = String(message || "");
+        status.dataset.kind = kind;
+    }
+
+    function mountKittyPetPlayerPicker() {
+        if (!document.body) return null;
+        installKittyPetStyles();
+        let root = document.getElementById(KITTY_PET_MODAL_ID);
+        if (root) return root;
+        root = document.createElement("div");
+        root.id = KITTY_PET_MODAL_ID;
+        root.setAttribute("hidden", "");
+        root.setAttribute("role", "dialog");
+        root.setAttribute("aria-modal", "true");
+        root.setAttribute("aria-label", "Choose a Kitty pet host");
+        const card = document.createElement("section");
+        card.className = "kitty-pet-picker-card";
+        const top = document.createElement("div");
+        top.className = "kitty-pet-picker-top";
+        const heading = document.createElement("div");
+        const title = document.createElement("h2");
+        title.textContent = "Play as Pet";
+        const copy = document.createElement("p");
+        copy.textContent = "Choose an online Kitty user running the Pet Mode update. You become a small visual-only companion on their current MooMoo server.";
+        heading.append(title, copy);
+        const close = document.createElement("button");
+        close.type = "button";
+        close.className = "kitty-pet-picker-close";
+        close.textContent = "×";
+        close.setAttribute("aria-label", "Close player selection");
+        close.addEventListener("click", closeKittyPetPlayerPicker);
+        top.append(heading, close);
+        const list = document.createElement("div");
+        list.className = "kitty-pet-picker-list";
+        list.dataset.kittyPetPickerList = "1";
+        const status = document.createElement("p");
+        status.className = "kitty-pet-picker-status";
+        status.dataset.kittyPetPickerStatus = "1";
+        root.addEventListener("click", (event) => {
+            if (event.target === root) closeKittyPetPlayerPicker();
+        });
+        card.append(top, list, status);
+        root.appendChild(card);
+        document.body.appendChild(root);
+        return root;
+    }
+
+    async function joinKittyPetHost(host, root) {
+        if (!host || !host.username || !root) return;
+        const list = root.querySelector("[data-kitty-pet-picker-list]");
+        list?.querySelectorAll("button").forEach((button) => { button.disabled = true; });
+        kittyPetPickerStatus(root, `Joining ${host.username} as a pet…`);
+        try {
+            const result = await kittyAccountRequest("/v1/pets/join", {
+                hostUsername: String(host.username),
+                clientVersion: KITTY_KLIENT_VERSION
+            });
+            if (!result || !result.self) throw new Error("Pet Mode did not start.");
+            kittyPetState = { self: result.self, pets: [] };
+            publishKittyPetOverlayState();
+            closeKittyPetPlayerPicker();
+            void syncKittyPetState(true);
+        } catch (error) {
+            kittyPetPickerStatus(root, String(error && error.message || "Could not join that player."), "error");
+            list?.querySelectorAll("button").forEach((button) => { button.disabled = false; });
+        }
+    }
+
+    async function openKittyPetPlayerPicker() {
+        const root = mountKittyPetPlayerPicker();
+        if (!root) return;
+        root.removeAttribute("hidden");
+        const list = root.querySelector("[data-kitty-pet-picker-list]");
+        if (!readKittyAccountSession()) {
+            if (list) list.replaceChildren();
+            kittyPetPickerStatus(root, "Sign in to a Kitty account first, then choose an online player.", "error");
+            return;
+        }
+        if (kittyPetModeActive()) {
+            if (list) list.replaceChildren();
+            kittyPetPickerStatus(root, "You are already floating as a pet. Leave Pet Mode before choosing another player.", "error");
+            return;
+        }
+        if (kittyPetRosterBusy) return;
+        kittyPetRosterBusy = true;
+        if (list) {
+            list.replaceChildren();
+            const loading = document.createElement("p");
+            loading.textContent = "Finding compatible Kitty players…";
+            list.appendChild(loading);
+        }
+        kittyPetPickerStatus(root, "");
+        try {
+            const result = await kittyAccountRequest("/v1/pets/roster", {});
+            if (result && result.self && result.self.role === "pet") {
+                kittyPetState = { ...kittyPetState, self: result.self };
+                publishKittyPetOverlayState();
+                if (list) list.replaceChildren();
+                kittyPetPickerStatus(root, "You are already floating as a pet. Leave Pet Mode before choosing another player.", "error");
+                return;
+            }
+            const hosts = Array.isArray(result && result.hosts) ? result.hosts : [];
+            if (list) list.replaceChildren();
+            if (!hosts.length) {
+                const empty = document.createElement("p");
+                empty.textContent = "No compatible pet hosts are online right now.";
+                list?.appendChild(empty);
+                return;
+            }
+            hosts.forEach((host) => {
+                const row = document.createElement("div");
+                row.className = "kitty-pet-host-row";
+                const details = document.createElement("div");
+                const name = document.createElement("strong");
+                name.textContent = String(host.playerName || host.username || "Kitty player");
+                const meta = document.createElement("span");
+                meta.textContent = `@${String(host.username || "")} · ${String(host.server || "Current server")}`;
+                details.append(name, meta);
+                const choose = document.createElement("button");
+                choose.type = "button";
+                choose.textContent = "Become pet";
+                choose.addEventListener("click", () => { void joinKittyPetHost(host, root); });
+                row.append(details, choose);
+                list?.appendChild(row);
+            });
+        } catch (error) {
+            if (list) list.replaceChildren();
+            kittyPetPickerStatus(root, String(error && error.message || "Could not load compatible players."), "error");
+        } finally {
+            kittyPetRosterBusy = false;
+        }
+    }
+
+    function kittyPetGameSnapshot() {
+        try {
+            const runtime = window.__KittyGameRuntime;
+            const snapshot = runtime && typeof runtime.getPlayerSessionSnapshot === "function"
+                ? runtime.getPlayerSessionSnapshot()
+                : null;
+            return snapshot && snapshot.shard && snapshot.self && snapshot.self.sid ? snapshot : null;
+        } catch {
+            return null;
+        }
+    }
+
+    function kittyPetReplicas(value) {
+        return Array.isArray(value)
+            ? value.filter((pet) => pet && typeof pet === "object").slice(0, 24)
+            : [];
+    }
+
+    async function syncKittyPetState(force = false) {
+        if (kittyPetStateBusy || !kittyAccountApiBase()) return false;
+        const now = Date.now();
+        if (!force && now - kittyPetLastStateAt < KITTY_PET_STATE_MS) return false;
+        const session = readKittyAccountSession();
+        const snapshot = kittyPetGameSnapshot();
+        // The read-only viewer feed is intentionally available to every
+        // updated Kitty client in a shard. Pet owners still use the signed
+        // endpoint so their short-lived session stays alive from the title
+        // screen, where they do not have a MooMoo player sid at all.
+        if (!session && !snapshot) {
+            if (kittyPetState.self || (kittyPetState.pets && kittyPetState.pets.length)) {
+                kittyPetState = { self: null, pets: [] };
+                publishKittyPetOverlayState();
+            }
+            return false;
+        }
+        kittyPetStateBusy = true;
+        try {
+            const result = session
+                ? await kittyAccountRequest("/v1/pets/state", snapshot
+                    ? { shard: snapshot.shard, playerSid: String(snapshot.self.sid) }
+                    : {})
+                : await kittyAccountRequest("/v1/pets/view", { shard: snapshot.shard });
+            kittyPetState = {
+                self: session && result && result.self ? result.self : null,
+                pets: kittyPetReplicas(result && result.pets)
+            };
+            kittyPetLastStateAt = Date.now();
+            publishKittyPetOverlayState();
+            return true;
+        } catch (error) {
+            if (/sign in again/i.test(String(error && error.message || ""))) clearKittyAccountSession();
+            return false;
+        } finally {
+            kittyPetStateBusy = false;
+        }
+    }
+
+    function startKittyPets() {
+        installKittyPetInputLock();
+        mountKittyPetHomeAction();
+        renderKittyPetPanels();
+        if (!kittyPetStateTimer) {
+            kittyPetStateTimer = window.setInterval(() => { void syncKittyPetState(); }, KITTY_PET_STATE_MS);
+        }
+        if (!window.__KittyPetLifecycleBound) {
+            window.__KittyPetLifecycleBound = true;
+            window.addEventListener("KittyKlientGameRuntimeReady", () => {
+                mountKittyPetHomeAction();
+                void syncKittyPetState(true);
+            });
+            window.addEventListener("MooMooKittyMainMenuVisibility", () => {
+                mountKittyPetHomeAction();
+                renderKittyPetPanels();
+            });
+            window.addEventListener("MooMooKittyGameLeft", () => {
+                if (!readKittyAccountSession()) {
+                    kittyPetState = { self: null, pets: [] };
+                    publishKittyPetOverlayState();
+                }
+            });
+        }
+        void syncKittyPetState(true);
     }
 
     function normalizeKittyTeamChatRelayUrl(value) {
@@ -7288,6 +7998,7 @@ const KITTY_KLIENT_VERSION = "6.8.29";
             window.addEventListener("KittyKlientAccountState", () => {
                 syncKittyMainAccountDrawer();
                 syncKittyAccountFeatureLocks();
+                void syncKittyPetState(true);
                 if (readKittyAccountSession()) {
                     void refreshKittyAccountCombatRecords(true).catch(() => {});
                     void refreshKittyAccountSupportInbox(true).catch(() => {});
@@ -7298,6 +8009,7 @@ const KITTY_KLIENT_VERSION = "6.8.29";
         mountKittyMainAccountPanel();
         mountKittyAccountPanel();
         mountKittyCosmeticsPanel();
+        startKittyPets();
         window.addEventListener("MooMooKittyMainMenuVisibility", (event) => {
             // A rank-appeal dialog opened on the title screen must not stay
             // actionable after the player has entered a match.
@@ -7371,7 +8083,13 @@ const KITTY_KLIENT_VERSION = "6.8.29";
             const announced = shouldAnnounce
                 ? await kittyAccountRequest(
                     "/v1/presence/announce",
-                    { shard: snapshot.shard, playerSid: String(snapshot.self.sid), clientVersion: KITTY_KLIENT_VERSION }
+                    {
+                        shard: snapshot.shard,
+                        playerSid: String(snapshot.self.sid),
+                        clientVersion: KITTY_KLIENT_VERSION,
+                        playerName: String(snapshot.self.name || ""),
+                        petsEnabled: kittyPetHostingEnabled()
+                    }
                 )
                 : { profile: session.profile };
             // Presence announce is also the inexpensive periodic source of
@@ -7423,6 +8141,7 @@ const KITTY_KLIENT_VERSION = "6.8.29";
             if (shouldAnnounce) kittyAccountLastPresenceAt = Date.now();
             kittyAccountLastLookupAt = Date.now();
             updateKittyAccountPanel();
+            void syncKittyPetState(force);
         } catch (error) {
             if (/sign in again/i.test(String(error && error.message || ""))) {
                 clearKittyAccountSession();
@@ -9032,6 +9751,11 @@ const KITTY_KLIENT_VERSION = "6.8.29";
     // remains for custom bindings; this keeps physical Escape dependable.
     window.addEventListener("keydown", (event) => {
         if (!event || (event.key !== "Escape" && event.code !== "Escape")) return;
+        if (kittyPetModeActive()) {
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            return;
+        }
         if (clipFarm && clipFarm.vault && clipFarm.vault.root && !clipFarm.vault.root.hidden) {
             clipFarmCloseVault();
             event.preventDefault();
@@ -26769,6 +27493,194 @@ function __mmDrawInterruptedChats() {
     }
   }
 }
+// Pet Mode is a Kitty-only visual layer.  It deliberately reuses MooMoo's
+// native player renderer with a read-only clone, but never inserts an entity
+// into the game's player list or sends a game packet.  The account service
+// supplies only these compact replica descriptors to matching Kitty clients.
+const __mmKittyPetMotion = new Map();
+function __mmKittyPetReplicaRows() {
+  const __mmState = window.__KittyPetOverlayState,
+    __mmSource = __mmState && Array.isArray(__mmState.pets)
+      ? __mmState.pets
+      : [],
+    __mmRows = [];
+  for (let __mmIndex = 0; __mmIndex < __mmSource.length && __mmRows.length < 24; __mmIndex++) {
+    const __mmRaw = __mmSource[__mmIndex] || {},
+      __mmId = String(__mmRaw.id || "").slice(0, 80),
+      __mmHostSid = String(__mmRaw.hostSid || "").slice(0, 96),
+      __mmName = String(__mmRaw.petUsername || "")
+        .replace(/[\u0000-\u001f\u007f]/g, " ")
+        .replace(/\s+/g, " ")
+        .trim()
+        .slice(0, 20),
+      __mmBounded = function (__mmValue, __mmMaximum) {
+        const __mmNumber = Number(__mmValue);
+        return Number.isInteger(__mmNumber) && __mmNumber >= 0 && __mmNumber <= __mmMaximum
+          ? __mmNumber
+          : 0;
+      };
+    if (!__mmId || !__mmHostSid || !__mmName) continue;
+    __mmRows.push({
+      id: __mmId,
+      hostSid: __mmHostSid,
+      name: __mmName,
+      hatId: __mmBounded(__mmRaw.hatId, 127),
+      tailId: __mmBounded(__mmRaw.tailId, 127),
+      weaponId: __mmBounded(__mmRaw.weaponId, 63),
+      weaponVariant: __mmBounded(__mmRaw.weaponVariant, 3),
+      orbitSlot: Math.max(0, Math.min(7, __mmBounded(__mmRaw.orbitSlot, 7))),
+      orbitPhase: Number.isFinite(Number(__mmRaw.orbitPhase)) ? Number(__mmRaw.orbitPhase) : 0,
+      chat: String(__mmRaw.chat || "")
+        .replace(/[\u0000-\u001f\u007f]/g, " ")
+        .replace(/\s+/g, " ")
+        .trim()
+        .slice(0, 60),
+      chatSentAt: Number(new Date(__mmRaw.chatSentAt || 0)) || 0,
+    });
+  }
+  return __mmRows;
+}
+function __mmKittyPetHostBySid(__mmSid) {
+  if (v && String(v.sid) === String(__mmSid)) return v;
+  try {
+    const __mmFound = Rt(__mmSid);
+    if (__mmFound) return __mmFound;
+  } catch (_) {}
+  if (Array.isArray(E))
+    for (let __mmIndex = 0; __mmIndex < E.length; __mmIndex++)
+      if (E[__mmIndex] && String(E[__mmIndex].sid) === String(__mmSid)) return E[__mmIndex];
+  return null;
+}
+function __mmKittyPetPlayerSnapshot(__mmHost, __mmPet, __mmX, __mmY, __mmDirection) {
+  const __mmSnapshot = __mmAngelDeathPlayerSnapshot(__mmHost);
+  if (!__mmSnapshot) return null;
+  try { delete __mmSnapshot.__mmAngelDeathSprite; } catch (_) {}
+  ((__mmSnapshot.sid = "kitty-pet:" + __mmPet.id),
+    (__mmSnapshot.name = __mmPet.name),
+    (__mmSnapshot.team = null),
+    (__mmSnapshot.teamSID = null),
+    (__mmSnapshot.isLeader = !1),
+    (__mmSnapshot.skinIndex = __mmPet.hatId),
+    (__mmSnapshot.tailIndex = __mmPet.tailId),
+    (__mmSnapshot.weaponIndex = __mmPet.weaponId),
+    (__mmSnapshot.weaponVariant = __mmPet.weaponVariant),
+    (__mmSnapshot.weapons = [__mmPet.weaponId]),
+    (__mmSnapshot.primaryIndex = __mmPet.weaponId),
+    (__mmSnapshot.secondaryIndex = -1),
+    (__mmSnapshot.buildIndex = -1),
+    (__mmSnapshot.dir = __mmDirection),
+    (__mmSnapshot.dirPlus = 0),
+    (__mmSnapshot.x = __mmX),
+    (__mmSnapshot.y = __mmY),
+    (__mmSnapshot.x2 = __mmX),
+    (__mmSnapshot.y2 = __mmY),
+    (__mmSnapshot.alive = !0),
+    (__mmSnapshot.visible = !0),
+    (__mmSnapshot.health = 100),
+    (__mmSnapshot.maxHealth = 100));
+  return __mmSnapshot;
+}
+function __mmDrawKittyPetText(__mmPet, __mmX, __mmY, __mmScale, __mmNow) {
+  if (!k) return;
+  const __mmPreviousPreserve = k.__kittyPreserveFillStyle,
+    __mmNameY = __mmY - __mmScale * 35 - 9;
+  try {
+    (k.save(),
+      (k.__kittyPreserveFillStyle = !0),
+      (k.textAlign = "center"),
+      (k.textBaseline = "middle"),
+      (k.lineJoin = "round"),
+      (k.font = "900 8px Hammersmith One, Arial, sans-serif"),
+      (k.lineWidth = 2.5),
+      (k.strokeStyle = "rgba(5,3,12,.92)"),
+      (k.fillStyle = "#ffffff"),
+      k.strokeText(__mmPet.name, __mmX, __mmNameY),
+      k.fillText(__mmPet.name, __mmX, __mmNameY));
+    if (__mmPet.chat && __mmPet.chatSentAt && __mmNow - __mmPet.chatSentAt < 6500) {
+      const __mmChatProgress = Math.max(0, Math.min(1, (__mmNow - __mmPet.chatSentAt) / 6500)),
+        __mmChatAlpha = Math.min(1, Math.max(0, (1 - __mmChatProgress) * 1.22)),
+        __mmChatY = __mmNameY - 12,
+        __mmChat = __mmPet.chat,
+        __mmPreviousFont = k.font;
+      (k.font = "800 7px Hammersmith One, Arial, sans-serif");
+      const __mmWidth = Math.min(132, Math.max(20, Math.ceil(k.measureText(__mmChat).width) + 9));
+      ((k.globalAlpha = __mmChatAlpha),
+        (k.fillStyle = "rgba(20,7,35,.9)"),
+        k.fillRect(Math.round(__mmX - __mmWidth / 2), Math.round(__mmChatY - 6), __mmWidth, 12),
+        (k.lineWidth = 1),
+        (k.strokeStyle = "rgba(240,171,252,.9)"),
+        k.strokeRect(Math.round(__mmX - __mmWidth / 2) + .5, Math.round(__mmChatY - 6) + .5, __mmWidth - 1, 11),
+        (k.fillStyle = "#fdf4ff"),
+        k.fillText(__mmChat, __mmX, __mmChatY),
+        (k.font = __mmPreviousFont));
+    }
+  } catch (__mmKittyPetTextError) {
+  } finally {
+    try { k.restore(); } catch (_) {}
+    try {
+      if (__mmPreviousPreserve === void 0) delete k.__kittyPreserveFillStyle;
+      else k.__kittyPreserveFillStyle = __mmPreviousPreserve;
+    } catch (_) {}
+  }
+}
+function __mmDrawKittyPets() {
+  if (!k || typeof Dl !== "function") return;
+  const __mmPets = __mmKittyPetReplicaRows(),
+    __mmNow = performance.now(),
+    __mmLeft = Number(oe) - Number(_) / 2,
+    __mmTop = Number(ae) - Number(L) / 2,
+    __mmActive = new Set();
+  if (!Number.isFinite(__mmLeft) || !Number.isFinite(__mmTop)) return;
+  for (let __mmIndex = 0; __mmIndex < __mmPets.length; __mmIndex++) {
+    const __mmPet = __mmPets[__mmIndex],
+      __mmHost = __mmKittyPetHostBySid(__mmPet.hostSid);
+    if (!__mmHost || !__mmHost.alive || __mmHost.visible === !1) continue;
+    const __mmHostX = Number.isFinite(Number(__mmHost.x2)) ? Number(__mmHost.x2) : Number(__mmHost.x),
+      __mmHostY = Number.isFinite(Number(__mmHost.y2)) ? Number(__mmHost.y2) : Number(__mmHost.y),
+      __mmHostScale = Math.max(18, Number(__mmHost.scale) || 35);
+    if (!Number.isFinite(__mmHostX) || !Number.isFinite(__mmHostY)) continue;
+    const __mmPhase = __mmNow / 980 + __mmPet.orbitPhase,
+      __mmRadius = __mmHostScale * 1.62 + 32 + __mmPet.orbitSlot * 12,
+      __mmTargetX = __mmHostX + Math.cos(__mmPhase) * __mmRadius,
+      __mmTargetY = __mmHostY + Math.sin(__mmPhase) * __mmRadius * .56 - __mmHostScale * .74 + Math.sin(__mmNow / 205 + __mmPet.orbitPhase) * 3.2,
+      __mmPrevious = __mmKittyPetMotion.get(__mmPet.id),
+      __mmElapsed = __mmPrevious ? Math.max(0, Math.min(120, __mmNow - __mmPrevious.at)) : 0,
+      __mmJumped = !__mmPrevious || Math.hypot(__mmTargetX - __mmPrevious.x, __mmTargetY - __mmPrevious.y) > 430,
+      __mmBlend = __mmJumped ? 1 : 1 - Math.exp(-__mmElapsed / 88),
+      __mmMotion = __mmPrevious && !__mmJumped
+        ? {
+            x: __mmPrevious.x + (__mmTargetX - __mmPrevious.x) * __mmBlend,
+            y: __mmPrevious.y + (__mmTargetY - __mmPrevious.y) * __mmBlend,
+            at: __mmNow,
+          }
+        : { x: __mmTargetX, y: __mmTargetY, at: __mmNow };
+    ((__mmMotion.seenAt = __mmNow), __mmKittyPetMotion.set(__mmPet.id, __mmMotion), __mmActive.add(__mmPet.id));
+    const __mmScreenX = __mmMotion.x - __mmLeft,
+      __mmScreenY = __mmMotion.y - __mmTop,
+      __mmSpriteScale = .43,
+      __mmMargin = __mmHostScale * __mmSpriteScale * 2 + 86;
+    if (__mmScreenX < -__mmMargin || __mmScreenX > Number(_) + __mmMargin || __mmScreenY < -__mmMargin || __mmScreenY > Number(L) + __mmMargin) continue;
+    const __mmDirection = Math.atan2(__mmHostY - __mmMotion.y, __mmHostX - __mmMotion.x),
+      __mmSprite = __mmKittyPetPlayerSnapshot(__mmHost, __mmPet, __mmMotion.x, __mmMotion.y, __mmDirection);
+    if (!__mmSprite) continue;
+    try {
+      (k.save(),
+        (k.globalAlpha = .96),
+        k.translate(__mmScreenX, __mmScreenY),
+        k.rotate(__mmDirection),
+        k.scale(__mmSpriteScale, __mmSpriteScale),
+        Dl(__mmSprite, k),
+        k.restore());
+    } catch (__mmKittyPetRenderError) {
+      try { k.restore(); } catch (_) {}
+      continue;
+    }
+    __mmDrawKittyPetText(__mmPet, __mmScreenX, __mmScreenY, __mmSpriteScale, __mmNow);
+  }
+  for (const [__mmId, __mmState] of __mmKittyPetMotion)
+    if (!__mmActive.has(__mmId) || __mmNow - Number(__mmState && __mmState.seenAt) > 8000)
+      __mmKittyPetMotion.delete(__mmId);
+}
 Cl = function () {
   __mmBeginVisualFrame();
   __mmUpdateMeleeRangeFadeVisuals();
@@ -26801,6 +27713,7 @@ Cl = function () {
       __mmDrawHackDetectorLabels(),
       __mmDrawServerWeaponCosmetics(),
       __mmDrawDeveloperIdentities(),
+      __mmDrawKittyPets(),
       __mmDrawReloadArcs(),
       __mmDrawPlayerCooldownBars(),
       __mmDrawWeaponXpBar(),
@@ -53777,6 +54690,73 @@ window.__KittyGameRuntime = {
   },
   getPlayerBySid: function (__mmSid) {
     try { return Rt(__mmSid); } catch (_) { return null; }
+  },
+  // Pet Mode uses only the native item tables already loaded by MooMoo. This
+  // keeps the picker in step with original hats, tails, and weapons instead
+  // of inventing a separate Kitty cosmetic catalog.
+  getPetCatalog: function () {
+    try {
+      var __mmPetCatalogEntries = function (__mmEntries, __mmPrefix, __mmMaximum, __mmFallbackCount) {
+        var __mmResult = [], __mmSeen = Object.create(null), __mmAdd = function (__mmEntry, __mmIndex) {
+          var __mmId = Number(__mmEntry && __mmEntry.id != null ? __mmEntry.id : __mmIndex);
+          if (!Number.isInteger(__mmId) || __mmId < 0 || __mmId > __mmMaximum || __mmSeen[__mmId]) return;
+          __mmSeen[__mmId] = !0;
+          var __mmLabel = String(
+            (__mmEntry && (__mmEntry.name || __mmEntry.label || __mmEntry.desc)) ||
+            (__mmId === 0 && (__mmPrefix === "Hat" || __mmPrefix === "Tail") ? "No " + __mmPrefix : __mmPrefix + " #" + __mmId),
+          ).replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim().slice(0, 48);
+          var __mmImage = "",
+            __mmImageValue = __mmEntry && [
+              __mmEntry.src,
+              __mmEntry.icon,
+              __mmEntry.img,
+              __mmEntry.image,
+            ].find(function (__mmValue) {
+              return typeof __mmValue === "string" && __mmValue.trim();
+            });
+          // MooMoo's original store uses these same first-party sprite paths.
+          // Hat/accessory tables themselves do not consistently carry a src,
+          // so derive only those known native paths rather than inventing art.
+          if (!__mmImageValue && __mmId > 0) {
+            if (__mmPrefix === "Hat") __mmImageValue = "./img/hats/hat_" + __mmId + ".png";
+            else if (__mmPrefix === "Tail") __mmImageValue = "./img/accessories/access_" + __mmId + ".png";
+          }
+          try {
+            if (__mmImageValue) {
+              var __mmImageUrl = new URL(__mmImageValue, location.href);
+              if (__mmImageUrl.protocol === "https:" || __mmImageUrl.protocol === "http:")
+                __mmImage = __mmImageUrl.href;
+            }
+          } catch (_) {}
+          __mmResult.push({
+            id: __mmId,
+            label: __mmLabel || __mmPrefix + " #" + __mmId,
+            image: __mmImage,
+          });
+        };
+        if (Array.isArray(__mmEntries))
+          for (var __mmIndex = 0; __mmIndex < __mmEntries.length; __mmIndex++)
+            __mmAdd(__mmEntries[__mmIndex], __mmIndex);
+        if (!__mmResult.length)
+          for (var __mmFallback = 0; __mmFallback < __mmFallbackCount; __mmFallback++)
+            __mmAdd({ id: __mmFallback }, __mmFallback);
+        __mmResult.sort(function (__mmLeft, __mmRight) { return __mmLeft.id - __mmRight.id; });
+        return __mmResult;
+      };
+      return {
+        hats: __mmPetCatalogEntries(typeof Ze !== "undefined" ? Ze : null, "Hat", 127, 64),
+        tails: __mmPetCatalogEntries(typeof pa !== "undefined" ? pa : null, "Tail", 127, 32),
+        weapons: __mmPetCatalogEntries(b && Array.isArray(b.weapons) ? b.weapons : null, "Weapon", 63, 32),
+        variants: [
+          { id: 0, label: "Normal" },
+          { id: 1, label: "Gold" },
+          { id: 2, label: "Diamond" },
+          { id: 3, label: "Ruby" },
+        ],
+      };
+    } catch (_) {
+      return null;
+    }
   },
   getAimAngle: function () {
     try { return Ci(); } catch (_) { return 0; }
