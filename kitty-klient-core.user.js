@@ -2,7 +2,7 @@
 // @name         kitty klient
 // @author       Coder Guy
 // @credits       random4ik — bot script
-// @version      6.9.2
+// @version      6.9.3
 // @icon         https://cdn.discordapp.com/icons/1540876076224356437/ac27c0ce87c4c46b407ebca78e150aeb.webp?size=2048
 // @description  kitty klient — a MooMoo.io client with adaptive zoom, fast autoheal, gear automation, combat tools, predictive placement, visual markers, CC0 background music, manual quick builds, and a fully rebindable keyboard/mouse controls HUD.
 // @match        *://moomoo.io/*
@@ -40,7 +40,15 @@
         const operationEvent = "KittyMooMooSharedStorageOperation";
         const applyEvent = "KittyMooMooSharedStorageApply";
         const appliedEvent = "KittyMooMooSharedStorageApplied";
-        const excludedKeys = ["kitty-klient-tab-sync-bridge-v1"];
+        // Account sessions are deliberately excluded: they belong to one
+        // browser tab and must never be mirrored into another origin or tab.
+        const excludedKeys = [
+            "kitty-klient-tab-sync-bridge-v1",
+            "kitty-klient-account-state-v2",
+            "kitty-klient-account-state-tab-v2",
+            "kitty-klient-account-state-v3",
+            "kitty-klient-account-state-tab-v3"
+        ];
         // HUD writes must survive a quick respawn/reload. Other local game
         // keys can stay batched, but delaying these settings even one short
         // timer lets a sandbox navigation cancel the shared-store update.
@@ -259,7 +267,7 @@
     const AUTO_PUSH_FINISHER_MIGRATION_KEY = "kitty-klient-auto-push-finisher-v1";
     const ASSASSIN_RANGE_AUTO_MIGRATION_KEY = "kitty-klient-assassin-range-auto-v1";
     const TAB_SYNC_BRIDGE_KEY = "kitty-klient-tab-sync-bridge-v1";
-const KITTY_KLIENT_VERSION = "6.9.2";
+const KITTY_KLIENT_VERSION = "6.9.3";
     const KITTY_SHARED_STORAGE_APPLIED_EVENT = "KittyMooMooSharedStorageApplied";
     // FRVR's v1.8 client changed the game module and now owns its own Altcha
     // verification flow. The legacy runtime patch relies on exact bundle
@@ -292,8 +300,13 @@ const KITTY_KLIENT_VERSION = "6.9.2";
     const KITTY_ACCOUNT_PANEL_ID = "kitty-klient-account-panel";
     const KITTY_MAIN_ACCOUNT_PANEL_ID = "kitty-klient-main-account-panel";
     const KITTY_ACCOUNT_DEVICE_KEY = "kitty-klient-account-device-v1";
-    const KITTY_ACCOUNT_REMEMBER_KEY = "kitty-klient-account-state-v2";
-    const KITTY_ACCOUNT_SESSION_KEY = "kitty-klient-account-state-tab-v2";
+    const KITTY_ACCOUNT_LEGACY_REMEMBER_KEY = "kitty-klient-account-state-v2";
+    const KITTY_ACCOUNT_LEGACY_SESSION_KEY = "kitty-klient-account-state-tab-v2";
+    const KITTY_ACCOUNT_REMEMBER_KEY = "kitty-klient-account-state-v3";
+    const KITTY_ACCOUNT_SESSION_KEY = "kitty-klient-account-state-tab-v3";
+    const KITTY_ACCOUNT_MANUAL_CHOICE_KEY = "kitty-klient-account-manual-choice-v1";
+    const KITTY_ACCOUNT_SESSION_MODE_HEADER = "x-kitty-session-mode";
+    const KITTY_ACCOUNT_SESSION_MODE = "tab-v1";
     const KITTY_ACCOUNT_DRAWER_SEEN_VERSION_KEY = "kitty-klient-account-drawer-seen-version-v1";
     const KITTY_ACCOUNT_DRAWER_REMINDER_MS = 12 * 60 * 1000;
     const KITTY_ACCOUNT_PRESENCE_MS = 20_000;
@@ -5094,31 +5107,125 @@ const KITTY_KLIENT_VERSION = "6.9.2";
         }
     }
 
-    function readKittyAccountSession() {
-        const read = (store, key) => {
-            try {
-                const value = JSON.parse(store.getItem(key) || "null");
-                return value && typeof value === "object" && value.profile && typeof value.expiresAt === "string"
-                    ? value
-                    : null;
-            } catch {
-                return null;
-            }
-        };
-        const remembered = read(localStorage, KITTY_ACCOUNT_REMEMBER_KEY);
-        const temporary = read(sessionStorage, KITTY_ACCOUNT_SESSION_KEY);
-        const session = remembered || temporary;
-        if (!session) return null;
-        if (Number(new Date(session.expiresAt)) > Date.now()) return session;
+    function readKittyAccountStoredSession(store, key) {
         try {
-            localStorage.removeItem(KITTY_ACCOUNT_REMEMBER_KEY);
-            sessionStorage.removeItem(KITTY_ACCOUNT_SESSION_KEY);
+            const value = JSON.parse(store.getItem(key) || "null");
+            return value && typeof value === "object" && value.profile && typeof value.expiresAt === "string"
+                ? value
+                : null;
+        } catch {
+            return null;
+        }
+    }
+
+    function kittyAccountStoredUsername(session) {
+        const username = String(session && session.profile && session.profile.username || "").trim().toLowerCase();
+        return /^[a-z0-9_-]{3,20}$/.test(username) ? username : "";
+    }
+
+    function kittyAccountAccessToken(session) {
+        const token = String(session && session.token || "").trim();
+        return /^[A-Za-z0-9_-]{20,2048}\.[A-Za-z0-9_-]{20,2048}$/.test(token) ? token : "";
+    }
+
+    function kittyAccountSessionIsLive(session) {
+        return !!session && Number(new Date(session.expiresAt)) > Date.now();
+    }
+
+    function readKittyRememberedAccounts() {
+        try {
+            const value = JSON.parse(localStorage.getItem(KITTY_ACCOUNT_REMEMBER_KEY) || "null");
+            const accounts = value && value.accounts && typeof value.accounts === "object" && !Array.isArray(value.accounts)
+                ? value.accounts
+                : {};
+            const saved = {};
+            Object.entries(accounts).forEach(([username, session]) => {
+                const normalized = String(username || "").trim().toLowerCase();
+                if (normalized === kittyAccountStoredUsername(session) && kittyAccountAccessToken(session)) {
+                    saved[normalized] = { ...session, remember: true };
+                }
+            });
+            const preferred = String(value && value.preferredUsername || "").trim().toLowerCase();
+            return {
+                preferredUsername: saved[preferred] ? preferred : Object.keys(saved).sort()[0] || "",
+                accounts: saved
+            };
+        } catch {
+            return { preferredUsername: "", accounts: {} };
+        }
+    }
+
+    function writeKittyRememberedAccounts(value) {
+        try {
+            localStorage.setItem(KITTY_ACCOUNT_REMEMBER_KEY, JSON.stringify(value));
+            return true;
+        } catch {
+            return false;
+        }
+    }
+
+    function rememberKittyAccountSession(session) {
+        const username = kittyAccountStoredUsername(session);
+        if (!username || !kittyAccountAccessToken(session)) return false;
+        const remembered = readKittyRememberedAccounts();
+        remembered.accounts[username] = { ...session, remember: true };
+        remembered.preferredUsername = username;
+        return writeKittyRememberedAccounts(remembered);
+    }
+
+    function forgetKittyAccountSession(session) {
+        const username = kittyAccountStoredUsername(session);
+        if (!username) return;
+        const remembered = readKittyRememberedAccounts();
+        if (!remembered.accounts[username]) return;
+        delete remembered.accounts[username];
+        if (remembered.preferredUsername === username) {
+            remembered.preferredUsername = Object.keys(remembered.accounts).sort()[0] || "";
+        }
+        if (Object.keys(remembered.accounts).length) writeKittyRememberedAccounts(remembered);
+        else {
+            try { localStorage.removeItem(KITTY_ACCOUNT_REMEMBER_KEY); } catch {}
+        }
+    }
+
+    function removeKittyAccountStoredSession(store, key) {
+        try { store.removeItem(key); } catch {}
+    }
+
+    function readKittyAccountSession() {
+        const tabSession = readKittyAccountStoredSession(sessionStorage, KITTY_ACCOUNT_SESSION_KEY);
+        if (kittyAccountSessionIsLive(tabSession)) return tabSession;
+        if (tabSession) removeKittyAccountStoredSession(sessionStorage, KITTY_ACCOUNT_SESSION_KEY);
+
+        try {
+            if (sessionStorage.getItem(KITTY_ACCOUNT_MANUAL_CHOICE_KEY) === "1") return null;
         } catch {}
+
+        const remembered = readKittyRememberedAccounts();
+        const rememberedSession = remembered.accounts[remembered.preferredUsername] || null;
+        if (kittyAccountSessionIsLive(rememberedSession)) {
+            // A remembered account is copied into this tab once. Existing
+            // tabs keep their own session, so signing into a second account
+            // never replaces the account already playing in another tab.
+            try { sessionStorage.setItem(KITTY_ACCOUNT_SESSION_KEY, JSON.stringify(rememberedSession)); } catch {}
+            return rememberedSession;
+        }
+        if (rememberedSession) forgetKittyAccountSession(rememberedSession);
+
+        // v2 sessions used the browser-wide HTTP-only cookie. Keep them as a
+        // brief migration path so an installed update does not immediately
+        // sign a player out; the next /session refresh upgrades this tab.
+        const legacyTab = readKittyAccountStoredSession(sessionStorage, KITTY_ACCOUNT_LEGACY_SESSION_KEY);
+        if (kittyAccountSessionIsLive(legacyTab)) return { ...legacyTab, remember: false, legacyCookie: true };
+        if (legacyTab) removeKittyAccountStoredSession(sessionStorage, KITTY_ACCOUNT_LEGACY_SESSION_KEY);
+        const legacyRemembered = readKittyAccountStoredSession(localStorage, KITTY_ACCOUNT_LEGACY_REMEMBER_KEY);
+        if (kittyAccountSessionIsLive(legacyRemembered)) return { ...legacyRemembered, remember: true, legacyCookie: true };
+        if (legacyRemembered) removeKittyAccountStoredSession(localStorage, KITTY_ACCOUNT_LEGACY_REMEMBER_KEY);
         return null;
     }
 
     function kittyAccountSessionKey(session) {
-        return session ? `${String(session.expiresAt || "")}|${String(session.profile && session.profile.username || "")}` : "";
+        return session ? `${String(session.expiresAt || "")}|${String(session.profile && session.profile.username || "")}|${kittyAccountAccessToken(session).slice(-16)}` : "";
     }
 
     function kittyAccountSessionIsCurrent(generation, key) {
@@ -5488,6 +5595,8 @@ const KITTY_KLIENT_VERSION = "6.9.2";
         const ranks = kittyRankProfiles(payload && payload.profile);
         const session = {
             expiresAt: String(payload && payload.expiresAt || ""),
+            token: kittyAccountAccessToken(payload),
+            remember: remember === true,
             profile: {
                 username: String(payload && payload.profile && payload.profile.username || ""),
                 role: profile.role,
@@ -5507,19 +5616,20 @@ const KITTY_KLIENT_VERSION = "6.9.2";
                 payload && payload.profile && payload.profile.equippedCosmetics
             )
         };
-        if (!session.expiresAt || Number(new Date(session.expiresAt)) <= Date.now()) return null;
+        if (!session.token || !kittyAccountStoredUsername(session) || !kittyAccountSessionIsLive(session)) return null;
         try {
-            const target = remember ? localStorage : sessionStorage;
-            target.setItem(remember ? KITTY_ACCOUNT_REMEMBER_KEY : KITTY_ACCOUNT_SESSION_KEY, JSON.stringify(session));
+            // The active credential is always scoped to this one tab. A
+            // remembered account is an additional saved copy, never a
+            // browser-wide replacement for the tab currently playing.
+            sessionStorage.setItem(KITTY_ACCOUNT_SESSION_KEY, JSON.stringify(session));
+            sessionStorage.removeItem(KITTY_ACCOUNT_MANUAL_CHOICE_KEY);
         } catch {
             return null;
         }
-        // Some privacy configurations permit the selected store but deny the
-        // other one. A successful session write must not be reported as a
-        // failed registration merely because stale data could not be cleared.
+        if (session.remember && !rememberKittyAccountSession(session)) return null;
         try {
-            const other = remember ? sessionStorage : localStorage;
-            other.removeItem(remember ? KITTY_ACCOUNT_SESSION_KEY : KITTY_ACCOUNT_REMEMBER_KEY);
+            localStorage.removeItem(KITTY_ACCOUNT_LEGACY_REMEMBER_KEY);
+            sessionStorage.removeItem(KITTY_ACCOUNT_LEGACY_SESSION_KEY);
         } catch {}
         kittyAccountSessionGeneration += 1;
         window.__KittyKlientAccountSignedIn = true;
@@ -5550,18 +5660,9 @@ const KITTY_KLIENT_VERSION = "6.9.2";
                 ? kittyWeaponCosmetics(session.weaponCosmetics, profile.weaponCosmetic, profile.equippedCosmetics)
                 : kittyWeaponCosmetics(weaponCosmetics, profile.weaponCosmetic, profile.equippedCosmetics)
         };
-        const stores = [
-            [localStorage, KITTY_ACCOUNT_REMEMBER_KEY],
-            [sessionStorage, KITTY_ACCOUNT_SESSION_KEY]
-        ];
         try {
-            for (const [store, key] of stores) {
-                const value = JSON.parse(store.getItem(key) || "null");
-                if (value && value.expiresAt === session.expiresAt) {
-                    store.setItem(key, JSON.stringify(next));
-                    return;
-                }
-            }
+            sessionStorage.setItem(KITTY_ACCOUNT_SESSION_KEY, JSON.stringify(next));
+            if (next.remember) rememberKittyAccountSession(next);
         } catch {
             // The current session keeps working even if browser storage is
             // unavailable between sign-in and this background rank refresh.
@@ -5601,6 +5702,8 @@ const KITTY_KLIENT_VERSION = "6.9.2";
 
     function clearKittyAccountSession(options = {}) {
         const revealLogin = options && options.revealLogin === true;
+        const keepRemembered = options && options.keepRemembered === true;
+        const previousSession = readKittyAccountSession();
         kittyAccountSessionGeneration += 1;
         if (kittyAccountCombatSyncTimer) window.clearTimeout(kittyAccountCombatSyncTimer);
         kittyAccountCombatSyncTimer = 0;
@@ -5608,8 +5711,11 @@ const KITTY_KLIENT_VERSION = "6.9.2";
         kittyAccountCombatRecordsLoadedForSession = "";
         applyKittyAccountCombatRecords(null);
         try {
-            localStorage.removeItem(KITTY_ACCOUNT_REMEMBER_KEY);
             sessionStorage.removeItem(KITTY_ACCOUNT_SESSION_KEY);
+            sessionStorage.removeItem(KITTY_ACCOUNT_LEGACY_SESSION_KEY);
+            sessionStorage.setItem(KITTY_ACCOUNT_MANUAL_CHOICE_KEY, "1");
+            if (!keepRemembered && previousSession && previousSession.remember) forgetKittyAccountSession(previousSession);
+            if (!keepRemembered && previousSession && previousSession.legacyCookie) localStorage.removeItem(KITTY_ACCOUNT_LEGACY_REMEMBER_KEY);
         } catch {}
         window.__KittyVerifiedRoles = Object.create(null);
         window.__KittyVerifiedRoleStates = Object.create(null);
@@ -5635,15 +5741,20 @@ const KITTY_KLIENT_VERSION = "6.9.2";
     async function kittyAccountRequest(path, body) {
         const base = kittyAccountApiBase();
         if (!base) throw new Error("Kitty accounts are not connected to their secure service yet.");
+        const token = kittyAccountAccessToken(readKittyAccountSession());
         const controller = typeof AbortController === "function" ? new AbortController() : null;
         const timeout = window.setTimeout(() => controller && controller.abort(), 8000);
         try {
             const response = await fetch(base + path, {
                 method: "POST",
                 cache: "no-store",
-                credentials: "include",
+                // New tab sessions authenticate with their own bearer token.
+                // Old v2 sessions temporarily keep the cookie migration path.
+                credentials: token ? "omit" : "include",
                 headers: {
-                    "content-type": "application/json"
+                    "content-type": "application/json",
+                    [KITTY_ACCOUNT_SESSION_MODE_HEADER]: KITTY_ACCOUNT_SESSION_MODE,
+                    ...(token ? { authorization: "Bearer " + token } : {})
                 },
                 body: JSON.stringify(body),
                 signal: controller ? controller.signal : undefined
@@ -6612,6 +6723,10 @@ const KITTY_KLIENT_VERSION = "6.9.2";
         kittySupportEvents = null;
         kittySupportEventsSession = key;
         if (!session || !kittyAccountApiBase()) { updateKittyMessageDots(); return; }
+        // EventSource cannot attach the tab's Authorization header. The
+        // regular authenticated inbox refresh remains active for tab sessions
+        // instead of falling back to a browser-wide cookie from another tab.
+        if (kittyAccountAccessToken(session)) { updateKittyMessageDots(); return; }
         const events = new EventSource(kittyAccountApiBase() + "/v1/account/support-events", { withCredentials: true });
         kittySupportEvents = events;
         events.onmessage = (event) => {
@@ -6803,6 +6918,12 @@ const KITTY_KLIENT_VERSION = "6.9.2";
         const session = readKittyAccountSession();
         if (!session || !kittyAccountApiBase()) return null;
         const result = await kittyAccountRequest("/v1/auth/session", {});
+        if (result && result.token && !kittyAccountAccessToken(session)) {
+            // Upgrade the cookie-only v2 session in place. The server sends a
+            // tab-specific replacement, preserving its original Remember Me
+            // lifetime without changing any other open tab.
+            writeKittyAccountSession(result, result.remember === true || session.remember === true);
+        }
         if (result && result.profile) {
             updateKittyAccountSessionProfile(result.profile, result.weaponCosmetics, result.nameCosmetics);
             applyKittyAccountSelfProfile(result.profile);
@@ -7690,10 +7811,17 @@ const KITTY_KLIENT_VERSION = "6.9.2";
         signOut.type = "button";
         signOut.className = "kitty-account-sign-out";
         signOut.textContent = "Sign out";
+        const switchAccount = document.createElement("button");
+        switchAccount.type = "button";
+        switchAccount.className = "kitty-account-switch";
+        switchAccount.textContent = "Use another";
         const signedInWrap = document.createElement("div");
         signedInWrap.className = "kitty-account-signed-in-wrap";
-        signedInWrap.append(signedIn, signOut);
-        if (isMainAccountPanel) signOut.hidden = true;
+        signedInWrap.append(signedIn, switchAccount, signOut);
+        if (isMainAccountPanel) {
+            signOut.hidden = true;
+            switchAccount.hidden = true;
+        }
         const accountSettings = document.createElement("button");
         accountSettings.type = "button";
         accountSettings.className = "kitty-account-settings";
@@ -7875,6 +8003,13 @@ const KITTY_KLIENT_VERSION = "6.9.2";
         supportSend.addEventListener("click", () => sendKittyAccountSupportReply(supportPanel()));
         deleteButton.addEventListener("click", () => deleteKittyAccount(panel));
         accountSettings.addEventListener("click", openKittyAccountSettings);
+        switchAccount.addEventListener("click", () => {
+            // This is intentionally local only: it leaves every saved account
+            // and every other browser tab signed in, then opens this tab's
+            // credentials form for a different Kitty account.
+            clearKittyAccountSession({ revealLogin: true, keepRemembered: true });
+            setKittyAccountPanelStatus(panel, "This tab is ready for another Kitty account.", "ok");
+        });
         signOut.addEventListener("click", async () => {
             const session = readKittyAccountSession();
             signOut.disabled = true;
@@ -8051,7 +8186,12 @@ const KITTY_KLIENT_VERSION = "6.9.2";
         });
         if (!kittyAccountDiscordPollTimer) {
             kittyAccountDiscordPollTimer = window.setInterval(() => {
-                if (readKittyAccountSession()) void refreshKittyAccountDiscord().catch(() => {});
+                const session = readKittyAccountSession();
+                if (!session) return;
+                void refreshKittyAccountDiscord().catch(() => {});
+                // Header-authenticated tab sessions cannot use EventSource,
+                // so keep their private inbox current with the same cadence.
+                if (kittyAccountAccessToken(session)) void refreshKittyAccountSupportInbox().catch(() => {});
             }, 10_000);
         }
         if (readKittyAccountSession()) {
