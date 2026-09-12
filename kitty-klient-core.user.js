@@ -6082,8 +6082,8 @@ const KITTY_KLIENT_VERSION = "6.9.1";
         const inGame = !!(snapshot && snapshot.self && snapshot.self.sid);
         const mainMenu = document.getElementById("mainMenu");
         const menuVisible = !!(mainMenu && window.getComputedStyle(mainMenu).display !== "none");
-        hostPanel.toggleAttribute("hidden", !signedIn || petActive || !inGame || !menuVisible);
-        if (!signedIn || petActive || !inGame || !menuVisible) return;
+        hostPanel.toggleAttribute("hidden", !signedIn || petActive || !menuVisible);
+        if (!signedIn || petActive || !menuVisible) return;
         const toggle = hostPanel.querySelector("[data-kitty-pet-host-toggle]");
         if (toggle && document.activeElement !== toggle) toggle.checked = kittyPetHostingEnabled();
         const list = hostPanel.querySelector("[data-kitty-pet-host-list]");
@@ -6093,7 +6093,9 @@ const KITTY_KLIENT_VERSION = "6.9.1";
         if (!pets.length) {
             const empty = document.createElement("p");
             empty.textContent = kittyPetHostingEnabled()
-                ? "No one is floating with you yet."
+                ? inGame
+                    ? "No one is floating with you yet."
+                    : "Pet hosting is on and will be available when you join a server."
                 : "Pet hosting is currently off.";
             list.appendChild(empty);
             return;
