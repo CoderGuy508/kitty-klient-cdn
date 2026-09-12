@@ -2,7 +2,7 @@
 // @name         kitty klient
 // @author       Coder Guy
 // @credits       random4ik — bot script
-// @version      6.9.1
+// @version      6.9.2
 // @icon         https://cdn.discordapp.com/icons/1540876076224356437/ac27c0ce87c4c46b407ebca78e150aeb.webp?size=2048
 // @description  kitty klient — a MooMoo.io client with adaptive zoom, fast autoheal, gear automation, combat tools, predictive placement, visual markers, CC0 background music, manual quick builds, and a fully rebindable keyboard/mouse controls HUD.
 // @match        *://moomoo.io/*
@@ -259,7 +259,7 @@
     const AUTO_PUSH_FINISHER_MIGRATION_KEY = "kitty-klient-auto-push-finisher-v1";
     const ASSASSIN_RANGE_AUTO_MIGRATION_KEY = "kitty-klient-assassin-range-auto-v1";
     const TAB_SYNC_BRIDGE_KEY = "kitty-klient-tab-sync-bridge-v1";
-const KITTY_KLIENT_VERSION = "6.9.1";
+const KITTY_KLIENT_VERSION = "6.9.2";
     const KITTY_SHARED_STORAGE_APPLIED_EVENT = "KittyMooMooSharedStorageApplied";
     // FRVR's v1.8 client changed the game module and now owns its own Altcha
     // verification flow. The legacy runtime patch relies on exact bundle
@@ -5032,6 +5032,9 @@ const KITTY_KLIENT_VERSION = "6.9.1";
  
     let kittyAccountPresenceTimer = 0;
     let kittyAccountPresenceBusy = false;
+    // Every asynchronous account task carries this generation. Logging out
+    // advances it so an older request can never restore a signed-out UI.
+    let kittyAccountSessionGeneration = 0;
     let kittyAccountLastPresenceAt = 0;
     let kittyAccountLastLookupAt = 0;
     let kittyAccountLastShard = "";
@@ -5116,6 +5119,12 @@ const KITTY_KLIENT_VERSION = "6.9.1";
 
     function kittyAccountSessionKey(session) {
         return session ? `${String(session.expiresAt || "")}|${String(session.profile && session.profile.username || "")}` : "";
+    }
+
+    function kittyAccountSessionIsCurrent(generation, key) {
+        return generation === kittyAccountSessionGeneration &&
+            key !== "" &&
+            key === kittyAccountSessionKey(readKittyAccountSession());
     }
 
     function syncKittyTeamChatAuth() {
@@ -5512,6 +5521,7 @@ const KITTY_KLIENT_VERSION = "6.9.1";
             const other = remember ? sessionStorage : localStorage;
             other.removeItem(remember ? KITTY_ACCOUNT_SESSION_KEY : KITTY_ACCOUNT_REMEMBER_KEY);
         } catch {}
+        kittyAccountSessionGeneration += 1;
         window.__KittyKlientAccountSignedIn = true;
         window.dispatchEvent(new CustomEvent("KittyKlientAccountState", { detail: { signedIn: true } }));
         return session;
@@ -5589,7 +5599,9 @@ const KITTY_KLIENT_VERSION = "6.9.1";
         window.__KittyVerifiedRoleStates = states;
     }
 
-    function clearKittyAccountSession() {
+    function clearKittyAccountSession(options = {}) {
+        const revealLogin = options && options.revealLogin === true;
+        kittyAccountSessionGeneration += 1;
         if (kittyAccountCombatSyncTimer) window.clearTimeout(kittyAccountCombatSyncTimer);
         kittyAccountCombatSyncTimer = 0;
         kittyAccountCombatSyncAgain = false;
@@ -5607,11 +5619,17 @@ const KITTY_KLIENT_VERSION = "6.9.1";
         kittyAccountAppealState = null;
         kittyAccountSupportState = null;
         kittyAccountSupportRequest = null;
+        kittyAccountLastPresenceAt = 0;
+        kittyAccountLastLookupAt = 0;
+        kittyAccountLastShard = "";
         kittyPetLastStateAt = 0;
         kittyPetState = { self: null, pets: [] };
         publishKittyPetOverlayState();
         window.__KittyKlientAccountSignedIn = false;
         window.dispatchEvent(new CustomEvent("KittyKlientAccountState", { detail: { signedIn: false } }));
+        syncKittyMainAccountDrawer();
+        if (revealLogin && kittyMainMenuIsVisible()) setKittyMainAccountDrawerOpen(true);
+        updateKittyAccountPanel();
     }
 
     async function kittyAccountRequest(path, body) {
@@ -6277,6 +6295,8 @@ const KITTY_KLIENT_VERSION = "6.9.1";
         const now = Date.now();
         if (!force && now - kittyPetLastStateAt < KITTY_PET_STATE_MS) return false;
         const session = readKittyAccountSession();
+        const sessionGeneration = kittyAccountSessionGeneration;
+        const sessionKey = kittyAccountSessionKey(session);
         const snapshot = kittyPetGameSnapshot();
         // The read-only viewer feed is intentionally available to every
         // updated Kitty client in a shard. Pet owners still use the signed
@@ -6296,6 +6316,7 @@ const KITTY_KLIENT_VERSION = "6.9.1";
                     ? { shard: snapshot.shard, playerSid: String(snapshot.self.sid) }
                     : {})
                 : await kittyAccountRequest("/v1/pets/view", { shard: snapshot.shard });
+            if (session && !kittyAccountSessionIsCurrent(sessionGeneration, sessionKey)) return false;
             kittyPetState = {
                 self: session && result && result.self ? result.self : null,
                 pets: kittyPetReplicas(result && result.pets)
@@ -6304,6 +6325,7 @@ const KITTY_KLIENT_VERSION = "6.9.1";
             publishKittyPetOverlayState();
             return true;
         } catch (error) {
+            if (session && !kittyAccountSessionIsCurrent(sessionGeneration, sessionKey)) return false;
             if (/sign in again/i.test(String(error && error.message || ""))) clearKittyAccountSession();
             return false;
         } finally {
@@ -6393,6 +6415,8 @@ const KITTY_KLIENT_VERSION = "6.9.1";
     async function syncKittyAccountCombatRecords(force = false) {
         const session = readKittyAccountSession();
         if (!session || !kittyAccountApiBase()) return false;
+        const sessionGeneration = kittyAccountSessionGeneration;
+        const sessionKey = kittyAccountSessionKey(session);
         if (kittyAccountCombatSyncBusy) {
             kittyAccountCombatSyncAgain = true;
             return false;
@@ -6405,9 +6429,11 @@ const KITTY_KLIENT_VERSION = "6.9.1";
                 "/v1/account/combat-records",
                 { stats }
             );
-            applyKittyAccountCombatRecords(result && result.records, kittyAccountSessionKey(session));
+            if (!kittyAccountSessionIsCurrent(sessionGeneration, sessionKey)) return false;
+            applyKittyAccountCombatRecords(result && result.records, sessionKey);
             return true;
         } catch (error) {
+            if (!kittyAccountSessionIsCurrent(sessionGeneration, sessionKey)) return false;
             if (/sign in again/i.test(String(error && error.message || ""))) clearKittyAccountSession();
             return false;
         } finally {
@@ -7860,8 +7886,8 @@ const KITTY_KLIENT_VERSION = "6.9.1";
                     // is temporarily unavailable; the server token expires.
                 }
             }
-            clearKittyAccountSession();
-            updateKittyAccountPanel();
+            clearKittyAccountSession({ revealLogin: true });
+            setKittyAccountPanelStatus(panel, "Signed out. You can sign in with a different Kitty account.", "ok");
             signOut.disabled = false;
         });
         return panel;
@@ -8041,6 +8067,8 @@ const KITTY_KLIENT_VERSION = "6.9.1";
         const session = readKittyAccountSession();
         const runtime = window.__KittyGameRuntime;
         if (!kittyAccountApiBase() || !session || !runtime || typeof runtime.getPlayerSessionSnapshot !== "function") return;
+        const sessionGeneration = kittyAccountSessionGeneration;
+        const sessionKey = kittyAccountSessionKey(session);
         const now = Date.now();
         const socket = window.__KittyGameSocket;
         if (!socket || socket.readyState !== 1) return;
@@ -8098,6 +8126,7 @@ const KITTY_KLIENT_VERSION = "6.9.1";
                     }
                 )
                 : { profile: session.profile };
+            if (!kittyAccountSessionIsCurrent(sessionGeneration, sessionKey)) return;
             // Presence announce is also the inexpensive periodic source of
             // truth for staff-issued cosmetics. Keep the local session in
             // sync so a newly enabled reward appears without a manual logout.
@@ -8119,6 +8148,7 @@ const KITTY_KLIENT_VERSION = "6.9.1";
                 roles[String(snapshot.self.sid)] = announcedProfile;
             }
             const lookup = await kittyAccountRequest("/v1/presence/lookup", { shard: snapshot.shard, sids });
+            if (!kittyAccountSessionIsCurrent(sessionGeneration, sessionKey)) return;
             if (lookup && Array.isArray(lookup.profiles)) {
                 lookup.profiles.forEach((profile) => {
                     const verifiedProfile = {
@@ -8149,6 +8179,7 @@ const KITTY_KLIENT_VERSION = "6.9.1";
             updateKittyAccountPanel();
             void syncKittyPetState(force);
         } catch (error) {
+            if (!kittyAccountSessionIsCurrent(sessionGeneration, sessionKey)) return;
             if (/sign in again/i.test(String(error && error.message || ""))) {
                 clearKittyAccountSession();
                 updateKittyAccountPanel();
