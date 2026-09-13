@@ -2,7 +2,7 @@
 // @name         kitty klient
 // @author       Coder Guy
 // @credits       random4ik — bot script
-// @version      6.9.14
+// @version      7.0.0
 // @icon         https://cdn.discordapp.com/icons/1540876076224356437/ac27c0ce87c4c46b407ebca78e150aeb.webp?size=2048
 // @description  kitty klient — a MooMoo.io client with adaptive zoom, fast autoheal, gear automation, combat tools, predictive placement, visual markers, CC0 background music, manual quick builds, and a fully rebindable keyboard/mouse controls HUD.
 // @match        *://moomoo.io/*
@@ -267,7 +267,7 @@
     const AUTO_PUSH_FINISHER_MIGRATION_KEY = "kitty-klient-auto-push-finisher-v1";
     const ASSASSIN_RANGE_AUTO_MIGRATION_KEY = "kitty-klient-assassin-range-auto-v1";
     const TAB_SYNC_BRIDGE_KEY = "kitty-klient-tab-sync-bridge-v1";
-const KITTY_KLIENT_VERSION = "6.9.14";
+const KITTY_KLIENT_VERSION = "7.0.0";
     const KITTY_SHARED_STORAGE_APPLIED_EVENT = "KittyMooMooSharedStorageApplied";
     // FRVR's v1.8 client changed the game module and now owns its own Altcha
     // verification flow. The legacy runtime patch relies on exact bundle
@@ -4451,12 +4451,12 @@ const KITTY_KLIENT_VERSION = "6.9.14";
         addHudToggle(automationSurvival, "autoRespawn", "Auto respawn", "Return after a death when the server permits it");
         addHudToggle(automationSurvival, "soldierAuto", "Soldier helmet", "Use Soldier gear for safe idle and combat-range protection");
         addHudToggle(automationSurvival, "movementGear", "Movement gear", "Use speed gear and an adaptive tail while moving");
-        addHudToggle(automationSurvival, "musketRecharge", "Musket recharge", "Keep your manually selected weapon held while it reloads; it never force-switches to the other hand");
+        addHudToggle(automationSurvival, "musketRecharge", "Glotus weapon reload", "Match Glotus UseFastest: select the faster hand while it reloads, then the other hand, and return to the faster hand when both are ready. Native 1/2 choices are temporary while this is on");
         addHudToggle(automationSurvival, "autoPurchase", "Auto purchase", "Buy the configured progression when the required resources are available, then Halo as the final purchase");
 
         const automationDefense = addHudSection(automationPage, "Defense & escape");
         addHudToggle(automationDefense, "trapEscape", "Trap escape", "Break the locking trap and build a safe exit behind you. During a rapid re-trap loop, a reachable one-hit pit is Hammer-broken and replaced with your own Pit Trap instead of adding more rear spikes.");
-        addHudToggle(automationDefense, "antiInsta", "Anti-insta", "Defend against imminent high-damage combo windows");
+        addHudToggle(automationDefense, "antiInsta", "Anti-insta", "Pre-heal a damaged player before a confirmed lethal hit, then defend against the combo window");
         addHudToggle(automationDefense, "antiSync", "Anti Sync", "When two or more hostile hits are predicted to arrive together, pre-heal and hold Shield toward the combined impact");
         addHudToggle(automationDefense, "antiBoostInsta", "Anti-boost insta", "React to boosted hostile approaches with the defensive combo path");
         addHudToggle(automationDefense, "antiCollision", "Collision guard", "Avoid unsafe close-range collisions");
@@ -4698,7 +4698,7 @@ const KITTY_KLIENT_VERSION = "6.9.14";
 
         const kittyInstas = addHudSection(combatPage, "Kitty Insta library");
         addHudToggle(kittyInstas, "autoBowUpgradeInsta", "Bow Upgrade Insta", "R prefers a ready close-range normal Insta and chains the upgrade shots only when compatible; otherwise a fully ready Bow → Crossbow → Musket run is the ranged fallback. Friendly and personal-turret shots can trigger it too");
-        addHudToggle(kittyInstas, "reverseInsta", "Reverse R order", "R uses Turret + secondary first, then Bull + primary; Shift+R remains Kitty's Crossbow/Musket boost Insta");
+        addHudToggle(kittyInstas, "reverseInsta", "Reverse R order", "R uses Turret + secondary first, then Bull + primary. Polearm + Great Hammer waits for the predicted Turret hit before the Bull/Polearm phase; Shift+R remains Kitty's Crossbow/Musket boost Insta");
         addHudToggle(kittyInstas, "oneTickInsta", "One-Tick Insta", "Shift+P toggles the secondary-first one-server-tick combo; projectile timing is prediction-adjusted");
         addHudToggle(kittyInstas, "sevenShameInsta", "7-Shame Insta", "When the nearest enemy's server-reported Shame count is exactly 7, fire a fully ready lethal Insta. It stays off when that count is unavailable.");
         addHudToggle(kittyInstas, "appleInsta", "Apple Insta", "Automatically uses Turret + Great Hammer, then Bull + Polearm against a nearby Soldier-helmet target only when the Hammer landing lane has open space");
@@ -4710,7 +4710,7 @@ const KITTY_KLIENT_VERSION = "6.9.14";
         addHudToggle(kittyInstas, "spikeSync", "Base Spike Sync", "Place every legal contact spike around an in-range enemy, then use Bull + primary and a next-tick Turret follow-up. Does not use Tank gear");
         addHudToggle(kittyInstas, "spikeSyncHammer", "Spike Sync Hammer", "Find one Great Hammer angle that hits both an enemy and a one-hit breakable, place a legal contact spike, then stack ready Turret and primary damage");
         addHudToggle(kittyInstas, "velTickInsta", "VelTick Insta", "T watches the predicted 220–245px window, leads with Turret, then sends Bull + Polearm on the next tick");
-        addHudToggle(kittyInstas, "tankPredictInsta", "Tank Window Insta", "Learns repeat Tank Gear pulses and reads the next-hat signal. It leads a Turret into that vulnerable tick, then sends Bull + main and an optional Musket follow-up.");
+        addHudToggle(kittyInstas, "tankPredictInsta", "Tank Vel Predict RevInsta", "Learns repeat Tank Gear pulses, next-hat signals, and fresh movement reversals. It fires only when the Turret can land inside the learned Tank window, then sends Bull + main and an optional Musket follow-up.");
         addHudToggle(kittyInstas, "polearmAids", "Polearm Aids", "Against a target in your or an ally's trap: Tank + Great Hammer, then Bull + Polearm and a legal contact spike");
         addHudToggle(kittyInstas, "autoPushInsta", "Auto Push", "Uses Glotus far-point alignment and close-point steering within 250 pixels; pauses while movement keys are held");
         addHudToggle(kittyInstas, "boostSpikeKill", "Boost + Spike", "G uses x-RedDragon's 80 ms pattern: two side spikes, two close diagonals within 150 units, then a forward Boost Pad. Kitty skips any illegal slot.");
@@ -11803,6 +11803,10 @@ let __mmAntiInstaTimer = 0,
   __mmAntiInstaLastAt = 0,
   __mmAntiInstaUntil = 0,
   __mmAntiInstaActionTimer = 0,
+  // Pre-Insta healing is keyed to a forecasted hit window. It sends the
+  // required refill once, then waits for the server state to catch up.
+  __mmAntiInstaPreHealImpactAt = 0,
+  __mmAntiInstaPreHealLastAt = 0,
   // A lethal window can briefly borrow Trap Escape's weapon channel for a
   // Shield block. The escape loop is resumed as soon as that exact block
   // finishes; this is never a general trap-escape disable.
@@ -12305,6 +12309,9 @@ let __mmTrapAttackTimer = 0,
   __mmTrapAttackLastHoldAt = 0,
   __mmTrapAttackHeldWeapon = null,
   __mmTrapManualReadyAt = 0,
+  // A credible incoming Insta temporarily owns the trap-break window. This
+  // expires on its own so normal escape resumes as soon as the danger passes.
+  __mmTrapEscapeDangerPauseUntil = 0,
   __mmTrapWeaponSelectAt = 0,
   __mmTrapHatRestoreTimer = 0,
   __mmTrapHatRestoreAttempts = 0,
@@ -15942,6 +15949,9 @@ const __mmInsta = {
   automaticRetryUntil: 0,
   shieldWaitStartedAt: 0,
   tankPredictPlan: null,
+  // Absolute arrival time for the Turret shot in the Polearm + Great Hammer
+  // reverse combo. The Bull/Polearm phase is held until this exact window.
+  reverseTurretImpactAt: 0,
   isActive() {
     return this.state !== "idle" && this.state !== "cleanup";
   },
@@ -16037,7 +16047,30 @@ const __mmInsta = {
     this.redDragonMusketRestoreTimer && clearTimeout(this.redDragonMusketRestoreTimer);
     this.redDragonMusketRestoreTimer = 0;
   },
+  reverseTurretPolearm(__mmPrimary, __mmSecondary, __mmTarget) {
+    return !!(
+      this.profile === "reverse" &&
+      __mmTarget &&
+      Number(__mmPrimary) === Number(__mmPolearmWeapon) &&
+      Number(__mmSecondary) === Number(__mmGreatHammer)
+    );
+  },
   profileStep(__mmTarget, __mmWeapon) {
+    // This is the Glotus-style reverse order, but use the Turret's estimated
+    // arrival instead of assuming that its projectile lands one server tick
+    // after the Great Hammer packet.
+    if (
+      this.reverseTurretPolearm(
+        this.primaryWeapon,
+        __mmWeapon,
+        __mmTarget,
+      ) &&
+      Number(this.reverseTurretImpactAt) > 0
+    )
+      return Math.max(
+        1,
+        Math.min(700, Number(this.reverseTurretImpactAt) - Date.now()),
+      );
     if (this.profile !== "oneTick") return this.tick();
     const __mmData = this.weaponData(__mmWeapon),
       __mmProjectile =
@@ -16856,6 +16889,7 @@ const __mmInsta = {
     this.profile = __mmRequestedProfile;
     this.profileSource = String(__mmOptions.profileSource || this.profile);
     this.tankPredictPlan = __mmOptions.tankPredictPlan || null;
+    this.reverseTurretImpactAt = 0;
     this.popupShown = !1;
     if (!this.runtimeReady()) return (this.cleanup("runtime-unavailable"), !1);
     this.capture();
@@ -17070,8 +17104,10 @@ const __mmInsta = {
       const __mmPlan = this.tankPredictPlan;
       if (!__mmPlan || !this.turretReady())
         return void this.cleanup("tank-window-turret-unavailable");
-      const __mmNow = Date.now(),
-        __mmPrimaryAt = Math.max(
+      const __mmNow = Date.now();
+      if (__mmNow > Number(__mmPlan.pulseEndAt || Infinity) - 4)
+        return void this.cleanup("tank-window-expired-before-turret");
+      const __mmPrimaryAt = Math.max(
           __mmNow,
           Number(__mmPlan.primaryAt) || Number(__mmPlan.expectedAt) || __mmNow,
         ),
@@ -17082,10 +17118,13 @@ const __mmInsta = {
           __mmNow,
           Number(__mmPlan.turretImpactAt) || __mmPrimaryAt,
         ),
-        __mmLeadMs = Math.max(0, __mmTurretImpactAt - __mmNow),
         __mmAngle = this.mouseAimOnly || !__mmContext.target
           ? __mmRawMouseAimDirection()
-          : __mmSyncAimAngle(__mmContext.target, __mmLeadMs);
+          : __mmTankPredictInsta.aimAt(
+              __mmContext.target,
+              __mmPlan.record,
+              __mmTurretImpactAt,
+            );
       // This gear packet is the turret shot. Commit it immediately: waiting
       // for a cosmetic acknowledgement would put the projectile behind the
       // one-tick Tank exposure we deliberately predicted.
@@ -17154,8 +17193,24 @@ const __mmInsta = {
       )
         return void this.cleanup("reverse-secondary-unavailable");
       this.pendingSecondaryWeapon = __mmSecondary;
-      const __mmGearHat = this.selectSecondaryDamageGear();
-      if (!__mmGearArbiter.acknowledged(__mmGearHat))
+      const __mmReverseTurretPolearm = this.reverseTurretPolearm(
+          __mmContext.primary,
+          __mmSecondary,
+          __mmContext.target,
+        ),
+        __mmGearHat = this.selectSecondaryDamageGear();
+      if (__mmReverseTurretPolearm) {
+        // The Turret fires from this gear phase. Do not wait for its cosmetic
+        // acknowledgement: record the actual arrival window and send Hammer
+        // behind the same packet phase, matching Glotus's immediate reverse.
+        const __mmTurretTravel = this.turretTravelMs(__mmContext.target);
+        this.reverseTurretImpactAt = Date.now() + __mmTurretTravel;
+        try {
+          (O.send("D", this.turretAim(__mmContext.target)),
+            __mmAssumeTurretGearShot());
+        } catch (__mmReverseTurretAimError) {}
+        __mmGearArbiter.commit();
+      } else if (!__mmGearArbiter.acknowledged(__mmGearHat))
         return void this.schedule(
           () => this.executeBurst(),
           Math.max(8, __mmFastCheckMs()),
@@ -17215,6 +17270,19 @@ const __mmInsta = {
   },
   executeFollowup() {
     if (this.state !== "executeBurst") return;
+    // The Polearm + Great Hammer reverse must not spend Bull/Polearm before
+    // the Turret projectile's predicted impact. Timers may wake up early, so
+    // re-check the absolute deadline instead of trusting one local callback.
+    const __mmReverseImpactAt = Number(this.reverseTurretImpactAt) || 0,
+      __mmNow = Date.now();
+    if (
+      this.profile === "reverse" &&
+      __mmReverseImpactAt > __mmNow + 2
+    )
+      return void this.schedule(
+        () => this.executeFollowup(),
+        Math.max(1, __mmReverseImpactAt - __mmNow),
+      );
     // Combo stage two: release the primary, then switch Turret gear and
     // the secondary in the same phase before firing its 25 ms tap.
     this.releaseAttack();
@@ -17269,7 +17337,11 @@ const __mmInsta = {
         return void this.cleanup("tank-window-missed");
       const __mmAngle = this.mouseAimOnly || !__mmContext.target
         ? __mmRawMouseAimDirection()
-        : this.aim(__mmContext.target);
+        : __mmTankPredictInsta.aimAt(
+            __mmContext.target,
+            __mmPlan.record,
+            Math.max(__mmNow, __mmPrimaryAt),
+          );
       // Bull and the loaded main swing share the Tank impact phase. As with
       // the Glotus Musket path, packet ordering matters more than a delayed
       // local cosmetic echo.
@@ -17345,13 +17417,35 @@ const __mmInsta = {
           !this.inRange(__mmContext.primary, __mmContext.target))
       )
         return void this.cleanup("reverse-primary-unavailable");
-      const __mmGearHat = this.selectDamageGear();
-      if (!__mmGearArbiter.acknowledged(__mmGearHat))
+      const __mmReverseTurretPolearm = this.reverseTurretPolearm(
+          __mmContext.primary,
+          this.pendingSecondaryWeapon || this.secondaryFollowup(),
+          __mmContext.target,
+        ),
+        __mmGearHat = this.selectDamageGear();
+      // Bull's packet and the Polearm swing have to share the Turret impact
+      // phase. Waiting for the skin echo here consistently puts the swing
+      // behind the projectile, so commit this verified reverse pair directly.
+      if (__mmReverseTurretPolearm) __mmGearArbiter.commit();
+      else if (!__mmGearArbiter.acknowledged(__mmGearHat))
         return void this.schedule(
           () => this.executeFollowup(),
           Math.max(8, __mmFastCheckMs()),
         );
-      if (!this.sendAttack(__mmContext.primary, !0, __mmContext.target))
+      const __mmImpactAim = __mmReverseTurretPolearm && __mmContext.target
+        ? __mmSyncAimAngle(
+            __mmContext.target,
+            Math.max(0, __mmReverseImpactAt - Date.now()),
+          )
+        : null;
+      if (
+        !this.sendAttack(
+          __mmContext.primary,
+          !0,
+          __mmContext.target,
+          __mmImpactAim,
+        )
+      )
         return void this.cleanup("reverse-primary-send-failed");
       (this.scheduleRelease(),
         this.schedule(() => this.finishNormalBurst(), this.tick()));
@@ -17610,6 +17704,7 @@ const __mmInsta = {
     this.postSpikeCalculatedAt = 0;
     this.postSpikeTarget = null;
     this.tankPredictPlan = null;
+    this.reverseTurretImpactAt = 0;
     this.profile = "normal";
     this.profileSource = "R";
     this.popupShown = !1;
@@ -34573,13 +34668,21 @@ function __mmKittyFastestReloadWeapon() {
   return __mmSecondary;
 }
 function __mmKittyReloadTarget() {
-  // Reload is a passive hold for the weapon the player has actually selected.
-  // In particular, a just-fired Insta Musket must not steal selection after
-  // cleanup merely because it has the faster reload multiplier.
-  const __mmCurrent = __mmWeaponRechargeCurrentWeapon();
-  return __mmCurrent != null && __mmWeaponIsReloading(__mmCurrent)
-    ? Number(__mmCurrent)
+  // Glotus UseFastest: prefer the hand with the larger speed multiplier,
+  // stay on it while it reloads, then recharge the other hand. When both are
+  // ready, deliberately return to the faster hand instead of preserving a
+  // temporary native 1/2 selection.
+  const __mmFastest = __mmKittyFastestReloadWeapon();
+  if (__mmFastest == null) return null;
+  if (__mmWeaponIsReloading(__mmFastest)) return __mmFastest;
+  const __mmOther = v && v.weapons
+    ? v.weapons.find(function (__mmWeapon) {
+        return Number(__mmWeapon) !== Number(__mmFastest);
+      })
     : null;
+  return __mmOther != null && __mmWeaponIsReloading(__mmOther)
+    ? Number(__mmOther)
+    : Number(__mmFastest);
 }
 function __mmWeaponRechargeCurrentWeapon() {
   const __mmTool = __mmWeaponRechargeCurrentTool();
@@ -34683,10 +34786,9 @@ function __mmRememberManualWeaponSelection(__mmItem, __mmIsWeapon) {
     __mmActionOwner !== "weaponRecharge"
   )
     return;
-  // A direct hand choice stops the current reload run, but it is not a
-  // permanent single-weapon pin. The next safe pass follows the Kitty
-  // fastest-first order from the player's newly selected hand.
-  if (__mmActionOwner === "weaponRecharge") __mmStopWeaponRecharge(!1);
+  // Match Glotus: a native 1/2 choice reaches the game, but it does not
+  // reset UseFastest. The next safe server phase restores the reload hand
+  // selected by the faster-first controller.
 }
 function __mmRestoreWeaponRechargeTool(__mmTool) {
   __mmWeaponRechargeSelecting += 1;
@@ -34824,17 +34926,11 @@ function __mmUpdateWeaponRecharge() {
     __mmSelectWeaponForRecharge(__mmActive);
     return;
   }
-  // The source client only permits a change of hand after the presently held
-  // weapon is ready. Respect that gate on a fresh Kitty reload run too.
-  const __mmCurrentWeapon = __mmWeaponRechargeCurrentWeapon();
-  let __mmNext = __mmTarget;
-  if (
-    __mmActive == null &&
-    __mmCurrentWeapon != null &&
-    __mmWeaponIsReloading(__mmCurrentWeapon)
-  )
-    __mmNext = __mmCurrentWeapon;
-  if (__mmNext == null) return void __mmStopWeaponRecharge(!0);
+  // UseFastest does not adopt the hand chosen by a native 1/2 press. Its
+  // primary/secondary priority is recomputed from the two cooldown states on
+  // every phase, so a temporary hand selection cannot pin the reload loop.
+  const __mmNext = __mmTarget;
+  if (__mmNext == null) return void __mmStopWeaponRecharge(!1);
   if (!__mmActionClaim("weaponRecharge", "safe-window reload")) return;
   ((__mmWeaponRechargeActiveWeapon = __mmNext),
     __mmWeaponRechargePreviousTool == null &&
@@ -35185,6 +35281,10 @@ function __mmAutoHeal(__mmEmergency) {
   __mmEmergency = !!(
     __mmEmergency || __mmAutoHealBurstDanger(__mmIncomingThreat, __mmFoodValue)
   );
+  // Glotus pre-heals on a credible Insta setup rather than waiting for the
+  // first health packet. Do this before ordinary post-hit healing so the
+  // preemptive full refill has the entire current server window to arrive.
+  if (__mmTryAntiInstaPreHeal(__mmIncomingThreat)) return;
   // Shame! (hat 45) means the server is rejecting food for its 30-second
   // penalty. Do not burn resources or flood selection/attack packets during it.
   if (Number(v.skinIndex) === 45) {
@@ -40299,10 +40399,9 @@ function __mmUpdateVelTickInsta(__mmEnemy, __mmPrediction) {
   __mmVelTickSetMovement(__mmAngle);
   __mmStartKittyProfile("velTick", __mmEnemy, "VelTick range band");
 }
-// Tank Gear is most often pulsed for a single loaded break swing.  Keep a
-// small, per-enemy history of only server-visible hat transitions, then use
-// either the game's next-hat field or a repeatable pulse cadence.  A lone
-// Tank frame never becomes a prediction by itself.
+// Tank Gear is most often pulsed for a single loaded break swing. Track only
+// server-visible gear and motion transitions. A Tank frame alone is never a
+// prediction: the plan needs a next-hat announcement or a repeatable pulse.
 const __mmTankPredictInsta = {
   records: Object.create(null),
   sampleLimit: 6,
@@ -40329,8 +40428,20 @@ const __mmTankPredictInsta = {
       __mmSpread = __mmSorted[__mmSorted.length - 1] - __mmSorted[0];
     return __mmSpread <= Math.max(90, __mmServerTickMs() * 1.5);
   },
+  pulseMs(__mmRecord) {
+    // A seen Tank duration is the best description of that opponent's actual
+    // vulnerable window. Fall back to one server tick until one is observed.
+    return Math.max(
+      30,
+      Math.min(
+        __mmServerTickMs() * 1.35,
+        this.median(__mmRecord && __mmRecord.tankDurations) ||
+          __mmServerTickMs(),
+      ),
+    );
+  },
   packetLeadMs() {
-    // Hat changes are observed after the server packet arrives.  Move the
+    // Hat changes are observed after the server packet arrives. Move the
     // local deadline forward by the measured one-way trip, but never borrow a
     // full tick: a missing/stale ping value must not turn a precise Tank pulse
     // into an early combo.
@@ -40339,6 +40450,82 @@ const __mmTankPredictInsta = {
     return Math.min(
       Math.max(0, __mmServerTickMs() * 0.45),
       __mmOneWay,
+    );
+  },
+  observeMotion(__mmRecord, __mmEnemy, __mmNow) {
+    const __mmPosition = __mmServerEntityPosition(__mmEnemy) || __mmEnemy,
+      __mmPrevious = __mmRecord.position,
+      __mmElapsed = __mmPrevious
+        ? Math.max(1, Math.min(300, __mmNow - __mmPrevious.at))
+        : 0,
+      __mmServerVelocity = __mmSyncPlayerVelocity(__mmEnemy);
+    let __mmVelocityX = Number(__mmServerVelocity.x) || 0,
+      __mmVelocityY = Number(__mmServerVelocity.y) || 0;
+    if (__mmPrevious && __mmElapsed) {
+      const __mmSampleVelocityX =
+          (Number(__mmPosition.x) - Number(__mmPrevious.x)) / __mmElapsed,
+        __mmSampleVelocityY =
+          (Number(__mmPosition.y) - Number(__mmPrevious.y)) / __mmElapsed;
+      if (
+        Number.isFinite(__mmSampleVelocityX) &&
+        Number.isFinite(__mmSampleVelocityY)
+      ) {
+        // Server interpolation is less noisy than a single render delta, but
+        // retain some fresh movement so a reverse immediately before a break
+        // cannot aim a full tick behind the target.
+        ((__mmVelocityX = __mmServerVelocity.x * 0.7 + __mmSampleVelocityX * 0.3),
+          (__mmVelocityY = __mmServerVelocity.y * 0.7 + __mmSampleVelocityY * 0.3));
+      }
+    }
+    const __mmPreviousVelocity = __mmRecord.velocity,
+      __mmSpeed = Math.hypot(__mmVelocityX, __mmVelocityY),
+      __mmPreviousSpeed = Math.hypot(
+        Number(__mmPreviousVelocity && __mmPreviousVelocity.x) || 0,
+        Number(__mmPreviousVelocity && __mmPreviousVelocity.y) || 0,
+      ),
+      __mmDot =
+        __mmPreviousVelocity
+          ? __mmVelocityX * Number(__mmPreviousVelocity.x) +
+            __mmVelocityY * Number(__mmPreviousVelocity.y)
+          : 0;
+    if (
+      __mmSpeed >= 0.18 &&
+      __mmPreviousSpeed >= 0.18 &&
+      __mmDot < -__mmSpeed * __mmPreviousSpeed * 0.32
+    )
+      __mmRecord.reversalAt = __mmNow;
+    (__mmRecord.position = {
+      x: Number(__mmPosition.x),
+      y: Number(__mmPosition.y),
+      at: __mmNow,
+    }),
+      (__mmRecord.velocity = { x: __mmVelocityX, y: __mmVelocityY }),
+      (__mmRecord.velocityAt = __mmNow));
+  },
+  projectedPosition(__mmEnemy, __mmRecord, __mmAt, __mmNow = Date.now()) {
+    const __mmPosition = __mmServerEntityPosition(__mmEnemy) || __mmEnemy,
+      __mmVelocity = __mmRecord && __mmRecord.velocity
+        ? __mmRecord.velocity
+        : __mmSyncPlayerVelocity(__mmEnemy),
+      __mmLead = Math.max(0, Math.min(450, Number(__mmAt) - __mmNow)),
+      // Automated Tank-breaks commonly reverse to a stationary swing. On a
+      // fresh reversal, damp the extrapolation instead of leading through the
+      // player as if they will keep running in the old direction.
+      __mmReversing = __mmRecord &&
+        __mmNow - Number(__mmRecord.reversalAt || 0) <= __mmServerTickMs() * 1.35,
+      __mmScale = __mmReversing ? 0.45 : 1;
+    return {
+      x: Number(__mmPosition.x) + (Number(__mmVelocity.x) || 0) * __mmLead * __mmScale,
+      y: Number(__mmPosition.y) + (Number(__mmVelocity.y) || 0) * __mmLead * __mmScale,
+    };
+  },
+  aimAt(__mmEnemy, __mmRecord, __mmAt) {
+    if (!v || !__mmEnemy) return __mmRawMouseAimDirection();
+    const __mmTarget = this.projectedPosition(__mmEnemy, __mmRecord, __mmAt),
+      __mmSelf = __mmServerEntityPosition(v) || v;
+    return Math.atan2(
+      Number(__mmTarget.y) - Number(__mmSelf.y),
+      Number(__mmTarget.x) - Number(__mmSelf.x),
     );
   },
   observe() {
@@ -40354,10 +40541,13 @@ const __mmTankPredictInsta = {
         __mmRecord = this.records[__mmSid] = {
           hat: __mmHat, lastTankAt: 0, lastSeenAt: __mmNow,
           intervals: [], tankDurations: [], nextTankAt: 0,
-          firedForAt: 0, retryAfter: 0,
+          firedForAt: 0, retryAfter: 0, position: null, velocity: null,
+          velocityAt: 0, reversalAt: 0,
         };
+        this.observeMotion(__mmRecord, __mmEnemy, __mmNow);
         continue;
       }
+      this.observeMotion(__mmRecord, __mmEnemy, __mmNow);
       if (__mmRecord.hat !== 40 && __mmHat === 40) {
         __mmRecord.lastTankAt && this.push(__mmRecord.intervals, __mmNow - __mmRecord.lastTankAt);
         __mmRecord.lastTankAt = __mmNow;
@@ -40384,9 +40574,6 @@ const __mmTankPredictInsta = {
       __mmCadenceAt = this.stable(__mmRecord) ? Number(__mmRecord.nextTankAt) : 0,
       __mmPacketLead = this.packetLeadMs(),
       __mmExpectedAt = __mmNextHatTank
-        // skinIndex2 announces the coming loadout.  The resulting Tank swing
-        // reaches this client one network leg later, so schedule the melee for
-        // the server edge rather than one complete local tick after it.
         ? __mmNow + Math.max(4, __mmServerTickMs() - __mmPacketLead)
         : __mmTankBreakContext && __mmCadenceAt > __mmNow
           ? __mmCadenceAt - __mmPacketLead
@@ -40394,25 +40581,45 @@ const __mmTankPredictInsta = {
     if (!__mmExpectedAt) return null;
     const __mmTravel = Math.max(1, __mmInsta.turretTravelMs(__mmEnemy)),
       __mmFireAt = __mmExpectedAt - __mmTravel,
-      __mmTolerance = Math.max(38, __mmServerTickMs() * 0.45),
+      __mmPulseEndAt = __mmExpectedAt + this.pulseMs(__mmRecord),
+      __mmTolerance = Math.max(30, __mmServerTickMs() * 0.32),
+      __mmImpactAt = Math.max(__mmNow, __mmFireAt) + __mmTravel,
       __mmAlreadyFired = Number(__mmRecord.firedForAt) || 0;
-    // A cadence gives enough advance notice to put the turret exactly on the
-    // Tank tick. A next-hat signal arrives too late for a distant turret, but
-    // it is still the exact melee window: fire the turret immediately and put
-    // Bull + main on that edge instead of abandoning the entire Insta.
+    // Do not call a late Turret a Tank insta. It must arrive after the Tank
+    // change and before the learned pulse ends. This prevents wasted combos
+    // against one-tick Tank swap hacks while cadence predictions retain enough
+    // lead to line the projectile up exactly.
     if (
       __mmFireAt > __mmNow + 12 ||
+      __mmImpactAt < __mmExpectedAt - __mmTolerance ||
+      __mmImpactAt > __mmPulseEndAt - 4 ||
       (!__mmNextHatTank && __mmNow - __mmFireAt > __mmTolerance) ||
-      (__mmNextHatTank && __mmNow > __mmExpectedAt + __mmTolerance) ||
+      (__mmNextHatTank && __mmNow > __mmPulseEndAt - 4) ||
       (__mmAlreadyFired && Math.abs(__mmAlreadyFired - __mmExpectedAt) < __mmTolerance)
     )
       return null;
+    const __mmImpactPosition = this.projectedPosition(
+      __mmEnemy, __mmRecord, __mmImpactAt, __mmNow,
+    );
+    if (
+      Math.hypot(
+        Number(__mmImpactPosition.x) - Number(v.x),
+        Number(__mmImpactPosition.y) - Number(v.y),
+      ) >
+      __mmTurretGearRange + (Number(v.scale) || 0) +
+        (Number(__mmEnemy.scale) || 0) + 8
+    )
+      return null;
+    const __mmReversalFresh =
+      __mmNow - Number(__mmRecord.reversalAt || 0) <= __mmServerTickMs() * 1.35;
     return {
       expectedAt: __mmExpectedAt,
       primaryAt: Math.max(__mmNow, __mmExpectedAt),
-      turretImpactAt: Math.max(__mmNow, __mmFireAt) + __mmTravel,
-      lateTurret: __mmFireAt < __mmNow,
-      source: __mmNextHatTank ? "next-hat" : "repeat Tank break pulse",
+      turretImpactAt: __mmImpactAt,
+      pulseEndAt: __mmPulseEndAt,
+      source: __mmNextHatTank
+        ? (__mmReversalFresh ? "next-hat velocity reversal" : "next-hat")
+        : (__mmReversalFresh ? "repeat Tank break + velocity reversal" : "repeat Tank break pulse"),
       record: __mmRecord,
     };
   },
@@ -45395,6 +45602,86 @@ function __mmCanUseAntiInsta() {
     !__mmShieldDefenseTimer
   );
 }
+function __mmTryAntiInstaPreHeal(__mmThreat) {
+  if (
+    !__mmAutoHealEnabled ||
+    !v ||
+    !v.alive ||
+    Number(v.skinIndex) === 45 ||
+    !__mmThreat ||
+    !__mmCanEat() ||
+    __mmFoodCharges() < 1 ||
+    Number(__mmAutoHealShameCount) >= 7
+  )
+    return !1;
+  const __mmNow = Date.now(),
+    __mmTick = Math.max(1, __mmServerTickMs()),
+    __mmImpactRaw = Number(__mmThreat.firstImpactMs),
+    __mmHasImpact = Number.isFinite(__mmImpactRaw),
+    __mmImpactMs = __mmHasImpact ? Math.max(0, __mmImpactRaw) : Infinity,
+    __mmHealth = Math.max(0, Number(v.health) || 0),
+    __mmMaxHealth = Math.max(1, Number(v.maxHealth) || 100),
+    __mmFood = Math.max(1, Number(__mmAutoHealFoodValue()) || 20),
+    __mmPredictedDamage = Math.max(
+      0,
+      Number(__mmThreat.damage) || 0,
+      Number(__mmThreat.potentialDamage) || 0,
+    ),
+    // Glotus's force-heal paths include a visible melee / reverse / ranged
+    // danger setup. Kitty represents those as either a forecasted impact or
+    // a facing, in-range melee damage prediction.
+    __mmEarliestImpact = Math.max(14, __mmTick * 0.16),
+    __mmLatestImpact = Math.max(125, Math.min(340, __mmTick * 3)),
+    __mmImminentHit =
+      __mmHasImpact &&
+      __mmImpactMs >= __mmEarliestImpact &&
+      __mmImpactMs <= __mmLatestImpact,
+    __mmStrongMeleeSetup =
+      Number(__mmThreat.potentialDamage) >=
+      Math.max(__mmFood * 2, __mmHealth * 0.55),
+    __mmCredibleInsta = !!(
+      __mmThreat.urgent ||
+      (__mmImminentHit &&
+        __mmPredictedDamage >= Math.max(__mmFood, __mmHealth * 0.3)) ||
+      __mmStrongMeleeSetup
+    ),
+    // Glotus starts this safety refill below 95 health, then sends exactly
+    // enough food to reach full health before the likely combo reaches us.
+    __mmNeedsRefill = __mmHealth < Math.min(95, __mmMaxHealth),
+    __mmImpactAt = __mmHasImpact ? __mmNow + __mmImpactMs : 0,
+    __mmSameImpact =
+      __mmImpactAt > 0 &&
+      Math.abs(__mmImpactAt - Number(__mmAntiInstaPreHealImpactAt || -1)) <=
+        Math.max(35, __mmTick * 0.8),
+    __mmRecentSetup =
+      __mmNow - Number(__mmAntiInstaPreHealLastAt || 0) <=
+      Math.max(180, __mmTick * 1.75);
+  if (
+    !__mmCredibleInsta ||
+    !__mmNeedsRefill ||
+    (__mmSameImpact && __mmRecentSetup) ||
+    (!__mmHasImpact && __mmRecentSetup)
+  )
+    return !1;
+  const __mmBites = Math.min(
+    __mmFoodCharges(),
+    Math.max(1, Math.ceil((__mmMaxHealth - __mmHealth) / __mmFood)),
+  );
+  if (!__mmBites) return !1;
+  // Like Glotus, make the refill a pre-Insta packet burst rather than a
+  // normal after-damage queue. Clear an older queue so it cannot append an
+  // extra food packet before the server reports this refill.
+  ((__mmAutoHealWasHealing = !0),
+    __mmUseFoodBurst(__mmBites),
+    (__mmAutoHealWasHealing = !1),
+    (__mmAutoHealPending = !1),
+    (__mmAutoHealBitesRemaining = 0),
+    (__mmAutoHealNextBiteAt = __mmNow + Math.max(__mmTick, 100)),
+    (__mmAutoHealFoodAwaitingAckAt = __mmNow),
+    (__mmAntiInstaPreHealImpactAt = __mmImpactAt),
+    (__mmAntiInstaPreHealLastAt = __mmNow));
+  return !0;
+}
 function __mmPlaceAntiInstaSpike(__mmAngle) {
   return !1;
   if (__mmEmergencyGetawayActive() || __mmHoldingMcGrabby()) return !1;
@@ -45505,6 +45792,9 @@ function __mmUpdateAntiInsta() {
   __mmHammerPolearmInsta.isActive() &&
     __mmHammerPolearmInsta.cancel("lethal-combat-threat");
   __mmInstaSyncPending || __mmInstaSyncFiring ? __mmStopInstaSync() : null;
+  // Food precedes the defensive weapon packet, so the Glotus-style pre-Insta
+  // refill can reach the server before Shield owns the impact edge.
+  __mmTryAntiInstaPreHeal(__mmThreat);
   const __mmShielded = __mmCanShield && __mmUseShieldDefense(null, {
     angle: __mmShieldPlan.angle,
     holdMs: __mmShieldPlan.holdMs,
@@ -52668,6 +52958,90 @@ function __mmUpdateTeammateTrapRescue() {
 function __mmStartTeammateTrapRescue() {
   __mmEnsureOperationPipeline();
 }
+function __mmPauseTrapEscapeForPredictedInsta() {
+  if (!v || !v.alive || !__mmIsTrapped()) return !1;
+  const __mmNow = Date.now();
+  if (__mmNow < __mmTrapEscapeDangerPauseUntil) return !0;
+  const __mmThreat = __mmCombatThreatSnapshot(!0),
+    __mmTick = Math.max(1, __mmServerTickMs()),
+    __mmHealth = Math.max(1, Number(v.health) || 100),
+    __mmImpactMs = Number(__mmThreat && __mmThreat.firstImpactMs),
+    __mmImminentImpact =
+      Number.isFinite(__mmImpactMs) &&
+      __mmImpactMs >= 0 &&
+      __mmImpactMs <= Math.max(110, Math.min(320, __mmTick * 3)),
+    __mmImpactDamage = Math.max(
+      0,
+      Number(__mmThreat && __mmThreat.damage) || 0,
+    ),
+    // Glotus also yields when a player starts a brief Tank attack window.
+    // Kitty records those pulses, so only a fresh Tank/next-hat transition at
+    // close combat range can pause the breaker; a player idling in Tank never
+    // stalls the escape.
+    __mmEnemies = __mmLiveStateFresh() ? __mmLiveState.enemies : E,
+    __mmFreshTankThreat = Array.isArray(__mmEnemies) &&
+      __mmEnemies.some(function (__mmEnemy) {
+        if (!__mmIsEnemyPlayer(__mmEnemy)) return !1;
+        const __mmRecord = __mmTankPredictInsta && __mmTankPredictInsta.records
+            ? __mmTankPredictInsta.records[String(__mmEnemy.sid)]
+            : null,
+          __mmTankNow = Number(__mmEnemy.skinIndex) === 40 ||
+            Number(__mmEnemy.skinIndex2) === 40,
+          __mmFreshTank =
+            Number(__mmEnemy.skinIndex2) === 40 ||
+            (__mmTankNow &&
+              __mmNow - Number(__mmRecord && __mmRecord.lastTankAt) <=
+                __mmTick * 1.6),
+          __mmWeapon = b && b.weapons && b.weapons[Number(__mmEnemy.weaponIndex)],
+          __mmReach = __mmWeapon && __mmWeapon.projectile == null
+            ? (Number(__mmWeapon.range) || 0) +
+              (Number(__mmEnemy.scale) || 35) +
+              (Number(v.scale) || 35) + 28
+            : 0;
+        return __mmFreshTank && __mmReach > 0 &&
+          Math.hypot(
+            Number(__mmEnemy.x) - Number(v.x),
+            Number(__mmEnemy.y) - Number(v.y),
+          ) <= __mmReach;
+      }),
+    __mmCredibleInsta =
+      (__mmImminentImpact &&
+        __mmImpactDamage >= Math.max(25, __mmHealth * 0.3)) ||
+      (__mmFreshTankThreat &&
+        Number(__mmThreat && __mmThreat.potentialDamage) >=
+          Math.max(35, __mmHealth * 0.45));
+  if (!__mmCredibleInsta) return !1;
+  const __mmHoldMs = Math.max(
+    __mmTick,
+    Math.min(
+      360,
+      (__mmImminentImpact ? __mmImpactMs : __mmTick) + __mmTick,
+    ),
+  );
+  __mmTrapEscapeDangerPauseUntil = __mmNow + __mmHoldMs;
+  // A combo that was armed before the trap lock cannot safely retain the
+  // weapon channel while this defensive window selects Shield.
+  __mmInsta.isActive() && __mmInsta.cancel("predicted trapped Insta threat");
+  __mmTryAntiInstaPreHeal(__mmThreat);
+  const __mmShieldPlan = __mmAntiInstaShieldPlan({
+    firstImpactMs: __mmImminentImpact ? __mmImpactMs : __mmTick,
+    angle: __mmThreat && __mmThreat.angle,
+  });
+  if (
+    __mmShieldPlan &&
+    Array.isArray(v.weapons) &&
+    v.weapons.includes(__mmShieldWeapon)
+  ) {
+    __mmPauseTrapEscapeForAntiInsta(__mmHoldMs);
+    __mmUseShieldDefense(null, {
+      angle: __mmShieldPlan.angle,
+      holdMs: __mmHoldMs,
+      forceAntiInsta: !0,
+      reason: "predicted Insta while trapped",
+    });
+  } else __mmStopTrapAttack();
+  return !0;
+}
 function __mmBreakTrap() {
   if (
     !__mmTrapEscapeEnabled ||
@@ -52681,6 +53055,10 @@ function __mmBreakTrap() {
   // __mmStopShieldDefense schedules this same breaker as soon as the block
   // window ends.
   if (Date.now() < __mmAntiInstaTrapShieldUntil) return;
+  // Match Glotus Autobreak: yield the held breaker during a credible incoming
+  // Insta/Tank window, defend if possible, then resume when the short window
+  // expires instead of swinging continuously into the combo.
+  if (__mmPauseTrapEscapeForPredictedInsta()) return;
   // An Insta that started immediately before the lock is stale combat work;
   // cancel it now and reclaim the same weapon/hat/aim channels for escape.
   // Returning here used to leave a caught player idle until every Insta stage
