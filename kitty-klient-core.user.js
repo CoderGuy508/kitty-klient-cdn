@@ -2,7 +2,7 @@
 // @name         kitty klient
 // @author       Coder Guy
 // @credits       random4ik — bot script
-// @version      6.9.11
+// @version      6.9.12
 // @icon         https://cdn.discordapp.com/icons/1540876076224356437/ac27c0ce87c4c46b407ebca78e150aeb.webp?size=2048
 // @description  kitty klient — a MooMoo.io client with adaptive zoom, fast autoheal, gear automation, combat tools, predictive placement, visual markers, CC0 background music, manual quick builds, and a fully rebindable keyboard/mouse controls HUD.
 // @match        *://moomoo.io/*
@@ -267,7 +267,7 @@
     const AUTO_PUSH_FINISHER_MIGRATION_KEY = "kitty-klient-auto-push-finisher-v1";
     const ASSASSIN_RANGE_AUTO_MIGRATION_KEY = "kitty-klient-assassin-range-auto-v1";
     const TAB_SYNC_BRIDGE_KEY = "kitty-klient-tab-sync-bridge-v1";
-const KITTY_KLIENT_VERSION = "6.9.11";
+const KITTY_KLIENT_VERSION = "6.9.12";
     const KITTY_SHARED_STORAGE_APPLIED_EVENT = "KittyMooMooSharedStorageApplied";
     // FRVR's v1.8 client changed the game module and now owns its own Altcha
     // verification flow. The legacy runtime patch relies on exact bundle
@@ -316,6 +316,10 @@ const KITTY_KLIENT_VERSION = "6.9.11";
     const KITTY_PET_WORLD_MAX_BYTES = 14_000;
     const KITTY_PET_WORLD_STALE_MS = 4_000;
     const KITTY_PET_VISION_CONTROL_MS = 45;
+    // A direct data channel is the normal transport. The relay is deliberately
+    // slower and starts only when NAT/firewall rules make direct WebRTC fail.
+    const KITTY_PET_DIRECT_GRACE_MS = 7_000;
+    const KITTY_PET_RELAY_FRAME_MS = 220;
     const KITTY_PET_HOSTING_KEY = "kitty-klient-pets-enabled-v1";
     const KITTY_PET_DEFAULT_SKIN_COLOR = "#f6c7a5";
     const KITTY_PET_MODAL_ID = "kitty-pet-player-picker";
@@ -5085,10 +5089,13 @@ const KITTY_KLIENT_VERSION = "6.9.11";
     let kittyPetInputLockInstalled = false;
     let kittyPetVisionPollTimer = 0;
     let kittyPetVisionPollBusy = false;
+    let kittyPetMirrorRelayTimer = 0;
+    let kittyPetMirrorRelayBusy = false;
     let kittyPetMirrorState = null;
     let kittyPetMirrorAnimationFrame = 0;
     const kittyPetVisionPeers = new Map();
     const kittyPetVisionAcknowledgements = new Set();
+    const kittyPetMirrorRelaySessions = new Set();
     const kittyPetVisionInput = { w: false, a: false, s: false, d: false, aimX: 0.5, aimY: 0.5, lastSentAt: 0 };
 
     let kittyAccountSupportRequest = null;
@@ -6072,6 +6079,7 @@ const KITTY_KLIENT_VERSION = "6.9.11";
         if (!peer) return;
         kittyPetVisionPeers.delete(id);
         if (peer.frameTimer) window.clearInterval(peer.frameTimer);
+        if (peer.directDeadline) window.clearTimeout(peer.directDeadline);
         try { peer.channel?.close(); } catch (_) {}
         try { peer.pc?.close(); } catch (_) {}
         if (retry) window.setTimeout(() => kittyPetVisionReconcile(), 1_500);
@@ -6080,7 +6088,10 @@ const KITTY_KLIENT_VERSION = "6.9.11";
     function closeInactiveKittyPetVisionPeers(activeSessionIds) {
         const active = new Set(activeSessionIds);
         [...kittyPetVisionPeers.keys()].forEach((id) => {
-            if (!active.has(id)) closeKittyPetVisionPeer(id);
+            if (!active.has(id)) {
+                kittyPetMirrorRelaySessions.delete(id);
+                closeKittyPetVisionPeer(id);
+            }
         });
     }
 
@@ -6088,7 +6099,11 @@ const KITTY_KLIENT_VERSION = "6.9.11";
         const existing = kittyPetVisionPeer(sessionId);
         if (existing) return existing;
         const pc = new window.RTCPeerConnection({
-            iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+            iceServers: [
+                { urls: "stun:stun.l.google.com:19302" },
+                { urls: "stun:stun1.l.google.com:19302" },
+                { urls: "stun:stun.cloudflare.com:3478" }
+            ]
         });
         const peer = {
             sessionId: String(sessionId),
@@ -6096,7 +6111,10 @@ const KITTY_KLIENT_VERSION = "6.9.11";
             pc,
             channel: null,
             pendingCandidates: [],
-            frameTimer: 0
+            frameTimer: 0,
+            directDeadline: 0,
+            relayLastSentAt: 0,
+            relayPushBusy: false
         };
         kittyPetVisionPeers.set(peer.sessionId, peer);
         pc.addEventListener("icecandidate", (event) => {
@@ -6113,11 +6131,20 @@ const KITTY_KLIENT_VERSION = "6.9.11";
             void sendKittyPetVisionSignal(peer.sessionId, { type: "candidate", candidate: value });
         });
         pc.addEventListener("connectionstatechange", () => {
-            if (pc.connectionState === "connected" && peer.role === "pet") {
-                setKittyPetVisionStatus("Direct world mirror connected.", "ok");
+            if (pc.connectionState === "connected") {
+                if (peer.directDeadline) window.clearTimeout(peer.directDeadline);
+                peer.directDeadline = 0;
+                kittyPetMirrorRelaySessions.delete(peer.sessionId);
+                if (peer.role === "pet") setKittyPetVisionStatus("Direct world mirror connected.", "ok");
                 return;
             }
-            if (pc.connectionState === "failed") closeKittyPetVisionPeer(peer.sessionId, true);
+            if (pc.connectionState === "failed") {
+                if (peer.role === "pet") {
+                    void requestKittyPetMirrorFallback(peer.sessionId);
+                    return;
+                }
+                closeKittyPetVisionPeer(peer.sessionId, true);
+            }
             if (pc.connectionState === "disconnected") {
                 window.setTimeout(() => {
                     if (kittyPetVisionPeer(peer.sessionId) === peer && pc.connectionState === "disconnected") {
@@ -6130,6 +6157,13 @@ const KITTY_KLIENT_VERSION = "6.9.11";
             if (peer.role !== "pet") return;
             attachKittyPetVisionDataChannel(peer, event.channel);
         });
+        if (role === "pet") {
+            peer.directDeadline = window.setTimeout(() => {
+                if (kittyPetVisionPeer(peer.sessionId) === peer && pc.connectionState !== "connected") {
+                    void requestKittyPetMirrorFallback(peer.sessionId);
+                }
+            }, KITTY_PET_DIRECT_GRACE_MS);
+        }
         return peer;
     }
 
@@ -6194,7 +6228,7 @@ const KITTY_KLIENT_VERSION = "6.9.11";
         if (root) root.dataset.live = "0";
     }
 
-    function applyKittyPetMirrorWorld(value) {
+    function applyKittyPetMirrorWorld(value, transport = "direct") {
         if (!value || typeof value !== "object" || Number(value.v) !== 1 || !Array.isArray(value.c)) return;
         const camera = value.c;
         if (camera.length < 5 || !Number.isFinite(Number(camera[0])) || !Number.isFinite(Number(camera[1]))) return;
@@ -6218,7 +6252,9 @@ const KITTY_KLIENT_VERSION = "6.9.11";
         };
         const root = mountKittyPetVision();
         if (root) root.dataset.live = "1";
-        setKittyPetVisionStatus("Direct world mirror connected.", "ok");
+        setKittyPetVisionStatus(transport === "relay"
+            ? "World mirror connected through the Kitty relay."
+            : "Direct world mirror connected.", "ok");
         scheduleKittyPetMirrorRender();
     }
 
@@ -6476,6 +6512,9 @@ const KITTY_KLIENT_VERSION = "6.9.11";
             if (peer.channel === channel) peer.channel = null;
         });
         channel.addEventListener("open", () => {
+            kittyPetMirrorRelaySessions.delete(peer.sessionId);
+            if (peer.directDeadline) window.clearTimeout(peer.directDeadline);
+            peer.directDeadline = 0;
             if (peer.role === "pet") kittyPetVisionSendControl(true);
         });
         if (peer.role === "host") startKittyPetMirrorWorldLoop(peer);
@@ -6506,11 +6545,38 @@ const KITTY_KLIENT_VERSION = "6.9.11";
         } while (true);
     }
 
+    async function requestKittyPetMirrorFallback(sessionId) {
+        const id = String(sessionId || "");
+        if (!kittyPetModeActive() || !/^[A-Za-z0-9_-]{43}$/.test(id) || kittyPetMirrorRelaySessions.has(id)) return;
+        kittyPetMirrorRelaySessions.add(id);
+        setKittyPetVisionStatus("Direct connection is unavailable. Switching to the Kitty world relay…", "");
+        const sent = await sendKittyPetVisionSignal(id, { type: "fallback" });
+        if (!sent) {
+            kittyPetMirrorRelaySessions.delete(id);
+            setKittyPetVisionStatus("Could not start the world mirror relay. Retrying direct connection…", "error");
+        }
+    }
+
+    async function pushKittyPetMirrorRelayWorld(peer, world) {
+        if (peer.relayPushBusy) return;
+        peer.relayPushBusy = true;
+        try {
+            await kittyAccountRequest("/v1/pets/mirror/push", { sessionId: peer.sessionId, world });
+        } catch {
+            // A relay packet is disposable. The next bounded snapshot will
+            // replace it, while the direct channel continues attempting.
+        } finally {
+            peer.relayPushBusy = false;
+        }
+    }
+
     function startKittyPetMirrorWorldLoop(peer) {
         if (peer.role !== "host" || peer.frameTimer) return;
         peer.frameTimer = window.setInterval(() => {
             const channel = peer.channel;
-            if (!channel || channel.readyState !== "open" || Number(channel.bufferedAmount) > KITTY_PET_WORLD_MAX_BYTES * 3) return;
+            const directOpen = !!(channel && channel.readyState === "open" && Number(channel.bufferedAmount) <= KITTY_PET_WORLD_MAX_BYTES * 3);
+            const relayRequested = kittyPetMirrorRelaySessions.has(peer.sessionId);
+            if (!directOpen && !relayRequested) return;
             const pet = kittyPetHostSessions().find((entry) => String(entry && entry.id || "") === peer.sessionId);
             const runtime = window.__KittyGameRuntime;
             const world = pet && runtime && typeof runtime.getPetWorldSnapshot === "function"
@@ -6518,7 +6584,15 @@ const KITTY_KLIENT_VERSION = "6.9.11";
                 : null;
             if (!world) return;
             const encoded = encodeKittyPetMirrorWorld(world);
-            if (encoded) try { channel.send(encoded); } catch {}
+            if (!encoded) return;
+            if (directOpen) {
+                try { channel.send(encoded); } catch {}
+            }
+            const now = performance.now();
+            if (relayRequested && !directOpen && now - peer.relayLastSentAt >= KITTY_PET_RELAY_FRAME_MS) {
+                peer.relayLastSentAt = now;
+                try { void pushKittyPetMirrorRelayWorld(peer, JSON.parse(encoded).world); } catch {}
+            }
         }, KITTY_PET_WORLD_FRAME_MS);
     }
 
@@ -6563,12 +6637,17 @@ const KITTY_KLIENT_VERSION = "6.9.11";
             } catch {
                 closeKittyPetVisionPeer(sessionId);
                 setKittyPetVisionStatus("Could not connect the direct world mirror. Retrying…", "error");
+                void requestKittyPetMirrorFallback(sessionId);
                 return true;
             }
         }
         const peer = kittyPetVisionPeer(sessionId);
         if (!peer) return false;
         try {
+            if (type === "fallback" && peer.role === "host") {
+                kittyPetMirrorRelaySessions.add(peer.sessionId);
+                return true;
+            }
             if (type === "answer" && peer.role === "host" && signal.description) {
                 await peer.pc.setRemoteDescription(signal.description);
                 await drainKittyPetVisionCandidates(peer);
@@ -6609,6 +6688,22 @@ const KITTY_KLIENT_VERSION = "6.9.11";
         }
     }
 
+    async function pollKittyPetMirrorRelay() {
+        if (kittyPetMirrorRelayBusy || !kittyPetModeActive() || !readKittyAccountSession()) return;
+        const self = kittyPetState && kittyPetState.self;
+        const sessionId = String(self && self.id || "");
+        if (!kittyPetMirrorRelaySessions.has(sessionId)) return;
+        kittyPetMirrorRelayBusy = true;
+        try {
+            const result = await kittyAccountRequest("/v1/pets/mirror/poll", { sessionId });
+            if (result && result.world) applyKittyPetMirrorWorld(result.world, "relay");
+        } catch {
+            setKittyPetVisionStatus("Waiting for the Kitty world relay…", "");
+        } finally {
+            kittyPetMirrorRelayBusy = false;
+        }
+    }
+
     function kittyPetVisionReconcile() {
         const sessionIds = kittyPetVisionSessionIds();
         closeInactiveKittyPetVisionPeers(sessionIds);
@@ -6634,11 +6729,21 @@ const KITTY_KLIENT_VERSION = "6.9.11";
             if (petMode) kittyPetVisionSendControl();
             if (!petMode) sessionIds.forEach((id) => { void startKittyPetVisionHost(id); });
             void pollKittyPetVisionSignals();
+            if (petMode && !kittyPetMirrorRelayTimer) {
+                kittyPetMirrorRelayTimer = window.setInterval(() => { void pollKittyPetMirrorRelay(); }, KITTY_PET_RELAY_FRAME_MS);
+            }
+            if (petMode) void pollKittyPetMirrorRelay();
         } else if (!sessionIds.length && kittyPetVisionPollTimer) {
             window.clearInterval(kittyPetVisionPollTimer);
             kittyPetVisionPollTimer = 0;
             kittyPetVisionAcknowledgements.clear();
+            kittyPetMirrorRelaySessions.clear();
             resetKittyPetMirror();
+        }
+        if (!petMode && kittyPetMirrorRelayTimer) {
+            window.clearInterval(kittyPetMirrorRelayTimer);
+            kittyPetMirrorRelayTimer = 0;
+            kittyPetMirrorRelayBusy = false;
         }
     }
 
@@ -6870,7 +6975,7 @@ const KITTY_KLIENT_VERSION = "6.9.11";
             if (petActive) {
                 const self = kittyPetState.self || {};
                 const copy = modePanel.querySelector("[data-kitty-pet-copy]");
-                if (copy) copy.textContent = `Floating with ${String(self.hostUsername || "your host")} · their nearby world state mirrors directly to this pet tab. Mouse aim turns your pet; WASD gives it a small, smooth tethered drift while normal game, bots, and Esc HUD controls stay locked.`;
+                if (copy) copy.textContent = `Floating with ${String(self.hostUsername || "your host")} · their nearby world state mirrors directly to this pet tab, with an automatic compact relay only if direct networking is blocked. Mouse aim turns your pet; WASD gives it a small, smooth tethered drift while normal game, bots, and Esc HUD controls stay locked.`;
                 const catalog = kittyPetCatalog();
                 [
                     ["hatId", "hats"], ["tailId", "tails"],
@@ -55846,9 +55951,9 @@ window.__KittyGameRuntime = {
       return { clear: !1, reason: "placement validator unavailable", scale: 45 };
     }
   },
-  // The Pet Mirror transfers compact, bounded nearby-world records over the
-  // direct WebRTC data channel. The account service only brokers WebRTC; it
-  // never receives this world data or any rendered pixels.
+  // The Pet Mirror sends compact, bounded nearby-world records over a direct
+  // WebRTC data channel whenever possible. If NAT/firewall rules block that
+  // path, it uses a temporary, bounded service relay; never rendered pixels.
   getPetWorldSnapshot: function (__mmPet) {
     try {
       if (!v || !v.alive || !__mmPet) return null;
