@@ -2,7 +2,7 @@
 // @name         kitty klient
 // @author       Coder Guy
 // @credits       random4ik — bot script
-// @version      6.9.12
+// @version      6.9.13
 // @icon         https://cdn.discordapp.com/icons/1540876076224356437/ac27c0ce87c4c46b407ebca78e150aeb.webp?size=2048
 // @description  kitty klient — a MooMoo.io client with adaptive zoom, fast autoheal, gear automation, combat tools, predictive placement, visual markers, CC0 background music, manual quick builds, and a fully rebindable keyboard/mouse controls HUD.
 // @match        *://moomoo.io/*
@@ -267,7 +267,7 @@
     const AUTO_PUSH_FINISHER_MIGRATION_KEY = "kitty-klient-auto-push-finisher-v1";
     const ASSASSIN_RANGE_AUTO_MIGRATION_KEY = "kitty-klient-assassin-range-auto-v1";
     const TAB_SYNC_BRIDGE_KEY = "kitty-klient-tab-sync-bridge-v1";
-const KITTY_KLIENT_VERSION = "6.9.12";
+const KITTY_KLIENT_VERSION = "6.9.13";
     const KITTY_SHARED_STORAGE_APPLIED_EVENT = "KittyMooMooSharedStorageApplied";
     // FRVR's v1.8 client changed the game module and now owns its own Altcha
     // verification flow. The legacy runtime patch relies on exact bundle
@@ -311,6 +311,9 @@ const KITTY_KLIENT_VERSION = "6.9.12";
     const KITTY_ACCOUNT_DRAWER_REMINDER_MS = 12 * 60 * 1000;
     const KITTY_ACCOUNT_PRESENCE_MS = 20_000;
     const KITTY_PET_STATE_MS = 5_000;
+    // Pet Mode is intentionally offline while its gameplay and networking
+    // experience are still being finished.
+    const KITTY_PET_MODE_AVAILABLE = false;
     const KITTY_PET_VISION_POLL_MS = 1_000;
     const KITTY_PET_WORLD_FRAME_MS = 67;
     const KITTY_PET_WORLD_MAX_BYTES = 14_000;
@@ -815,6 +818,7 @@ const KITTY_KLIENT_VERSION = "6.9.12";
         spikeSync: true,
         spikeSyncHammer: true,
         velTickInsta: true,
+        tankPredictInsta: true,
         polearmAids: true,
         autoPushInsta: true,
         autoPushFinisher: true,
@@ -974,7 +978,7 @@ const KITTY_KLIENT_VERSION = "6.9.12";
             "instaKill", "autoInsta", "autoAim", "autoBowUpgradeInsta", "reverseInsta", "oneTickInsta",
             "sevenShameInsta", "appleInsta", "bleedInsta", "knockbackInsta", "primaryKnockbackTick",
             "hammerTurretKnockbackTick", "hammerTrapKnockbackTick", "spikeSync", "spikeSyncHammer",
-            "velTickInsta", "polearmAids", "autoPushInsta", "autoTrapInsta", "autoSpikeInsta", "instaSync"
+            "velTickInsta", "tankPredictInsta", "polearmAids", "autoPushInsta", "autoTrapInsta", "autoSpikeInsta", "instaSync"
         ]),
         combat: Object.freeze([
             "bullHelmet", "tankRightClick", "antiInsta", "antiSync", "antiBoostInsta", "antiCollision",
@@ -1078,6 +1082,7 @@ const KITTY_KLIENT_VERSION = "6.9.12";
         "spikeSync",
         "spikeSyncHammer",
         "velTickInsta",
+        "tankPredictInsta",
         "polearmAids",
         "autoPushInsta",
         "autoPushFinisher",
@@ -4705,6 +4710,7 @@ const KITTY_KLIENT_VERSION = "6.9.12";
         addHudToggle(kittyInstas, "spikeSync", "Base Spike Sync", "Place every legal contact spike around an in-range enemy, then use Bull + primary and a next-tick Turret follow-up. Does not use Tank gear");
         addHudToggle(kittyInstas, "spikeSyncHammer", "Spike Sync Hammer", "Find one Great Hammer angle that hits both an enemy and a one-hit breakable, place a legal contact spike, then stack ready Turret and primary damage");
         addHudToggle(kittyInstas, "velTickInsta", "VelTick Insta", "T watches the predicted 220–245px window, leads with Turret, then sends Bull + Polearm on the next tick");
+        addHudToggle(kittyInstas, "tankPredictInsta", "Tank Window Insta", "Learns repeat Tank Gear pulses and reads the next-hat signal. It leads a Turret into that vulnerable tick, then sends Bull + main and an optional Musket follow-up.");
         addHudToggle(kittyInstas, "polearmAids", "Polearm Aids", "Against a target in your or an ally's trap: Tank + Great Hammer, then Bull + Polearm and a legal contact spike");
         addHudToggle(kittyInstas, "autoPushInsta", "Auto Push", "Uses Glotus far-point alignment and close-point steering within 250 pixels; pauses while movement keys are held");
         addHudToggle(kittyInstas, "boostSpikeKill", "Boost + Spike", "G uses x-RedDragon's 80 ms pattern: two side spikes, two close diagonals within 150 units, then a forward Boost Pad. Kitty skips any illegal slot.");
@@ -5846,7 +5852,7 @@ const KITTY_KLIENT_VERSION = "6.9.12";
         const style = document.createElement("style");
         style.id = "kitty-pet-mode-style";
         style.textContent = [
-            "#kitty-klient-home-actions .kitty-play-as-pet{position:relative;grid-column:1/-1;isolation:isolate;overflow:hidden;min-height:46px;border-color:#f0abfc!important;background:linear-gradient(135deg,#3b0764,#7e22ce 44%,#4c1d95)!important;box-shadow:0 0 18px rgba(217,70,239,.45)!important;cursor:pointer}",
+            "#kitty-klient-home-actions .kitty-play-as-pet{position:relative;grid-column:1/-1;isolation:isolate;overflow:hidden;min-height:46px;border-color:#f0abfc!important;background:linear-gradient(135deg,#3b0764,#7e22ce 44%,#4c1d95)!important;box-shadow:0 0 18px rgba(217,70,239,.45)!important;cursor:pointer}#kitty-klient-home-actions .kitty-play-as-pet:disabled{border-color:rgba(203,213,225,.38)!important;background:linear-gradient(135deg,#374151,#4b5563)!important;box-shadow:none!important;cursor:not-allowed;filter:grayscale(1);opacity:.72}",
             "#kitty-klient-home-actions .kitty-play-as-pet .kitty-pet-hat-fragment{position:absolute;z-index:0;display:grid;place-items:center;min-width:28px;min-height:22px;color:rgba(255,255,255,.24);font:900 8px/1 system-ui,sans-serif;letter-spacing:.08em;white-space:nowrap;pointer-events:none;transform:translate(-50%,-50%) rotate(var(--kitty-pet-tilt));text-shadow:0 1px 0 rgba(45,0,74,.75)}#kitty-klient-home-actions .kitty-play-as-pet .kitty-pet-hat-fragment img{display:block;width:34px;height:30px;object-fit:contain;image-rendering:auto;filter:drop-shadow(0 1px 1px rgba(45,0,74,.75));opacity:.68}",
             "#kitty-klient-home-actions .kitty-play-as-pet .kitty-pet-button-label{position:relative;z-index:1;font:900 13px/1 system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;letter-spacing:.12em;text-shadow:0 0 9px #fff,0 0 18px #f0abfc}",
             "#kitty-pet-player-picker{position:fixed;z-index:2147483647;inset:0;display:grid;place-items:center;padding:16px;background:rgba(5,2,13,.78);backdrop-filter:blur(8px);color:#fff;font:600 12px/1.4 system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}",
@@ -5872,7 +5878,7 @@ const KITTY_KLIENT_VERSION = "6.9.12";
             button.className = "kitty-play-as-pet";
             const label = document.createElement("span");
             label.className = "kitty-pet-button-label";
-            label.textContent = "PLAY AS PET";
+            label.textContent = "PETS — WIP";
             [
                 ["BULL", "12%", "24%", "-18deg"], ["TANK", "82%", "28%", "15deg"],
                 ["BOOST", "25%", "76%", "11deg"], ["SAMURAI", "75%", "73%", "-12deg"],
@@ -5890,8 +5896,15 @@ const KITTY_KLIENT_VERSION = "6.9.12";
                 button.appendChild(fragment);
             });
             button.appendChild(label);
-            button.addEventListener("click", () => { void openKittyPetPlayerPicker(); });
+            button.addEventListener("click", () => {
+                if (KITTY_PET_MODE_AVAILABLE) void openKittyPetPlayerPicker();
+            });
         }
+        const label = button.querySelector(".kitty-pet-button-label");
+        if (label) label.textContent = KITTY_PET_MODE_AVAILABLE ? "PLAY AS PET" : "PETS — WIP";
+        button.disabled = !KITTY_PET_MODE_AVAILABLE;
+        button.setAttribute("aria-disabled", KITTY_PET_MODE_AVAILABLE ? "false" : "true");
+        button.title = KITTY_PET_MODE_AVAILABLE ? "" : "Pets are a work in progress.";
         refreshKittyPetHomeActionArt(button);
         if (button.parentElement !== actions) actions.prepend(button);
         return true;
@@ -11361,6 +11374,7 @@ let __mmSoldierRange = 400,
   __mmSpikeSyncEnabled = !0,
   __mmSpikeSyncHammerEnabled = !0,
   __mmVelTickInstaEnabled = !0,
+  __mmTankPredictInstaEnabled = !0,
   __mmHammerPolearmInstaEnabled = !1,
   __mmPolearmAidsEnabled = !0,
   __mmAutoPushInstaEnabled = !0,
@@ -15836,6 +15850,7 @@ function __mmInstaPopupLabel(__mmProfile, __mmAutomatic, __mmBetrayal) {
     trapCatch: "Trap Insta",
     polearmAids: "Polearm Insta",
     velTick: "VelTick Insta",
+    tankPredict: "Tank Window Insta",
     autoPush: "Auto-Push Insta",
   };
   return __mmLabels[String(__mmProfile || "normal")] || "Insta";
@@ -15921,6 +15936,7 @@ const __mmInsta = {
   statCounted: !1,
   automaticRetryUntil: 0,
   shieldWaitStartedAt: 0,
+  tankPredictPlan: null,
   isActive() {
     return this.state !== "idle" && this.state !== "cleanup";
   },
@@ -16394,7 +16410,7 @@ const __mmInsta = {
       return !1;
     if (!__mmIgnoreShield && !this.pathClear(__mmTarget)) return !1;
     const __mmPrimary = this.supportedPrimary(),
-      __mmPrimaryReady = __mmProfile === "velTick"
+      __mmPrimaryReady = (__mmProfile === "velTick" || __mmProfile === "tankPredict")
         ? __mmWeaponReadyWithin(__mmPrimary, this.tick())
         : __mmWeaponReady(__mmPrimary);
     if (
@@ -16403,7 +16419,7 @@ const __mmInsta = {
       !__mmPrimaryReady
     )
       return !1;
-    if (__mmProfile === "velTick" || __mmProfile === "autoPush")
+    if (__mmProfile === "velTick" || __mmProfile === "tankPredict" || __mmProfile === "autoPush")
       return !!(
         v.skins[__mmTurretGear] &&
         this.turretReady()
@@ -16430,7 +16446,7 @@ const __mmInsta = {
     if (!v || !v.alive || !v.skins || !v.skins[7]) return !1;
     const __mmPrimary = this.supportedPrimary();
     if (__mmPrimary == null || !__mmWeaponReady(__mmPrimary)) return !1;
-    if (__mmProfile === "velTick" || __mmProfile === "autoPush")
+    if (__mmProfile === "velTick" || __mmProfile === "tankPredict" || __mmProfile === "autoPush")
       return !!(v.skins[__mmTurretGear] && this.turretReady());
     const __mmSecondary = v.weapons && v.weapons[1],
       __mmSecondaryData = this.weaponData(__mmSecondary);
@@ -16834,6 +16850,7 @@ const __mmInsta = {
     this.bowUpgradeFollowup = !!__mmOptions.bowUpgradeFollowup;
     this.profile = __mmRequestedProfile;
     this.profileSource = String(__mmOptions.profileSource || this.profile);
+    this.tankPredictPlan = __mmOptions.tankPredictPlan || null;
     this.popupShown = !1;
     if (!this.runtimeReady()) return (this.cleanup("runtime-unavailable"), !1);
     this.capture();
@@ -17044,6 +17061,32 @@ const __mmInsta = {
       );
     }
     this.preparePostSpike(__mmContext.target);
+    if (this.profile === "tankPredict") {
+      const __mmPlan = this.tankPredictPlan;
+      if (!__mmPlan || !this.turretReady())
+        return void this.cleanup("tank-window-turret-unavailable");
+      const __mmNow = Date.now(),
+        __mmImpactAt = Math.max(__mmNow, Number(__mmPlan.impactAt) || __mmNow),
+        __mmLeadMs = Math.max(0, __mmImpactAt - __mmNow),
+        __mmAngle = this.mouseAimOnly || !__mmContext.target
+          ? __mmRawMouseAimDirection()
+          : __mmSyncAimAngle(__mmContext.target, __mmLeadMs);
+      // This gear packet is the turret shot. Commit it immediately: waiting
+      // for a cosmetic acknowledgement would put the projectile behind the
+      // one-tick Tank exposure we deliberately predicted.
+      this.selectSecondaryDamageGear();
+      __mmGearArbiter.commit();
+      try {
+        (O.send("D", __mmAngle), __mmAssumeTurretGearShot());
+      } catch (__mmTankPredictTurretError) {
+        return void this.cleanup("tank-window-turret-send-failed");
+      }
+      this.schedule(
+        () => this.executeFollowup(),
+        Math.max(1, Math.min(this.tick() * 2, __mmImpactAt - Date.now())),
+      );
+      return;
+    }
     if (this.profile === "velTick") {
       if (!this.turretReady())
         return void this.cleanup("veltick-turret-unavailable");
@@ -17181,6 +17224,47 @@ const __mmInsta = {
         return void this.cleanup("auto-push-turret-failed");
       }
       this.schedule(() => this.finishNormalBurst(), this.tick());
+      return;
+    }
+    if (this.profile === "tankPredict") {
+      const __mmPlan = this.tankPredictPlan,
+        __mmTankVisible = !!(
+          __mmContext.target &&
+          (Number(__mmContext.target.skinIndex) === 40 ||
+            Number(__mmContext.target.skinIndex2) === 40)
+        );
+      if (
+        !__mmPlan ||
+        !__mmTankVisible ||
+        !__mmWeaponReady(__mmContext.primary) ||
+        (__mmContext.target &&
+          !this.inRange(__mmContext.primary, __mmContext.target))
+      )
+        return void this.cleanup("tank-window-missed");
+      const __mmAngle = this.mouseAimOnly || !__mmContext.target
+        ? __mmRawMouseAimDirection()
+        : this.aim(__mmContext.target);
+      // Bull and the loaded main swing share the Tank impact phase. As with
+      // the Glotus Musket path, packet ordering matters more than a delayed
+      // local cosmetic echo.
+      this.selectDamageGear();
+      __mmGearArbiter.commit();
+      if (
+        !this.sendAttack(
+          __mmContext.primary,
+          !0,
+          __mmContext.target,
+          __mmAngle,
+        )
+      )
+        return void this.cleanup("tank-window-primary-send-failed");
+      this.countActivation();
+      this.scheduleRelease();
+      const __mmSecondary = this.secondaryFollowup();
+      if (__mmSecondary === __mmMusket && __mmWeaponReady(__mmSecondary)) {
+        this.pendingSecondaryWeapon = __mmSecondary;
+        this.schedule(() => this.executeTankPredictMusket(), this.tick());
+      } else this.schedule(() => this.cleanup("complete"), this.tick());
       return;
     }
     if (this.profile === "velTick") {
@@ -17322,6 +17406,28 @@ const __mmInsta = {
     ((this.pendingSecondaryWeapon = null),
       __mmGlotusMusket ? this.releaseAttack() : this.scheduleRelease(),
       this.schedule(() => this.finishNormalBurst(), this.normalStageMs()));
+  },
+  executeTankPredictMusket() {
+    if (this.state !== "executeBurst") return;
+    this.releaseAttack();
+    const __mmContext = this.context(!1),
+      __mmPendingMusket = this.pendingSecondaryWeapon;
+    if (
+      !__mmContext ||
+      __mmPendingMusket !== __mmMusket ||
+      !__mmWeaponReady(__mmPendingMusket) ||
+      (__mmContext.target && !this.inRange(__mmPendingMusket, __mmContext.target))
+    )
+      return void this.cleanup("complete");
+    const __mmAngle = this.projectileAim(__mmContext.target, __mmPendingMusket);
+    try {
+      O.send("D", __mmAngle);
+    } catch (__mmTankPredictMusketAimError) {}
+    if (!this.sendAttack(__mmPendingMusket, !0, __mmContext.target, __mmAngle))
+      return void this.cleanup("complete");
+    this.pendingSecondaryWeapon = null;
+    this.scheduleRelease();
+    this.schedule(() => this.cleanup("complete"), this.tick());
   },
   finishNormalBurst() {
     if (this.state !== "executeBurst") return;
@@ -17473,6 +17579,7 @@ const __mmInsta = {
     this.postSpikeCandidate = null;
     this.postSpikeCalculatedAt = 0;
     this.postSpikeTarget = null;
+    this.tankPredictPlan = null;
     this.profile = "normal";
     this.profileSource = "R";
     this.popupShown = !1;
@@ -30157,6 +30264,7 @@ function __mmHudState() {
     spikeSync: __mmSpikeSyncEnabled,
     spikeSyncHammer: __mmSpikeSyncHammerEnabled,
     velTickInsta: __mmVelTickInstaEnabled,
+    tankPredictInsta: __mmTankPredictInstaEnabled,
     polearmAids: __mmPolearmAidsEnabled,
     autoPushInsta: __mmAutoPushInstaEnabled,
     autoPushFinisher: __mmAutoPushFinisherEnabled,
@@ -30804,6 +30912,11 @@ function __mmSetHudToggle(__mmKey, __mmValue) {
     (!__mmEnabled && __mmStopVelTickInsta("hud disabled"),
       __mmRefreshKittyInstaLoop());
   }
+  else if (__mmKey === "tankPredictInsta") {
+    __mmTankPredictInstaEnabled = __mmEnabled;
+    !__mmEnabled && __mmTankPredictInsta.reset();
+    __mmRefreshKittyInstaLoop();
+  }
   else if (__mmKey === "polearmAids")
     ((__mmPolearmAidsEnabled = __mmEnabled), __mmRefreshKittyInstaLoop());
   else if (__mmKey === "autoPushInsta") {
@@ -31208,6 +31321,7 @@ function __mmApplyHudSettings(__mmSettings) {
     "spikeSync",
     "spikeSyncHammer",
     "velTickInsta",
+    "tankPredictInsta",
     "polearmAids",
     "autoPushInsta",
     "autoPushFinisher",
@@ -38477,7 +38591,7 @@ function __mmKittyProfileReady(__mmEnemy, __mmProfile) {
   )
     return !1;
   const __mmPrimary = __mmInsta.supportedPrimary(),
-    __mmPrimaryReady = __mmProfile === "velTick"
+    __mmPrimaryReady = (__mmProfile === "velTick" || __mmProfile === "tankPredict")
       ? __mmWeaponReadyWithin(__mmPrimary, __mmServerTickMs())
       : __mmWeaponReady(__mmPrimary);
   if (
@@ -38486,7 +38600,7 @@ function __mmKittyProfileReady(__mmEnemy, __mmProfile) {
     !__mmInsta.inRange(__mmPrimary, __mmEnemy)
   )
     return !1;
-  if (__mmProfile === "velTick" || __mmProfile === "autoPush")
+  if (__mmProfile === "velTick" || __mmProfile === "tankPredict" || __mmProfile === "autoPush")
     return !!(
       v.skins[__mmTurretGear] &&
       __mmInsta.turretReady()
@@ -38510,7 +38624,7 @@ function __mmKittyProfileReady(__mmEnemy, __mmProfile) {
         __mmInsta.turretReady()
       );
 }
-function __mmStartKittyProfile(__mmProfile, __mmEnemy, __mmReason) {
+function __mmStartKittyProfile(__mmProfile, __mmEnemy, __mmReason, __mmOptions = {}) {
   const __mmNow = Date.now();
   if (
     !__mmEnemy ||
@@ -38532,6 +38646,7 @@ function __mmStartKittyProfile(__mmProfile, __mmEnemy, __mmReason) {
     targetSid: __mmEnemy.sid,
     profile: __mmProfile,
     profileSource: __mmReason || "Kitty " + __mmProfile,
+    tankPredictPlan: __mmOptions.tankPredictPlan || null,
     // These profiles already choose their own local tick edge. The shared
     // projectile synchronizer must not insert an extra lead delay.
     syncScheduled: !0,
@@ -40094,6 +40209,108 @@ function __mmUpdateVelTickInsta(__mmEnemy, __mmPrediction) {
   __mmVelTickSetMovement(__mmAngle);
   __mmStartKittyProfile("velTick", __mmEnemy, "VelTick range band");
 }
+// Tank Gear is most often pulsed for a single loaded break swing.  Keep a
+// small, per-enemy history of only server-visible hat transitions, then use
+// either the game's next-hat field or a repeatable pulse cadence.  A lone
+// Tank frame never becomes a prediction by itself.
+const __mmTankPredictInsta = {
+  records: Object.create(null),
+  sampleLimit: 6,
+  reset() {
+    for (const __mmSid in this.records) delete this.records[__mmSid];
+  },
+  push(__mmSamples, __mmValue) {
+    if (!Number.isFinite(__mmValue) || __mmValue <= 0) return;
+    (__mmSamples.push(__mmValue),
+      __mmSamples.length > this.sampleLimit && __mmSamples.shift());
+  },
+  median(__mmSamples) {
+    if (!Array.isArray(__mmSamples) || !__mmSamples.length) return 0;
+    const __mmSorted = __mmSamples.slice().sort((__mmLeft, __mmRight) => __mmLeft - __mmRight),
+      __mmMiddle = Math.floor(__mmSorted.length / 2);
+    return __mmSorted.length % 2
+      ? __mmSorted[__mmMiddle]
+      : (__mmSorted[__mmMiddle - 1] + __mmSorted[__mmMiddle]) / 2;
+  },
+  stable(__mmRecord) {
+    const __mmSamples = __mmRecord && __mmRecord.intervals;
+    if (!__mmSamples || __mmSamples.length < 2) return !1;
+    const __mmSorted = __mmSamples.slice().sort((__mmLeft, __mmRight) => __mmLeft - __mmRight),
+      __mmSpread = __mmSorted[__mmSorted.length - 1] - __mmSorted[0];
+    return __mmSpread <= Math.max(90, __mmServerTickMs() * 1.5);
+  },
+  observe() {
+    if (!Array.isArray(E)) return;
+    const __mmNow = Date.now(), __mmSeen = Object.create(null);
+    for (let __mmIndex = 0; __mmIndex < E.length; __mmIndex += 1) {
+      const __mmEnemy = E[__mmIndex];
+      if (!__mmIsEnemyPlayer(__mmEnemy) || __mmEnemy.sid == null) continue;
+      const __mmSid = String(__mmEnemy.sid), __mmHat = Number(__mmEnemy.skinIndex);
+      __mmSeen[__mmSid] = !0;
+      let __mmRecord = this.records[__mmSid];
+      if (!__mmRecord) {
+        __mmRecord = this.records[__mmSid] = {
+          hat: __mmHat, lastTankAt: 0, lastSeenAt: __mmNow,
+          intervals: [], tankDurations: [], nextTankAt: 0,
+          firedForAt: 0, retryAfter: 0,
+        };
+        continue;
+      }
+      if (__mmRecord.hat !== 40 && __mmHat === 40) {
+        __mmRecord.lastTankAt && this.push(__mmRecord.intervals, __mmNow - __mmRecord.lastTankAt);
+        __mmRecord.lastTankAt = __mmNow;
+        __mmRecord.nextTankAt = this.stable(__mmRecord)
+          ? __mmNow + this.median(__mmRecord.intervals)
+          : 0;
+      } else if (__mmRecord.hat === 40 && __mmHat !== 40 && __mmRecord.lastTankAt) {
+        this.push(__mmRecord.tankDurations, __mmNow - __mmRecord.lastTankAt);
+      }
+      (__mmRecord.hat = __mmHat, __mmRecord.lastSeenAt = __mmNow);
+    }
+    for (const __mmSid in this.records)
+      !__mmSeen[__mmSid] && __mmNow - this.records[__mmSid].lastSeenAt > 15000 &&
+        delete this.records[__mmSid];
+  },
+  plan(__mmEnemy, __mmNow = Date.now()) {
+    if (!__mmEnemy || __mmEnemy.sid == null || Number(__mmEnemy.skinIndex) === 40 ||
+        !v || !v.alive || !__mmInsta.turretInRange(__mmEnemy)) return null;
+    const __mmRecord = this.records[String(__mmEnemy.sid)];
+    if (!__mmRecord || __mmNow < __mmRecord.retryAfter) return null;
+    const __mmNextHatTank = Number(__mmEnemy.skinIndex2) === 40,
+      __mmTrap = __mmAutoTrapInstaTrapForEnemy(__mmEnemy, __mmActiveTrapObjects()),
+      __mmTankBreakContext = !!(__mmTrap && Number(__mmEnemy.weaponIndex) === __mmGreatHammer),
+      __mmCadenceAt = this.stable(__mmRecord) ? Number(__mmRecord.nextTankAt) : 0,
+      __mmExpectedAt = __mmNextHatTank
+        ? __mmNow + __mmServerTickMs()
+        : __mmTankBreakContext && __mmCadenceAt > __mmNow
+          ? __mmCadenceAt
+          : 0;
+    if (!__mmExpectedAt) return null;
+    const __mmTravel = Math.max(1, __mmInsta.turretTravelMs(__mmEnemy)),
+      __mmFireAt = __mmExpectedAt - __mmTravel,
+      __mmTolerance = Math.max(55, __mmServerTickMs() * 0.7);
+    // Start only when this server tick is the turret's fire edge. This avoids
+    // turning a vague future cadence into a long, interruptible pre-arm.
+    if (__mmFireAt > __mmNow + 12 || __mmNow - __mmFireAt > __mmTolerance) return null;
+    return {
+      expectedAt: __mmExpectedAt,
+      impactAt: Math.max(__mmNow, __mmExpectedAt),
+      source: __mmNextHatTank ? "next-hat" : "repeat Tank break pulse",
+      record: __mmRecord,
+    };
+  },
+  launch(__mmEnemy, __mmPlan) {
+    if (!__mmPlan) return !1;
+    const __mmStarted = __mmStartKittyProfile(
+      "tankPredict", __mmEnemy,
+      "Tank Gear " + __mmPlan.source,
+      { tankPredictPlan: __mmPlan },
+    );
+    if (__mmStarted) __mmPlan.record.firedForAt = __mmPlan.expectedAt;
+    else __mmPlan.record.retryAfter = Date.now() + Math.max(45, __mmFastCheckMs());
+    return __mmStarted;
+  },
+};
 function __mmUpdateKittyInstas() {
   if (
     !v ||
@@ -40109,6 +40326,7 @@ function __mmUpdateKittyInstas() {
     __mmBleedInstaEnabled ||
     __mmKnockbackInstaEnabled ||
     __mmVelTickInstaEnabled ||
+    __mmTankPredictInstaEnabled ||
     __mmHammerPolearmInstaEnabled ||
     __mmPolearmAidsEnabled ||
     __mmAutoPushInstaEnabled
@@ -40147,6 +40365,10 @@ function __mmUpdateKittyInstas() {
     __mmHammerPolearmInsta.start(__mmEnemy)
   )
     return;
+  if (__mmTankPredictInstaEnabled) {
+    const __mmTankPlan = __mmTankPredictInsta.plan(__mmEnemy, __mmNow);
+    if (__mmTankPlan && __mmTankPredictInsta.launch(__mmEnemy, __mmTankPlan)) return;
+  }
   if (
     __mmPolearmAidsEnabled &&
     __mmPolearmHammer &&
@@ -40195,6 +40417,7 @@ function __mmRefreshKittyInstaLoop() {
     __mmBleedInstaEnabled ||
     __mmKnockbackInstaEnabled ||
     __mmVelTickInstaEnabled ||
+    __mmTankPredictInstaEnabled ||
     __mmHammerPolearmInstaEnabled ||
     __mmPolearmAidsEnabled ||
     __mmAutoPushInstaEnabled
@@ -55383,6 +55606,7 @@ Jl = function () {
     __mmUpdateServerCapacityWarning(),
     __mmHackDetector.observe(),
     __mmSoldierPredictInsta.observe(),
+    __mmTankPredictInsta.observe(),
     __mmRunServerTacticalTick());
   return __mmResult;
 };
