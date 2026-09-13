@@ -2,7 +2,7 @@
 // @name         kitty klient
 // @author       Coder Guy
 // @credits       random4ik — bot script
-// @version      6.9.3
+// @version      6.9.4
 // @icon         https://cdn.discordapp.com/icons/1540876076224356437/ac27c0ce87c4c46b407ebca78e150aeb.webp?size=2048
 // @description  kitty klient — a MooMoo.io client with adaptive zoom, fast autoheal, gear automation, combat tools, predictive placement, visual markers, CC0 background music, manual quick builds, and a fully rebindable keyboard/mouse controls HUD.
 // @match        *://moomoo.io/*
@@ -267,7 +267,7 @@
     const AUTO_PUSH_FINISHER_MIGRATION_KEY = "kitty-klient-auto-push-finisher-v1";
     const ASSASSIN_RANGE_AUTO_MIGRATION_KEY = "kitty-klient-assassin-range-auto-v1";
     const TAB_SYNC_BRIDGE_KEY = "kitty-klient-tab-sync-bridge-v1";
-const KITTY_KLIENT_VERSION = "6.9.3";
+const KITTY_KLIENT_VERSION = "6.9.4";
     const KITTY_SHARED_STORAGE_APPLIED_EVENT = "KittyMooMooSharedStorageApplied";
     // FRVR's v1.8 client changed the game module and now owns its own Altcha
     // verification flow. The legacy runtime patch relies on exact bundle
@@ -5803,7 +5803,7 @@ const KITTY_KLIENT_VERSION = "6.9.3";
             "#kitty-pet-player-picker[hidden]{display:none!important}#kitty-pet-player-picker *{box-sizing:border-box}#kitty-pet-player-picker .kitty-pet-picker-card{width:min(570px,calc(100vw - 24px));max-height:min(690px,calc(100vh - 24px));display:grid;gap:12px;overflow:auto;padding:17px;border:1px solid #f0abfc;border-radius:15px;background:linear-gradient(145deg,rgba(36,7,62,.98),rgba(12,5,26,.98));box-shadow:0 24px 70px rgba(0,0,0,.7),0 0 28px rgba(217,70,239,.35)}",
             "#kitty-pet-player-picker .kitty-pet-picker-top{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}#kitty-pet-player-picker h2{margin:0;color:#fff;font-size:20px;line-height:1.1}#kitty-pet-player-picker p{margin:5px 0 0;color:#e9d5ff;font-size:11px}#kitty-pet-player-picker button{min-height:34px;padding:0 10px;border:1px solid rgba(240,171,252,.7);border-radius:8px;background:rgba(49,10,75,.76);color:#fff;font:800 11px/1 system-ui,sans-serif;cursor:pointer;text-shadow:none}#kitty-pet-player-picker button:hover:not(:disabled){filter:brightness(1.15)}#kitty-pet-player-picker button:disabled{opacity:.5;cursor:wait}#kitty-pet-player-picker .kitty-pet-picker-close{min-width:32px;padding:0;border-color:transparent;background:transparent;font-size:20px}",
             "#kitty-pet-player-picker .kitty-pet-picker-list{display:grid;gap:8px;max-height:410px;overflow:auto;padding-right:2px}#kitty-pet-player-picker .kitty-pet-host-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center;padding:10px;border:1px solid rgba(240,171,252,.28);border-radius:10px;background:rgba(23,7,42,.65)}#kitty-pet-player-picker .kitty-pet-host-row strong{display:block;color:#fff;font-size:12px;overflow-wrap:anywhere}#kitty-pet-player-picker .kitty-pet-host-row span{display:block;margin-top:3px;color:#d8b4fe;font-size:10px;overflow-wrap:anywhere}#kitty-pet-player-picker .kitty-pet-picker-status{min-height:17px;margin:0;color:#e9d5ff;font-size:11px}#kitty-pet-player-picker .kitty-pet-picker-status[data-kind='error']{color:#fda4af}#kitty-pet-player-picker .kitty-pet-picker-status[data-kind='ok']{color:#bbf7d0}",
-            "#kitty-pet-mode-panel{position:fixed;z-index:2147483645;width:min(300px,calc(100vw - 22px));display:grid;gap:9px;padding:12px;border:1px solid rgba(240,171,252,.74);border-radius:12px;background:linear-gradient(145deg,rgba(35,6,59,.96),rgba(10,4,23,.96));box-shadow:0 12px 32px rgba(0,0,0,.48),0 0 18px rgba(217,70,239,.3);color:#fff;font:600 11px/1.35 system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;text-shadow:none;right:12px;top:12px}#kitty-pet-mode-panel[hidden],#kitty-pet-host-panel[hidden]{display:none!important}#kitty-pet-mode-panel *,#kitty-pet-host-panel *{box-sizing:border-box}#kitty-pet-mode-panel h3,#kitty-pet-host-panel h3{margin:0;color:#fff;font-size:13px;letter-spacing:.05em}#kitty-pet-mode-panel p,#kitty-pet-host-panel p{margin:0;color:#e9d5ff;font-size:10px;line-height:1.4}#kitty-pet-mode-panel select,#kitty-pet-mode-panel input,#kitty-pet-mode-panel button,#kitty-pet-host-panel button{min-width:0;min-height:31px;padding:0 8px;border:1px solid rgba(240,171,252,.55);border-radius:7px;background:rgba(14,4,29,.82);color:#fff;font:800 10px/1 system-ui,sans-serif;text-shadow:none}#kitty-pet-mode-panel button,#kitty-pet-host-panel button{cursor:pointer;background:linear-gradient(135deg,#701a75,#a21caf)}#kitty-pet-mode-panel button:hover,#kitty-pet-host-panel button:hover{filter:brightness(1.14)}#kitty-pet-mode-panel .kitty-pet-select-grid{display:grid;grid-template-columns:1fr 1fr;gap:7px}#kitty-pet-mode-panel label,#kitty-pet-host-panel label{display:grid;gap:4px;color:#f5d0fe;font-size:9px;font-weight:900;letter-spacing:.04em;text-transform:uppercase}#kitty-pet-mode-panel .kitty-pet-chat{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px}#kitty-pet-mode-panel .kitty-pet-leave{border-color:rgba(251,113,133,.7);background:linear-gradient(135deg,#7f1d1d,#be123c)}#kitty-klient-home-actions #kitty-pet-host-panel{position:relative!important;z-index:3;grid-column:1/-1;display:grid!important;gap:9px;width:100%!important;min-height:0!important;margin:0!important;padding:12px!important;align-items:stretch!important;justify-items:stretch!important;border:1px solid rgba(240,171,252,.74)!important;border-radius:12px!important;background:linear-gradient(145deg,rgba(35,6,59,.96),rgba(10,4,23,.96))!important;box-shadow:0 12px 32px rgba(0,0,0,.48),0 0 18px rgba(217,70,239,.3)!important;color:#fff;font:600 11px/1.35 system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;text-shadow:none!important}#kitty-pet-host-panel .kitty-pet-host-toggle{display:flex;align-items:center;justify-content:flex-start;gap:7px;color:#f5d0fe;font-size:10px;font-weight:800;text-transform:none;letter-spacing:0}#kitty-pet-host-panel .kitty-pet-host-toggle input{width:auto!important;min-height:0!important;accent-color:#e879f9}#kitty-pet-host-panel .kitty-pet-host-list{display:grid;gap:6px;width:100%}#kitty-pet-host-panel .kitty-pet-host-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px;align-items:center;padding:7px;border:1px solid rgba(240,171,252,.2);border-radius:7px;background:rgba(8,2,17,.42)}#kitty-pet-host-panel .kitty-pet-host-row strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#fff;font-size:10px}#kitty-pet-host-panel .kitty-pet-host-row button{min-height:27px;padding:0 7px;border-color:rgba(251,113,133,.6);background:rgba(127,29,29,.55);font-size:9px}",
+            "#kitty-pet-mode-panel{position:fixed;z-index:2147483645;width:min(300px,calc(100vw - 22px));display:grid;gap:9px;padding:12px;border:1px solid rgba(240,171,252,.74);border-radius:12px;background:linear-gradient(145deg,rgba(35,6,59,.96),rgba(10,4,23,.96));box-shadow:0 12px 32px rgba(0,0,0,.48),0 0 18px rgba(217,70,239,.3);color:#fff;font:600 11px/1.35 system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;text-shadow:none;right:12px;top:12px}#kitty-pet-mode-panel[hidden],#kitty-pet-host-panel[hidden]{display:none!important}#kitty-pet-mode-panel *,#kitty-pet-host-panel *{box-sizing:border-box}#kitty-pet-mode-panel h3,#kitty-pet-host-panel h3{margin:0;color:#fff;font-size:13px;letter-spacing:.05em}#kitty-pet-mode-panel p,#kitty-pet-host-panel p{margin:0;color:#e9d5ff;font-size:10px;line-height:1.4}#kitty-pet-mode-panel select,#kitty-pet-mode-panel input,#kitty-pet-mode-panel button,#kitty-pet-host-panel button{min-width:0;min-height:31px;padding:0 8px;border:1px solid rgba(240,171,252,.55);border-radius:7px;background:rgba(14,4,29,.82);color:#fff;font:800 10px/1 system-ui,sans-serif;text-shadow:none}#kitty-pet-mode-panel button,#kitty-pet-host-panel button{cursor:pointer;background:linear-gradient(135deg,#701a75,#a21caf)}#kitty-pet-mode-panel button:hover,#kitty-pet-host-panel button:hover{filter:brightness(1.14)}#kitty-pet-mode-panel .kitty-pet-select-grid{display:grid;grid-template-columns:1fr 1fr;gap:7px}#kitty-pet-mode-panel label,#kitty-pet-host-panel label{display:grid;gap:4px;color:#f5d0fe;font-size:9px;font-weight:900;letter-spacing:.04em;text-transform:uppercase}#kitty-pet-mode-panel .kitty-pet-chat{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px}#kitty-pet-mode-panel .kitty-pet-leave{border-color:rgba(251,113,133,.7);background:linear-gradient(135deg,#7f1d1d,#be123c)}#moomoo-op-hud #kitty-pet-host-panel{display:grid;gap:9px;width:min(370px,calc(100vw - 40px));box-sizing:border-box;margin:12px auto 0;padding:15px;border:1px solid rgba(240,171,252,.74);border-radius:12px;background:linear-gradient(145deg,rgba(35,6,59,.96),rgba(10,4,23,.96));box-shadow:0 12px 32px rgba(0,0,0,.48),0 0 18px rgba(217,70,239,.3);color:#fff;font:600 11px/1.35 system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;text-align:left;text-shadow:none}#kitty-pet-host-panel .kitty-pet-host-toggle{display:flex;align-items:center;justify-content:flex-start;gap:7px;color:#f5d0fe;font-size:10px;font-weight:800;text-transform:none;letter-spacing:0}#kitty-pet-host-panel .kitty-pet-host-toggle input{width:auto!important;min-height:0!important;accent-color:#e879f9}#kitty-pet-host-panel .kitty-pet-host-list{display:grid;gap:6px;width:100%}#kitty-pet-host-panel .kitty-pet-host-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px;align-items:center;padding:7px;border:1px solid rgba(240,171,252,.2);border-radius:7px;background:rgba(8,2,17,.42)}#kitty-pet-host-panel .kitty-pet-host-row strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#fff;font-size:10px}#kitty-pet-host-panel .kitty-pet-host-row button{min-height:27px;padding:0 7px;border-color:rgba(251,113,133,.6);background:rgba(127,29,29,.55);font-size:9px}",
             "html[data-kitty-pet-mode='1'] #kitty-klient-hud-launcher,html[data-kitty-pet-mode='1'] #moomoo-op-hud,html[data-kitty-pet-mode='1'] #kitty-bot-float-menu,html[data-kitty-pet-mode='1'] #kitty-bot-mouse-lock-indicator,html[data-kitty-pet-mode='1'] #kitty-bot-circle-guide{display:none!important}html[data-kitty-pet-mode='1'] #mainMenu #enterGame{display:none!important}@media(max-width:620px){#kitty-pet-mode-panel{top:auto;right:10px;bottom:10px;width:min(280px,calc(100vw - 20px))}#kitty-pet-mode-panel .kitty-pet-select-grid{grid-template-columns:1fr}}"
         ].join("");
         (document.head || document.documentElement).appendChild(style);
@@ -6151,8 +6151,9 @@ const KITTY_KLIENT_VERSION = "6.9.3";
     }
 
     function mountKittyPetHostPanel() {
-        const actions = kittyHomeActions();
-        if (!actions) return null;
+        const accountPanel = document.getElementById(KITTY_ACCOUNT_PANEL_ID);
+        const accountPage = accountPanel && accountPanel.parentElement;
+        if (!accountPage || !accountPage.matches("#" + HUD_ID + " .mm-hud-page[data-page='account']")) return null;
         installKittyPetStyles();
         let panel = document.getElementById(KITTY_PET_HOST_PANEL_ID);
         if (!panel) {
@@ -6175,7 +6176,7 @@ const KITTY_KLIENT_VERSION = "6.9.3";
             status.dataset.kittyPetStatus = "1";
             panel.append(title, toggleLabel, list, status);
         }
-        if (panel.parentElement !== actions) actions.appendChild(panel);
+        if (panel.parentElement !== accountPage) accountPage.appendChild(panel);
         return panel;
     }
 
@@ -6209,10 +6210,8 @@ const KITTY_KLIENT_VERSION = "6.9.3";
         const hostPanel = mountKittyPetHostPanel();
         if (!hostPanel) return;
         const inGame = !!(snapshot && snapshot.self && snapshot.self.sid);
-        const mainMenu = document.getElementById("mainMenu");
-        const menuVisible = !!(mainMenu && window.getComputedStyle(mainMenu).display !== "none");
-        hostPanel.toggleAttribute("hidden", !signedIn || petActive || !menuVisible);
-        if (!signedIn || petActive || !menuVisible) return;
+        hostPanel.toggleAttribute("hidden", !signedIn || petActive || !inGame);
+        if (!signedIn || petActive || !inGame) return;
         const toggle = hostPanel.querySelector("[data-kitty-pet-host-toggle]");
         if (toggle && document.activeElement !== toggle) toggle.checked = kittyPetHostingEnabled();
         const list = hostPanel.querySelector("[data-kitty-pet-host-list]");
@@ -6222,9 +6221,7 @@ const KITTY_KLIENT_VERSION = "6.9.3";
         if (!pets.length) {
             const empty = document.createElement("p");
             empty.textContent = kittyPetHostingEnabled()
-                ? inGame
-                    ? "No one is floating with you yet."
-                    : "Pet hosting is on and will be available when you join a server."
+                ? "No one is floating with you yet."
                 : "Pet hosting is currently off.";
             list.appendChild(empty);
             return;
