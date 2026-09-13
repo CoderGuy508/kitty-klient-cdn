@@ -2,7 +2,7 @@
 // @name         kitty klient
 // @author       Coder Guy
 // @credits       random4ik — bot script
-// @version      6.9.9
+// @version      6.9.11
 // @icon         https://cdn.discordapp.com/icons/1540876076224356437/ac27c0ce87c4c46b407ebca78e150aeb.webp?size=2048
 // @description  kitty klient — a MooMoo.io client with adaptive zoom, fast autoheal, gear automation, combat tools, predictive placement, visual markers, CC0 background music, manual quick builds, and a fully rebindable keyboard/mouse controls HUD.
 // @match        *://moomoo.io/*
@@ -267,7 +267,7 @@
     const AUTO_PUSH_FINISHER_MIGRATION_KEY = "kitty-klient-auto-push-finisher-v1";
     const ASSASSIN_RANGE_AUTO_MIGRATION_KEY = "kitty-klient-assassin-range-auto-v1";
     const TAB_SYNC_BRIDGE_KEY = "kitty-klient-tab-sync-bridge-v1";
-const KITTY_KLIENT_VERSION = "6.9.9";
+const KITTY_KLIENT_VERSION = "6.9.11";
     const KITTY_SHARED_STORAGE_APPLIED_EVENT = "KittyMooMooSharedStorageApplied";
     // FRVR's v1.8 client changed the game module and now owns its own Altcha
     // verification flow. The legacy runtime patch relies on exact bundle
@@ -312,8 +312,9 @@ const KITTY_KLIENT_VERSION = "6.9.9";
     const KITTY_ACCOUNT_PRESENCE_MS = 20_000;
     const KITTY_PET_STATE_MS = 5_000;
     const KITTY_PET_VISION_POLL_MS = 1_000;
-    const KITTY_PET_VISION_STREAM_FPS = 30;
-    const KITTY_PET_VISION_FRAME_MS = 50;
+    const KITTY_PET_WORLD_FRAME_MS = 67;
+    const KITTY_PET_WORLD_MAX_BYTES = 14_000;
+    const KITTY_PET_WORLD_STALE_MS = 4_000;
     const KITTY_PET_VISION_CONTROL_MS = 45;
     const KITTY_PET_HOSTING_KEY = "kitty-klient-pets-enabled-v1";
     const KITTY_PET_DEFAULT_SKIN_COLOR = "#f6c7a5";
@@ -2241,6 +2242,10 @@ const KITTY_KLIENT_VERSION = "6.9.9";
             "@media(max-width:700px){#kitty-klient-metrics{right:8px;top:60%;font-size:9px;padding:7px}#menuContainer{width:calc(100vw - 16px)!important;white-space:normal!important}}"
         ].join("");
         (document.head || document.documentElement).appendChild(style);
+        // Do not hide the title screen behind an opaque black layer while a
+        // direct host stream is still negotiating. The video itself appears
+        // only after it has begun playing.
+        style.append(document.createTextNode("#kitty-pet-vision{background:transparent!important}#kitty-pet-vision canvas{position:absolute;inset:0;width:100%;height:100%;max-width:none;image-rendering:auto}#kitty-pet-vision video{opacity:0;transition:opacity 140ms ease}#kitty-pet-vision[data-live='1'] video{opacity:1}"));
         applyKittyBrand();
         // The game mutates its DOM constantly. Running the full branding query
         // for every mutation can consume an entire frame on the main menu, so
@@ -5080,8 +5085,8 @@ const KITTY_KLIENT_VERSION = "6.9.9";
     let kittyPetInputLockInstalled = false;
     let kittyPetVisionPollTimer = 0;
     let kittyPetVisionPollBusy = false;
-    let kittyPetVisionCanvas = null;
-    let kittyPetVisionStream = null;
+    let kittyPetMirrorState = null;
+    let kittyPetMirrorAnimationFrame = 0;
     const kittyPetVisionPeers = new Map();
     const kittyPetVisionAcknowledgements = new Set();
     const kittyPetVisionInput = { w: false, a: false, s: false, d: false, aimX: 0.5, aimY: 0.5, lastSentAt: 0 };
@@ -6002,7 +6007,11 @@ const KITTY_KLIENT_VERSION = "6.9.9";
             : [];
         window.__KittyPetOverlayState = { pets, updatedAt: Date.now() };
         window.__KittyPetMode = role === "pet";
-        if (role !== "pet") resetKittyPetVisionInput();
+        if (role !== "pet") {
+            resetKittyPetVisionInput();
+            closeKittyPetNativeChat();
+            resetKittyPetMirror();
+        }
         document.documentElement?.setAttribute("data-kitty-pet-mode", role === "pet" ? "1" : "0");
         if (role === "pet") {
             try { setKittyHudOpen(false); } catch (_) {}
@@ -6024,15 +6033,13 @@ const KITTY_KLIENT_VERSION = "6.9.9";
         root.id = KITTY_PET_VISION_ID;
         root.setAttribute("aria-label", "Live Pet Vision");
         root.setAttribute("hidden", "");
-        const video = document.createElement("video");
-        video.autoplay = true;
-        video.muted = true;
-        video.playsInline = true;
-        video.dataset.kittyPetVisionVideo = "1";
+        const canvas = document.createElement("canvas");
+        canvas.dataset.kittyPetMirrorCanvas = "1";
+        canvas.setAttribute("aria-hidden", "true");
         const status = document.createElement("p");
         status.className = "kitty-pet-vision-status";
         status.dataset.kittyPetVisionStatus = "1";
-        root.append(video, status);
+        root.append(canvas, status);
         document.body.appendChild(root);
         return root;
     }
@@ -6052,19 +6059,11 @@ const KITTY_KLIENT_VERSION = "6.9.9";
     }
 
     function kittyPetVisionSupported() {
-        return typeof window.RTCPeerConnection === "function" && typeof window.MediaStream === "function";
+        return typeof window.RTCPeerConnection === "function";
     }
 
     function kittyPetVisionPeer(sessionId) {
         return kittyPetVisionPeers.get(String(sessionId)) || null;
-    }
-
-    function kittyPetVisionReleaseStream() {
-        if (kittyPetVisionStream) {
-            try { kittyPetVisionStream.getTracks().forEach((track) => track.stop()); } catch (_) {}
-        }
-        kittyPetVisionCanvas = null;
-        kittyPetVisionStream = null;
     }
 
     function closeKittyPetVisionPeer(sessionId, retry = false) {
@@ -6075,7 +6074,6 @@ const KITTY_KLIENT_VERSION = "6.9.9";
         if (peer.frameTimer) window.clearInterval(peer.frameTimer);
         try { peer.channel?.close(); } catch (_) {}
         try { peer.pc?.close(); } catch (_) {}
-        if (![...kittyPetVisionPeers.values()].some((entry) => entry.role === "host")) kittyPetVisionReleaseStream();
         if (retry) window.setTimeout(() => kittyPetVisionReconcile(), 1_500);
     }
 
@@ -6116,24 +6114,17 @@ const KITTY_KLIENT_VERSION = "6.9.9";
         });
         pc.addEventListener("connectionstatechange", () => {
             if (pc.connectionState === "connected" && peer.role === "pet") {
-                setKittyPetVisionStatus("Live view connected.", "ok");
+                setKittyPetVisionStatus("Direct world mirror connected.", "ok");
                 return;
             }
             if (pc.connectionState === "failed") closeKittyPetVisionPeer(peer.sessionId, true);
-        });
-        pc.addEventListener("track", (event) => {
-            if (peer.role !== "pet") return;
-            const root = mountKittyPetVision();
-            const video = root?.querySelector("[data-kitty-pet-vision-video]");
-            const stream = event.streams && event.streams[0]
-                ? event.streams[0]
-                : new window.MediaStream([event.track]);
-            if (video && video.srcObject !== stream) {
-                video.srcObject = stream;
-                void video.play().catch(() => {});
+            if (pc.connectionState === "disconnected") {
+                window.setTimeout(() => {
+                    if (kittyPetVisionPeer(peer.sessionId) === peer && pc.connectionState === "disconnected") {
+                        closeKittyPetVisionPeer(peer.sessionId, true);
+                    }
+                }, 2_500);
             }
-            if (root) root.dataset.live = "1";
-            setKittyPetVisionStatus("Live view connected.", "ok");
         });
         pc.addEventListener("datachannel", (event) => {
             if (peer.role !== "pet") return;
@@ -6152,38 +6143,6 @@ const KITTY_KLIENT_VERSION = "6.9.9";
         }
     }
 
-    function kittyPetVisionSourceStream() {
-        const snapshot = kittyPetGameSnapshot();
-        const canvas = document.getElementById("gameCanvas");
-        if (!snapshot || !(canvas instanceof HTMLCanvasElement) || typeof canvas.captureStream !== "function") return null;
-        if (kittyPetVisionStream && kittyPetVisionCanvas === canvas && kittyPetVisionStream.getVideoTracks().some((track) => track.readyState === "live")) {
-            return kittyPetVisionStream;
-        }
-        kittyPetVisionReleaseStream();
-        try {
-            kittyPetVisionStream = canvas.captureStream(KITTY_PET_VISION_STREAM_FPS);
-            kittyPetVisionCanvas = canvas;
-            return kittyPetVisionStream;
-        } catch {
-            kittyPetVisionReleaseStream();
-            return null;
-        }
-    }
-
-    function applyKittyPetVisionFrame(frame) {
-        const x = Number(frame && frame.x);
-        const y = Number(frame && frame.y);
-        if (!Number.isFinite(x) || !Number.isFinite(y)) return;
-        const root = mountKittyPetVision();
-        if (!root) return;
-        const width = Math.max(1, root.clientWidth || window.innerWidth || 1);
-        const height = Math.max(1, root.clientHeight || window.innerHeight || 1);
-        const offsetX = Math.max(-width * 0.1, Math.min(width * 0.1, (0.5 - x) * width));
-        const offsetY = Math.max(-height * 0.1, Math.min(height * 0.1, (0.5 - y) * height));
-        root.style.setProperty("--kitty-pet-vision-x", `${offsetX.toFixed(1)}px`);
-        root.style.setProperty("--kitty-pet-vision-y", `${offsetY.toFixed(1)}px`);
-    }
-
     function resetKittyPetVisionInput() {
         kittyPetVisionInput.w = false;
         kittyPetVisionInput.a = false;
@@ -6192,6 +6151,279 @@ const KITTY_KLIENT_VERSION = "6.9.9";
         kittyPetVisionInput.aimX = .5;
         kittyPetVisionInput.aimY = .5;
         kittyPetVisionInput.lastSentAt = 0;
+    }
+
+    function kittyPetMirrorNumber(value, minimum, maximum, fallback = 0) {
+        const number = Number(value);
+        return Number.isFinite(number) ? Math.max(minimum, Math.min(maximum, number)) : fallback;
+    }
+
+    function kittyPetMirrorText(value, maximum = 24) {
+        return String(value || "")
+            .replace(/[\u0000-\u001f\u007f]/g, " ")
+            .replace(/\s+/g, " ")
+            .trim()
+            .slice(0, maximum);
+    }
+
+    function kittyPetMirrorRows(value, maximum) {
+        return Array.isArray(value)
+            ? value.filter((row) => Array.isArray(row) && Number.isFinite(Number(row[1])) && Number.isFinite(Number(row[2])))
+                .slice(0, maximum)
+                .map((row) => row.slice(0, 12))
+            : [];
+    }
+
+    function kittyPetMirrorPet(value) {
+        if (!Array.isArray(value) || !Number.isFinite(Number(value[0])) || !Number.isFinite(Number(value[1]))) return null;
+        return value.slice(0, 10);
+    }
+
+    function resetKittyPetMirror() {
+        kittyPetMirrorState = null;
+        if (kittyPetMirrorAnimationFrame) {
+            window.cancelAnimationFrame(kittyPetMirrorAnimationFrame);
+            kittyPetMirrorAnimationFrame = 0;
+        }
+        const root = document.getElementById(KITTY_PET_VISION_ID);
+        const canvas = root?.querySelector("[data-kitty-pet-mirror-canvas]");
+        if (canvas instanceof HTMLCanvasElement) {
+            const context = canvas.getContext("2d");
+            context?.clearRect(0, 0, canvas.width, canvas.height);
+        }
+        if (root) root.dataset.live = "0";
+    }
+
+    function applyKittyPetMirrorWorld(value) {
+        if (!value || typeof value !== "object" || Number(value.v) !== 1 || !Array.isArray(value.c)) return;
+        const camera = value.c;
+        if (camera.length < 5 || !Number.isFinite(Number(camera[0])) || !Number.isFinite(Number(camera[1]))) return;
+        const pet = kittyPetMirrorPet(value.p);
+        if (!pet) return;
+        kittyPetMirrorState = {
+            receivedAt: performance.now(),
+            camera: [
+                kittyPetMirrorNumber(camera[0], 0, 30000),
+                kittyPetMirrorNumber(camera[1], 0, 30000),
+                kittyPetMirrorNumber(camera[2], 420, 12000, 1920),
+                kittyPetMirrorNumber(camera[3], 300, 9000, 1080),
+                kittyPetMirrorNumber(camera[4], 1000, 30000, 14400),
+                kittyPetMirrorNumber(camera[5], 0, 30000),
+                kittyPetMirrorNumber(camera[6], 0, 5000)
+            ],
+            pet,
+            players: kittyPetMirrorRows(value.u, 28),
+            animals: kittyPetMirrorRows(value.a, 28),
+            objects: kittyPetMirrorRows(value.o, 84)
+        };
+        const root = mountKittyPetVision();
+        if (root) root.dataset.live = "1";
+        setKittyPetVisionStatus("Direct world mirror connected.", "ok");
+        scheduleKittyPetMirrorRender();
+    }
+
+    function kittyPetMirrorColor(index, fallback) {
+        const palette = ["#8b5cf6", "#f97316", "#38bdf8", "#facc15", "#fb7185", "#34d399", "#a78bfa"];
+        const number = Number(index);
+        return Number.isFinite(number) ? palette[Math.abs(Math.floor(number)) % palette.length] : fallback;
+    }
+
+    function kittyPetMirrorPoint(state, worldX, worldY, width, height) {
+        const camera = state.camera;
+        const scale = Math.max(.08, Math.min(4, Math.min(width / camera[2], height / camera[3])));
+        return {
+            x: width / 2 + (worldX - camera[0]) * scale,
+            y: height / 2 + (worldY - camera[1]) * scale,
+            scale
+        };
+    }
+
+    function drawKittyPetMirrorPlayer(context, state, row, width, height, pet = false) {
+        const x = kittyPetMirrorNumber(row[pet ? 0 : 1], -1000, 31000);
+        const y = kittyPetMirrorNumber(row[pet ? 1 : 2], -1000, 31000);
+        const point = kittyPetMirrorPoint(state, x, y, width, height);
+        const size = Math.max(5, kittyPetMirrorNumber(row[pet ? 3 : 4], 12, 180, 35) * point.scale * (pet ? .56 : 1));
+        if (point.x < -size * 2 || point.x > width + size * 2 || point.y < -size * 2 || point.y > height + size * 2) return;
+        const direction = kittyPetMirrorNumber(row[pet ? 2 : 3], -Math.PI * 2, Math.PI * 2);
+        const hat = Number(row[pet ? 4 : 5]);
+        const weapon = Number(row[pet ? 6 : 7]);
+        const color = pet && /^#[0-9a-f]{6}$/i.test(String(row[8] || "")) ? String(row[8]) : "#f6c7a5";
+        context.save();
+        context.translate(point.x, point.y);
+        context.rotate(direction);
+        context.fillStyle = color;
+        context.beginPath();
+        context.arc(0, 0, size, 0, Math.PI * 2);
+        context.fill();
+        context.fillStyle = kittyPetMirrorColor(hat, "#8b5cf6");
+        context.beginPath();
+        context.arc(0, -size * .48, size * .72, Math.PI, Math.PI * 2);
+        context.fill();
+        context.strokeStyle = kittyPetMirrorColor(weapon, "#312e81");
+        context.lineCap = "round";
+        context.lineWidth = Math.max(2, size * .18);
+        context.beginPath();
+        context.moveTo(size * .2, 0);
+        context.lineTo(size * 1.75, 0);
+        context.stroke();
+        context.restore();
+        const name = kittyPetMirrorText(row[pet ? 9 : 9], 20);
+        if (name) {
+            context.fillStyle = "#fff";
+            context.strokeStyle = "rgba(8,3,18,.9)";
+            context.lineWidth = 3;
+            context.font = "800 10px system-ui,sans-serif";
+            context.textAlign = "center";
+            context.strokeText(name, point.x, point.y - size - 9);
+            context.fillText(name, point.x, point.y - size - 9);
+        }
+    }
+
+    function drawKittyPetMirrorObject(context, state, row, width, height) {
+        const point = kittyPetMirrorPoint(state, kittyPetMirrorNumber(row[1], -1000, 31000), kittyPetMirrorNumber(row[2], -1000, 31000), width, height);
+        const size = Math.max(4, kittyPetMirrorNumber(row[4], 6, 250, 35) * point.scale);
+        if (point.x < -size * 2 || point.x > width + size * 2 || point.y < -size * 2 || point.y > height + size * 2) return;
+        const isItem = Number(row[6]) === 1;
+        const kind = kittyPetMirrorText(row[7], 30).toLowerCase();
+        context.save();
+        context.translate(point.x, point.y);
+        context.rotate(kittyPetMirrorNumber(row[3], -Math.PI * 2, Math.PI * 2));
+        if (!isItem && /tree|bush/.test(kind)) {
+            context.fillStyle = "#7c4a25";
+            context.fillRect(-size * .22, -size * .15, size * .44, size * 1.12);
+            context.fillStyle = "#3c8b4a";
+            context.beginPath();
+            context.arc(0, -size * .38, size * .82, 0, Math.PI * 2);
+            context.fill();
+        } else if (!isItem && /stone|rock|gold/.test(kind)) {
+            context.fillStyle = /gold/.test(kind) ? "#facc15" : "#94a3b8";
+            context.beginPath();
+            context.arc(0, 0, size * .72, 0, Math.PI * 2);
+            context.fill();
+        } else {
+            context.fillStyle = kittyPetMirrorColor(row[5], isItem ? "#8b5cf6" : "#64748b");
+            context.fillRect(-size * .7, -size * .7, size * 1.4, size * 1.4);
+            if (/spike|trap/.test(kind)) {
+                context.fillStyle = "#fecdd3";
+                context.beginPath();
+                context.moveTo(-size * .55, size * .5);
+                context.lineTo(0, -size * .7);
+                context.lineTo(size * .55, size * .5);
+                context.fill();
+            }
+        }
+        context.restore();
+    }
+
+    function drawKittyPetMirrorAnimal(context, state, row, width, height) {
+        const point = kittyPetMirrorPoint(state, kittyPetMirrorNumber(row[1], -1000, 31000), kittyPetMirrorNumber(row[2], -1000, 31000), width, height);
+        const size = Math.max(4, kittyPetMirrorNumber(row[4], 8, 220, 30) * point.scale);
+        if (point.x < -size * 2 || point.x > width + size * 2 || point.y < -size * 2 || point.y > height + size * 2) return;
+        context.save();
+        context.translate(point.x, point.y);
+        context.rotate(kittyPetMirrorNumber(row[3], -Math.PI * 2, Math.PI * 2));
+        context.fillStyle = kittyPetMirrorColor(row[5], "#f59e0b");
+        context.beginPath();
+        context.ellipse(0, 0, size, size * .74, 0, 0, Math.PI * 2);
+        context.fill();
+        context.fillStyle = "rgba(255,255,255,.8)";
+        context.beginPath();
+        context.arc(size * .46, -size * .2, Math.max(1.5, size * .13), 0, Math.PI * 2);
+        context.fill();
+        context.restore();
+    }
+
+    function renderKittyPetMirror() {
+        kittyPetMirrorAnimationFrame = 0;
+        const state = kittyPetMirrorState;
+        const root = document.getElementById(KITTY_PET_VISION_ID);
+        const canvas = root?.querySelector("[data-kitty-pet-mirror-canvas]");
+        if (!kittyPetModeActive() || !state || !(canvas instanceof HTMLCanvasElement)) return;
+        if (performance.now() - state.receivedAt > KITTY_PET_WORLD_STALE_MS) {
+            if (root) root.dataset.live = "0";
+            setKittyPetVisionStatus("World mirror reconnecting…", "error");
+            return;
+        }
+        const width = Math.max(1, root.clientWidth || window.innerWidth || 1);
+        const height = Math.max(1, root.clientHeight || window.innerHeight || 1);
+        const ratio = Math.max(1, Math.min(2, Number(window.devicePixelRatio) || 1));
+        if (canvas.width !== Math.round(width * ratio) || canvas.height !== Math.round(height * ratio)) {
+            canvas.width = Math.round(width * ratio);
+            canvas.height = Math.round(height * ratio);
+        }
+        const context = canvas.getContext("2d");
+        if (!context) return;
+        context.setTransform(ratio, 0, 0, ratio, 0, 0);
+        context.clearRect(0, 0, width, height);
+        context.fillStyle = "#66964b";
+        context.fillRect(0, 0, width, height);
+        const camera = state.camera;
+        const scale = Math.max(.08, Math.min(4, Math.min(width / camera[2], height / camera[3])));
+        context.strokeStyle = "rgba(235,255,235,.10)";
+        context.lineWidth = 1;
+        context.beginPath();
+        const left = camera[0] - camera[2] / 2;
+        const top = camera[1] - camera[3] / 2;
+        for (let x = Math.ceil(left / 250) * 250; x < left + camera[2]; x += 250) {
+            const screen = width / 2 + (x - camera[0]) * scale;
+            context.moveTo(screen, 0); context.lineTo(screen, height);
+        }
+        for (let y = Math.ceil(top / 250) * 250; y < top + camera[3]; y += 250) {
+            const screen = height / 2 + (y - camera[1]) * scale;
+            context.moveTo(0, screen); context.lineTo(width, screen);
+        }
+        context.stroke();
+        state.objects.forEach((row) => drawKittyPetMirrorObject(context, state, row, width, height));
+        state.animals.forEach((row) => drawKittyPetMirrorAnimal(context, state, row, width, height));
+        state.players.forEach((row) => drawKittyPetMirrorPlayer(context, state, row, width, height));
+        drawKittyPetMirrorPlayer(context, state, state.pet, width, height, true);
+        kittyPetMirrorAnimationFrame = window.requestAnimationFrame(renderKittyPetMirror);
+    }
+
+    function scheduleKittyPetMirrorRender() {
+        if (!kittyPetMirrorAnimationFrame) kittyPetMirrorAnimationFrame = window.requestAnimationFrame(renderKittyPetMirror);
+    }
+
+    function kittyPetNativeChatInput() {
+        const direct = document.getElementById("chatBox");
+        if (direct && direct.matches("input,textarea")) return direct;
+        return direct?.querySelector("input,textarea") || document.querySelector("#chatHolder input,#chatHolder textarea");
+    }
+
+    function kittyPetNativeChatHolder(input = kittyPetNativeChatInput()) {
+        return document.getElementById("chatHolder") || input?.closest("#chatHolder") || null;
+    }
+
+    function isKittyPetNativeChatTarget(target) {
+        const input = kittyPetNativeChatInput();
+        return Boolean(input && (target === input || (target && typeof input.contains === "function" && input.contains(target))));
+    }
+
+    function openKittyPetNativeChat() {
+        if (!kittyPetModeActive()) return false;
+        const input = kittyPetNativeChatInput();
+        if (!input) return false;
+        const holder = kittyPetNativeChatHolder(input);
+        if (input.dataset.kittyPetChatActive !== "1") {
+            input.dataset.kittyPetChatActive = "1";
+            input.dataset.kittyPetChatPlaceholder = input.getAttribute("placeholder") || "";
+        }
+        input.setAttribute("placeholder", "Tiny pet chat…");
+        if (holder) holder.style.display = "block";
+        try { input.focus({ preventScroll: true }); } catch { input.focus(); }
+        return true;
+    }
+
+    function closeKittyPetNativeChat() {
+        const input = kittyPetNativeChatInput();
+        if (!input || input.dataset.kittyPetChatActive !== "1") return;
+        const holder = kittyPetNativeChatHolder(input);
+        input.value = "";
+        input.setAttribute("placeholder", input.dataset.kittyPetChatPlaceholder || "");
+        delete input.dataset.kittyPetChatPlaceholder;
+        delete input.dataset.kittyPetChatActive;
+        if (holder) holder.style.display = "none";
+        try { input.blur(); } catch {}
     }
 
     function applyKittyPetVisionControl(sessionId, control) {
@@ -6235,9 +6467,9 @@ const KITTY_KLIENT_VERSION = "6.9.9";
         peer.channel = channel;
         channel.addEventListener("message", (event) => {
             try {
-                const frame = JSON.parse(String(event.data || ""));
-                if (frame && frame.type === "frame" && peer.role === "pet") applyKittyPetVisionFrame(frame);
-                if (frame && frame.type === "control" && peer.role === "host") applyKittyPetVisionControl(peer.sessionId, frame);
+                const message = JSON.parse(String(event.data || ""));
+                if (message && message.type === "world" && peer.role === "pet") applyKittyPetMirrorWorld(message.world);
+                if (message && message.type === "control" && peer.role === "host") applyKittyPetVisionControl(peer.sessionId, message);
             } catch {}
         });
         channel.addEventListener("close", () => {
@@ -6246,22 +6478,48 @@ const KITTY_KLIENT_VERSION = "6.9.9";
         channel.addEventListener("open", () => {
             if (peer.role === "pet") kittyPetVisionSendControl(true);
         });
-        if (peer.role === "host") startKittyPetVisionFrameLoop(peer);
+        if (peer.role === "host") startKittyPetMirrorWorldLoop(peer);
     }
 
-    function startKittyPetVisionFrameLoop(peer) {
+    function encodeKittyPetMirrorWorld(world) {
+        if (!world || typeof world !== "object") return "";
+        const message = {
+            type: "world",
+            world: {
+                ...world,
+                u: Array.isArray(world.u) ? world.u.slice() : [],
+                a: Array.isArray(world.a) ? world.a.slice() : [],
+                o: Array.isArray(world.o) ? world.o.slice() : []
+            }
+        };
+        let encoded = "";
+        do {
+            try { encoded = JSON.stringify(message); } catch { return ""; }
+            if (encoded.length <= KITTY_PET_WORLD_MAX_BYTES) return encoded;
+            if (message.world.o.length > 36) message.world.o.pop();
+            else if (message.world.a.length > 12) message.world.a.pop();
+            else if (message.world.u.length > 12) message.world.u.pop();
+            else if (message.world.o.length) message.world.o.pop();
+            else if (message.world.a.length) message.world.a.pop();
+            else if (message.world.u.length) message.world.u.pop();
+            else return "";
+        } while (true);
+    }
+
+    function startKittyPetMirrorWorldLoop(peer) {
         if (peer.role !== "host" || peer.frameTimer) return;
         peer.frameTimer = window.setInterval(() => {
             const channel = peer.channel;
-            if (!channel || channel.readyState !== "open") return;
+            if (!channel || channel.readyState !== "open" || Number(channel.bufferedAmount) > KITTY_PET_WORLD_MAX_BYTES * 3) return;
             const pet = kittyPetHostSessions().find((entry) => String(entry && entry.id || "") === peer.sessionId);
             const runtime = window.__KittyGameRuntime;
-            const frame = pet && runtime && typeof runtime.getPetVisionFrame === "function"
-                ? runtime.getPetVisionFrame(pet)
+            const world = pet && runtime && typeof runtime.getPetWorldSnapshot === "function"
+                ? runtime.getPetWorldSnapshot(pet)
                 : null;
-            if (!frame || !Number.isFinite(Number(frame.x)) || !Number.isFinite(Number(frame.y))) return;
-            try { channel.send(JSON.stringify({ type: "frame", x: Number(frame.x), y: Number(frame.y) })); } catch {}
-        }, KITTY_PET_VISION_FRAME_MS);
+            if (!world) return;
+            const encoded = encodeKittyPetMirrorWorld(world);
+            if (encoded) try { channel.send(encoded); } catch {}
+        }, KITTY_PET_WORLD_FRAME_MS);
     }
 
     async function drainKittyPetVisionCandidates(peer) {
@@ -6273,12 +6531,9 @@ const KITTY_KLIENT_VERSION = "6.9.9";
 
     async function startKittyPetVisionHost(sessionId) {
         if (!kittyPetVisionSupported() || kittyPetVisionPeer(sessionId)) return;
-        const stream = kittyPetVisionSourceStream();
-        if (!stream) return;
         const peer = createKittyPetVisionPeer(sessionId, "host");
         try {
-            stream.getVideoTracks().forEach((track) => peer.pc.addTrack(track, stream));
-            const channel = peer.pc.createDataChannel("kitty-pet-vision", { ordered: false, maxRetransmits: 0 });
+            const channel = peer.pc.createDataChannel("kitty-pet-world", { ordered: false, maxRetransmits: 0 });
             attachKittyPetVisionDataChannel(peer, channel);
             const offer = await peer.pc.createOffer();
             await peer.pc.setLocalDescription(offer);
@@ -6307,7 +6562,7 @@ const KITTY_KLIENT_VERSION = "6.9.9";
                 return await sendKittyPetVisionSignal(sessionId, { type: "answer", description: peer.pc.localDescription });
             } catch {
                 closeKittyPetVisionPeer(sessionId);
-                setKittyPetVisionStatus("Could not connect the live view. Retrying…", "error");
+                setKittyPetVisionStatus("Could not connect the direct world mirror. Retrying…", "error");
                 return true;
             }
         }
@@ -6348,7 +6603,7 @@ const KITTY_KLIENT_VERSION = "6.9.9";
                 if (await handleKittyPetVisionSignal(sessionId, entry.signal)) kittyPetVisionAcknowledgements.add(id);
             }
         } catch {
-            if (kittyPetModeActive()) setKittyPetVisionStatus("Waiting for the direct live view…", "");
+            if (kittyPetModeActive()) setKittyPetVisionStatus("Waiting for the direct world mirror…", "");
         } finally {
             kittyPetVisionPollBusy = false;
         }
@@ -6362,13 +6617,11 @@ const KITTY_KLIENT_VERSION = "6.9.9";
         if (root) {
             root.toggleAttribute("hidden", !petMode);
             if (!petMode) {
-                root.dataset.live = "0";
-                const video = root.querySelector("[data-kitty-pet-vision-video]");
-                if (video) video.srcObject = null;
+                resetKittyPetMirror();
             } else if (root.dataset.live !== "1") {
                 setKittyPetVisionStatus(kittyPetVisionSupported()
-                    ? "Connecting directly to your host’s live game view…"
-                    : "This browser does not support direct Pet Vision.", kittyPetVisionSupported() ? "" : "error");
+                    ? "Connecting directly to your host’s world mirror…"
+                    : "This browser does not support direct Pet Mirror.", kittyPetVisionSupported() ? "" : "error");
             }
         }
         if (sessionIds.length && kittyPetVisionSupported()) {
@@ -6385,7 +6638,7 @@ const KITTY_KLIENT_VERSION = "6.9.9";
             window.clearInterval(kittyPetVisionPollTimer);
             kittyPetVisionPollTimer = 0;
             kittyPetVisionAcknowledgements.clear();
-            kittyPetVisionReleaseStream();
+            resetKittyPetMirror();
         }
     }
 
@@ -6395,8 +6648,23 @@ const KITTY_KLIENT_VERSION = "6.9.9";
         const withinPetUi = (target) => target && typeof target.closest === "function" && Boolean(
             target.closest(`#${KITTY_PET_MODE_PANEL_ID},#${KITTY_PET_MODAL_ID}`)
         );
+        const handlePetChatKeydown = (event) => {
+            if (!kittyPetModeActive() || event.key !== "Enter") return;
+            if (isKittyPetNativeChatTarget(event.target)) {
+                event.preventDefault();
+                event.stopImmediatePropagation();
+                const input = kittyPetNativeChatInput();
+                void sendKittyPetChat(String(input && input.value || ""));
+                return;
+            }
+            if (withinPetUi(event.target) || isTextEditingTarget(event.target)) return;
+            if (openKittyPetNativeChat()) {
+                event.preventDefault();
+                event.stopImmediatePropagation();
+            }
+        };
         const recordPetInput = (event) => {
-            if (!kittyPetModeActive() || withinPetUi(event.target)) return;
+            if (!kittyPetModeActive() || withinPetUi(event.target) || isKittyPetNativeChatTarget(event.target)) return;
             if (event.type === "pointermove" || event.type === "mousemove") {
                 kittyPetVisionInput.aimX = Math.max(0, Math.min(1, Number(event.clientX) / Math.max(1, window.innerWidth || 1)));
                 kittyPetVisionInput.aimY = Math.max(0, Math.min(1, Number(event.clientY) / Math.max(1, window.innerHeight || 1)));
@@ -6411,8 +6679,9 @@ const KITTY_KLIENT_VERSION = "6.9.9";
         ["keydown", "keyup", "pointermove", "mousemove"].forEach((type) => {
             window.addEventListener(type, recordPetInput, true);
         });
+        window.addEventListener("keydown", handlePetChatKeydown, true);
         const blockGameInput = (event) => {
-            if (!kittyPetModeActive() || withinPetUi(event.target)) return;
+            if (!kittyPetModeActive() || withinPetUi(event.target) || isKittyPetNativeChatTarget(event.target)) return;
             event.preventDefault();
             event.stopImmediatePropagation();
         };
@@ -6461,24 +6730,19 @@ const KITTY_KLIENT_VERSION = "6.9.9";
         }
     }
 
-    async function sendKittyPetChat(panel = document.getElementById(KITTY_PET_MODE_PANEL_ID)) {
-        if (!kittyPetModeActive() || !panel) return;
-        const input = panel.querySelector("[data-kitty-pet-chat-input]");
-        const message = String(input && input.value || "").trim().slice(0, 60);
+    async function sendKittyPetChat(rawMessage, panel = document.getElementById(KITTY_PET_MODE_PANEL_ID)) {
+        if (!kittyPetModeActive()) return;
+        const message = String(rawMessage || "").trim().slice(0, 60);
         if (!message) return;
-        const send = panel.querySelector("[data-kitty-pet-chat-send]");
-        if (send) send.disabled = true;
         try {
             const result = await kittyAccountRequest("/v1/pets/chat", { message });
-            if (input) input.value = "";
             const self = kittyPetState.self && { ...kittyPetState.self, chat: result.message || message, chatSentAt: result.sentAt || new Date().toISOString() };
             kittyPetState = { ...kittyPetState, self };
+            closeKittyPetNativeChat();
             publishKittyPetOverlayState();
             setKittyPetPanelStatus(panel, "Tiny message sent.", "ok");
         } catch (error) {
             setKittyPetPanelStatus(panel, String(error && error.message || "Could not send pet chat."), "error");
-        } finally {
-            if (send) send.disabled = false;
         }
     }
 
@@ -6523,26 +6787,6 @@ const KITTY_KLIENT_VERSION = "6.9.9";
             label.appendChild(select);
             selectGrid.appendChild(label);
         });
-        const chat = document.createElement("div");
-        chat.className = "kitty-pet-chat";
-        const input = document.createElement("input");
-        input.type = "text";
-        input.maxLength = 60;
-        input.placeholder = "Tiny pet chat…";
-        input.setAttribute("aria-label", "Tiny pet chat");
-        input.dataset.kittyPetChatInput = "1";
-        input.addEventListener("keydown", (event) => {
-            if (event.key !== "Enter") return;
-            event.preventDefault();
-            event.stopImmediatePropagation();
-            void sendKittyPetChat(panel);
-        });
-        const send = document.createElement("button");
-        send.type = "button";
-        send.textContent = "Say";
-        send.dataset.kittyPetChatSend = "1";
-        send.addEventListener("click", () => { void sendKittyPetChat(panel); });
-        chat.append(input, send);
         const leave = document.createElement("button");
         leave.type = "button";
         leave.className = "kitty-pet-leave";
@@ -6550,7 +6794,7 @@ const KITTY_KLIENT_VERSION = "6.9.9";
         leave.addEventListener("click", () => { void leaveKittyPetMode(panel); });
         const status = document.createElement("p");
         status.dataset.kittyPetStatus = "1";
-        panel.append(title, copy, selectGrid, chat, leave, status);
+        panel.append(title, copy, selectGrid, leave, status);
         document.body.appendChild(panel);
         return panel;
     }
@@ -6626,7 +6870,7 @@ const KITTY_KLIENT_VERSION = "6.9.9";
             if (petActive) {
                 const self = kittyPetState.self || {};
                 const copy = modePanel.querySelector("[data-kitty-pet-copy]");
-                if (copy) copy.textContent = `Floating with ${String(self.hostUsername || "your host")} · their live game view connects directly to this pet tab. Mouse aim turns your pet; WASD gives it a small, smooth tethered drift while normal game, bots, and Esc HUD controls stay locked.`;
+                if (copy) copy.textContent = `Floating with ${String(self.hostUsername || "your host")} · their nearby world state mirrors directly to this pet tab. Mouse aim turns your pet; WASD gives it a small, smooth tethered drift while normal game, bots, and Esc HUD controls stay locked.`;
                 const catalog = kittyPetCatalog();
                 [
                     ["hatId", "hats"], ["tailId", "tails"],
@@ -55602,10 +55846,115 @@ window.__KittyGameRuntime = {
       return { clear: !1, reason: "placement validator unavailable", scale: 45 };
     }
   },
-  // Pet Vision sends only this tiny camera offset over its direct WebRTC data
-  // channel. The host's game canvas stays the source of every world/entity
-  // pixel, while the pet's view follows the same orbit position the host
-  // renderer uses for that pet replica.
+  // The Pet Mirror transfers compact, bounded nearby-world records over the
+  // direct WebRTC data channel. The account service only brokers WebRTC; it
+  // never receives this world data or any rendered pixels.
+  getPetWorldSnapshot: function (__mmPet) {
+    try {
+      if (!v || !v.alive || !__mmPet) return null;
+      var __mmNumber = function (__mmValue, __mmFallback) {
+          var __mmResult = Number(__mmValue);
+          return Number.isFinite(__mmResult) ? __mmResult : __mmFallback;
+        },
+        __mmClean = function (__mmValue, __mmMaximum) {
+          return String(__mmValue || "").replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim().slice(0, __mmMaximum);
+        },
+        __mmPosition = function (__mmEntity) {
+          if (!__mmEntity) return null;
+          var __mmX = __mmNumber(__mmEntity.x2, __mmNumber(__mmEntity.x, NaN)),
+            __mmY = __mmNumber(__mmEntity.y2, __mmNumber(__mmEntity.y, NaN));
+          return Number.isFinite(__mmX) && Number.isFinite(__mmY) ? { x: __mmX, y: __mmY } : null;
+        },
+        __mmHost = __mmPosition(v);
+      if (!__mmHost) return null;
+      var __mmPetId = String(__mmPet.id || ""),
+        __mmNow = performance.now(),
+        __mmHostScale = Math.max(18, __mmNumber(v.scale, 35)),
+        __mmPhase = __mmNow / 980 + __mmNumber(__mmPet.orbitPhase, 0),
+        __mmRadius = __mmHostScale * 1.62 + 32 + Math.max(0, Math.min(7, Math.floor(__mmNumber(__mmPet.orbitSlot, 0)))) * 12,
+        __mmOrbitX = __mmHost.x + Math.cos(__mmPhase) * __mmRadius,
+        __mmOrbitY = __mmHost.y + Math.sin(__mmPhase) * __mmRadius * .56 - __mmHostScale * .74 + Math.sin(__mmNow / 205 + __mmNumber(__mmPet.orbitPhase, 0)) * 3.2,
+        __mmMotion = __mmKittyPetMotion.get(__mmPetId),
+        __mmPetX = Number.isFinite(__mmNumber(__mmMotion && __mmMotion.x, NaN)) ? Number(__mmMotion.x) : __mmOrbitX,
+        __mmPetY = Number.isFinite(__mmNumber(__mmMotion && __mmMotion.y, NaN)) ? Number(__mmMotion.y) : __mmOrbitY,
+        __mmViewWidth = Math.max(640, Math.min(6000, __mmNumber(_, __mmNumber(y && y.maxScreenWidth, 1920)))),
+        __mmViewHeight = Math.max(420, Math.min(4500, __mmNumber(L, __mmNumber(y && y.maxScreenHeight, 1080)))),
+        __mmRange = Math.hypot(__mmViewWidth, __mmViewHeight) * .72 + 220,
+        __mmRangeSquared = __mmRange * __mmRange,
+        __mmControl = __mmKittyPetDirectControl(__mmPetId, __mmNow),
+        __mmDirection = __mmControl
+          ? Math.atan2(__mmNumber(ae, __mmHost.y) - __mmViewHeight / 2 + __mmControl.aimY * __mmViewHeight - __mmPetY, __mmNumber(oe, __mmHost.x) - __mmViewWidth / 2 + __mmControl.aimX * __mmViewWidth - __mmPetX)
+          : Math.atan2(__mmHost.y - __mmPetY, __mmHost.x - __mmPetX),
+        __mmRound = function (__mmValue) { return Math.round(__mmValue * 10) / 10; },
+        __mmRowsNear = function (__mmRows, __mmLimit, __mmMap) {
+          return __mmRows.filter(function (__mmEntry) { return __mmEntry && __mmEntry.distance <= __mmRangeSquared; })
+            .sort(function (__mmLeft, __mmRight) { return __mmLeft.distance - __mmRight.distance; })
+            .slice(0, __mmLimit)
+            .map(__mmMap);
+        },
+        __mmPlayerRows = [], __mmSeenPlayers = Object.create(null),
+        __mmAddPlayer = function (__mmPlayer) {
+          if (!__mmPlayer || !__mmPlayer.alive || (__mmPlayer !== v && __mmPlayer.visible === !1)) return;
+          var __mmPositionValue = __mmPosition(__mmPlayer), __mmSid = String(__mmPlayer.sid != null ? __mmPlayer.sid : __mmPlayer.id || "").slice(0, 80);
+          if (!__mmPositionValue || !__mmSid || __mmSeenPlayers[__mmSid]) return;
+          __mmSeenPlayers[__mmSid] = !0;
+          var __mmDx = __mmPositionValue.x - __mmPetX, __mmDy = __mmPositionValue.y - __mmPetY;
+          __mmPlayerRows.push({ distance: __mmDx * __mmDx + __mmDy * __mmDy, value: [
+            __mmSid, __mmRound(__mmPositionValue.x), __mmRound(__mmPositionValue.y), __mmRound(__mmNumber(__mmPlayer.dir, 0)),
+            Math.round(Math.max(12, Math.min(180, __mmNumber(__mmPlayer.scale, 35)))), Math.round(__mmNumber(__mmPlayer.skinIndex, 0)),
+            Math.round(__mmNumber(__mmPlayer.tailIndex, 0)), Math.round(__mmNumber(__mmPlayer.weaponIndex, 0)),
+            Math.round(__mmNumber(__mmPlayer.weaponVariant, 0)), __mmClean(__mmPlayer.name, 20),
+            Math.round(__mmNumber(__mmPlayer.health, 0)), Math.round(__mmNumber(__mmPlayer.maxHealth, 100))
+          ] });
+        };
+      __mmAddPlayer(v);
+      if (Array.isArray(E)) for (var __mmPlayerIndex = 0; __mmPlayerIndex < E.length; __mmPlayerIndex++) __mmAddPlayer(E[__mmPlayerIndex]);
+      var __mmAnimalRows = [];
+      if (Array.isArray(N)) for (var __mmAnimalIndex = 0; __mmAnimalIndex < N.length; __mmAnimalIndex++) {
+        var __mmAnimal = N[__mmAnimalIndex];
+        if (!__mmAnimal || __mmAnimal.active === !1 || __mmAnimal.visible === !1) continue;
+        var __mmAnimalPosition = __mmPosition(__mmAnimal);
+        if (!__mmAnimalPosition) continue;
+        var __mmAnimalDx = __mmAnimalPosition.x - __mmPetX, __mmAnimalDy = __mmAnimalPosition.y - __mmPetY;
+        __mmAnimalRows.push({ distance: __mmAnimalDx * __mmAnimalDx + __mmAnimalDy * __mmAnimalDy, value: [
+          String(__mmAnimal.sid != null ? __mmAnimal.sid : __mmAnimal.id != null ? __mmAnimal.id : __mmAnimalIndex).slice(0, 80),
+          __mmRound(__mmAnimalPosition.x), __mmRound(__mmAnimalPosition.y), __mmRound(__mmNumber(__mmAnimal.dir, 0)),
+          Math.round(Math.max(8, Math.min(220, __mmNumber(__mmAnimal.scale, 30)))), Math.round(__mmNumber(__mmAnimal.type, __mmAnimalIndex)),
+          __mmClean(__mmAnimal.name || __mmAnimal.type, 20), Math.round(__mmNumber(__mmAnimal.health, 0)), Math.round(__mmNumber(__mmAnimal.maxHealth, 100))
+        ] });
+      }
+      var __mmObjectRows = [], __mmObjects = __mmActiveObjectSnapshot().all;
+      for (var __mmObjectIndex = 0; __mmObjectIndex < __mmObjects.length; __mmObjectIndex++) {
+        var __mmObject = __mmObjects[__mmObjectIndex];
+        if (!__mmObject || !__mmObject.active) continue;
+        var __mmObjectPosition = __mmPosition(__mmObject);
+        if (!__mmObjectPosition) continue;
+        var __mmObjectDx = __mmObjectPosition.x - __mmPetX, __mmObjectDy = __mmObjectPosition.y - __mmPetY,
+          __mmObjectData = b && b.list && b.list[Number(__mmObject.id)],
+          __mmResourceKinds = ["tree", "berry bush", "stone mine", "gold mine"],
+          __mmResourceType = Number(__mmObject.type),
+          __mmObjectKind = __mmClean(__mmObject.name || (__mmObjectData && __mmObjectData.name) || (!__mmObject.isItem && Number.isInteger(__mmResourceType) && __mmResourceType >= 0 && __mmResourceType < __mmResourceKinds.length ? __mmResourceKinds[__mmResourceType] : "") || __mmObject.type || (__mmObject.isItem ? "item" : "resource"), 24);
+        __mmObjectRows.push({ distance: __mmObjectDx * __mmObjectDx + __mmObjectDy * __mmObjectDy, value: [
+          String(__mmObject.sid != null ? __mmObject.sid : String(__mmObject.id || "object") + ":" + __mmObjectIndex).slice(0, 80),
+          __mmRound(__mmObjectPosition.x), __mmRound(__mmObjectPosition.y), __mmRound(__mmNumber(__mmObject.dir, 0)),
+          Math.round(Math.max(6, Math.min(250, __mmNumber(__mmObject.scale, 35)))), Math.round(__mmNumber(__mmObject.id, 0)),
+          __mmObject.isItem ? 1 : 0, __mmObjectKind, Math.round(__mmNumber(__mmObject.health, 0)), Math.round(__mmNumber(__mmObject.maxHealth, 0))
+        ] });
+      }
+      return {
+        v: 1,
+        c: [__mmRound(__mmPetX), __mmRound(__mmPetY), __mmRound(__mmViewWidth), __mmRound(__mmViewHeight), Math.round(__mmNumber(y && y.mapScale, 14400)), Math.round(__mmNumber(y && y.snowBiomeTop, 0)), Math.round(__mmNumber(y && y.riverWidth, 0))],
+        p: [__mmRound(__mmPetX), __mmRound(__mmPetY), __mmRound(__mmDirection), Math.round(__mmHostScale), Math.round(__mmNumber(__mmPet.hatId, 0)), Math.round(__mmNumber(__mmPet.tailId, 0)), Math.round(__mmNumber(__mmPet.weaponId, 0)), Math.round(__mmNumber(__mmPet.weaponVariant, 0)), String(__mmPet.skinColor || "#f6c7a5").slice(0, 7), __mmClean(__mmPet.petUsername, 20)],
+        u: __mmRowsNear(__mmPlayerRows, 28, function (__mmEntry) { return __mmEntry.value; }),
+        a: __mmRowsNear(__mmAnimalRows, 28, function (__mmEntry) { return __mmEntry.value; }),
+        o: __mmRowsNear(__mmObjectRows, 84, function (__mmEntry) { return __mmEntry.value; })
+      };
+    } catch (_) {
+      return null;
+    }
+  },
+  // Retained for older local integrations. Current Pet Mode uses the mirror
+  // snapshot above instead of capturing or relaying the host canvas.
   getPetVisionFrame: function (__mmPet) {
     try {
       if (!v || !v.alive) return null;
