@@ -2,7 +2,7 @@
 // @name         kitty klient
 // @author       Coder Guy
 // @credits       random4ik — bot script
-// @version      6.9.5
+// @version      6.9.6
 // @icon         https://cdn.discordapp.com/icons/1540876076224356437/ac27c0ce87c4c46b407ebca78e150aeb.webp?size=2048
 // @description  kitty klient — a MooMoo.io client with adaptive zoom, fast autoheal, gear automation, combat tools, predictive placement, visual markers, CC0 background music, manual quick builds, and a fully rebindable keyboard/mouse controls HUD.
 // @match        *://moomoo.io/*
@@ -267,7 +267,7 @@
     const AUTO_PUSH_FINISHER_MIGRATION_KEY = "kitty-klient-auto-push-finisher-v1";
     const ASSASSIN_RANGE_AUTO_MIGRATION_KEY = "kitty-klient-assassin-range-auto-v1";
     const TAB_SYNC_BRIDGE_KEY = "kitty-klient-tab-sync-bridge-v1";
-const KITTY_KLIENT_VERSION = "6.9.5";
+const KITTY_KLIENT_VERSION = "6.9.6";
     const KITTY_SHARED_STORAGE_APPLIED_EVENT = "KittyMooMooSharedStorageApplied";
     // FRVR's v1.8 client changed the game module and now owns its own Altcha
     // verification flow. The legacy runtime patch relies on exact bundle
@@ -314,6 +314,7 @@ const KITTY_KLIENT_VERSION = "6.9.5";
     const KITTY_PET_VISION_POLL_MS = 1_000;
     const KITTY_PET_VISION_STREAM_FPS = 30;
     const KITTY_PET_VISION_FRAME_MS = 50;
+    const KITTY_PET_VISION_CONTROL_MS = 45;
     const KITTY_PET_HOSTING_KEY = "kitty-klient-pets-enabled-v1";
     const KITTY_PET_MODAL_ID = "kitty-pet-player-picker";
     const KITTY_PET_HOST_PANEL_ID = "kitty-pet-host-panel";
@@ -5082,6 +5083,7 @@ const KITTY_KLIENT_VERSION = "6.9.5";
     let kittyPetVisionStream = null;
     const kittyPetVisionPeers = new Map();
     const kittyPetVisionAcknowledgements = new Set();
+    const kittyPetVisionInput = { w: false, a: false, s: false, d: false, aimX: 0.5, aimY: 0.5, lastSentAt: 0 };
 
     let kittyAccountSupportRequest = null;
 
@@ -5973,6 +5975,7 @@ const KITTY_KLIENT_VERSION = "6.9.5";
             : [];
         window.__KittyPetOverlayState = { pets, updatedAt: Date.now() };
         window.__KittyPetMode = role === "pet";
+        if (role !== "pet") resetKittyPetVisionInput();
         document.documentElement?.setAttribute("data-kitty-pet-mode", role === "pet" ? "1" : "0");
         if (role === "pet") {
             try { setKittyHudOpen(false); } catch (_) {}
@@ -6154,17 +6157,67 @@ const KITTY_KLIENT_VERSION = "6.9.5";
         root.style.setProperty("--kitty-pet-vision-y", `${offsetY.toFixed(1)}px`);
     }
 
+    function resetKittyPetVisionInput() {
+        kittyPetVisionInput.w = false;
+        kittyPetVisionInput.a = false;
+        kittyPetVisionInput.s = false;
+        kittyPetVisionInput.d = false;
+        kittyPetVisionInput.aimX = .5;
+        kittyPetVisionInput.aimY = .5;
+        kittyPetVisionInput.lastSentAt = 0;
+    }
+
+    function applyKittyPetVisionControl(sessionId, control) {
+        if (!control || typeof control !== "object") return;
+        const clamp = (value) => Math.max(0, Math.min(1, Number(value) || 0));
+        const controls = window.__KittyPetDirectControls || (window.__KittyPetDirectControls = Object.create(null));
+        controls[String(sessionId)] = {
+            w: Boolean(control.w),
+            a: Boolean(control.a),
+            s: Boolean(control.s),
+            d: Boolean(control.d),
+            aimX: clamp(control.aimX),
+            aimY: clamp(control.aimY),
+            updatedAt: Date.now()
+        };
+    }
+
+    function kittyPetVisionSendControl(force = false) {
+        if (!kittyPetModeActive()) return;
+        const self = kittyPetState && kittyPetState.self;
+        const peer = self && kittyPetVisionPeer(self.id);
+        const channel = peer && peer.channel;
+        const now = performance.now();
+        if (!channel || channel.readyState !== "open" || (!force && now - kittyPetVisionInput.lastSentAt < KITTY_PET_VISION_CONTROL_MS)) return;
+        try {
+            channel.send(JSON.stringify({
+                type: "control",
+                w: Boolean(kittyPetVisionInput.w),
+                a: Boolean(kittyPetVisionInput.a),
+                s: Boolean(kittyPetVisionInput.s),
+                d: Boolean(kittyPetVisionInput.d),
+                aimX: Math.max(0, Math.min(1, Number(kittyPetVisionInput.aimX) || .5)),
+                aimY: Math.max(0, Math.min(1, Number(kittyPetVisionInput.aimY) || .5))
+            }));
+            kittyPetVisionInput.lastSentAt = now;
+        } catch {}
+    }
+
     function attachKittyPetVisionDataChannel(peer, channel) {
         if (!channel) return;
         peer.channel = channel;
         channel.addEventListener("message", (event) => {
             try {
                 const frame = JSON.parse(String(event.data || ""));
-                if (frame && frame.type === "frame") applyKittyPetVisionFrame(frame);
+                if (frame && frame.type === "frame" && peer.role === "pet") applyKittyPetVisionFrame(frame);
+                if (frame && frame.type === "control" && peer.role === "host") applyKittyPetVisionControl(peer.sessionId, frame);
             } catch {}
         });
         channel.addEventListener("close", () => {
             if (peer.channel === channel) peer.channel = null;
+        });
+        channel.addEventListener("open", () => {
+            if (peer.role === "pet") kittyPetVisionSendControl(true);
         });
         if (peer.role === "host") startKittyPetVisionFrameLoop(peer);
     }
@@ -6298,6 +6351,7 @@ const KITTY_KLIENT_VERSION = "6.9.5";
                     void pollKittyPetVisionSignals();
                 }, KITTY_PET_VISION_POLL_MS);
             }
+            if (petMode) kittyPetVisionSendControl();
             if (!petMode) sessionIds.forEach((id) => { void startKittyPetVisionHost(id); });
             void pollKittyPetVisionSignals();
         } else if (!sessionIds.length && kittyPetVisionPollTimer) {
@@ -6314,6 +6368,22 @@ const KITTY_KLIENT_VERSION = "6.9.5";
         const withinPetUi = (target) => target && typeof target.closest === "function" && Boolean(
             target.closest(`#${KITTY_PET_MODE_PANEL_ID},#${KITTY_PET_MODAL_ID}`)
         );
+        const recordPetInput = (event) => {
+            if (!kittyPetModeActive() || withinPetUi(event.target)) return;
+            if (event.type === "pointermove" || event.type === "mousemove") {
+                kittyPetVisionInput.aimX = Math.max(0, Math.min(1, Number(event.clientX) / Math.max(1, window.innerWidth || 1)));
+                kittyPetVisionInput.aimY = Math.max(0, Math.min(1, Number(event.clientY) / Math.max(1, window.innerHeight || 1)));
+                kittyPetVisionSendControl();
+                return;
+            }
+            const key = String(event.key || "").toLowerCase();
+            if (!Object.prototype.hasOwnProperty.call(kittyPetVisionInput, key)) return;
+            kittyPetVisionInput[key] = event.type === "keydown";
+            kittyPetVisionSendControl(true);
+        };
+        ["keydown", "keyup", "pointermove", "mousemove"].forEach((type) => {
+            window.addEventListener(type, recordPetInput, true);
+        });
         const blockGameInput = (event) => {
             if (!kittyPetModeActive() || withinPetUi(event.target)) return;
             event.preventDefault();
@@ -6528,7 +6598,7 @@ const KITTY_KLIENT_VERSION = "6.9.5";
             if (petActive) {
                 const self = kittyPetState.self || {};
                 const copy = modePanel.querySelector("[data-kitty-pet-copy]");
-                if (copy) copy.textContent = `Floating with ${String(self.hostUsername || "your host")} · their live game view connects directly to this pet tab while normal game, bots, and Esc HUD controls stay locked.`;
+                if (copy) copy.textContent = `Floating with ${String(self.hostUsername || "your host")} · their live game view connects directly to this pet tab. Mouse aim turns your pet; WASD gives it a small, smooth tethered drift while normal game, bots, and Esc HUD controls stay locked.`;
                 const catalog = kittyPetCatalog();
                 [
                     ["hatId", "hats"], ["tailId", "tails"],
@@ -28007,6 +28077,19 @@ function __mmDrawInterruptedChats() {
 // into the game's player list or sends a game packet.  The account service
 // supplies only these compact replica descriptors to matching Kitty clients.
 const __mmKittyPetMotion = new Map();
+function __mmKittyPetDirectControl(__mmId, __mmNow) {
+  const __mmControls = window.__KittyPetDirectControls,
+    __mmControl = __mmControls && __mmControls[String(__mmId)];
+  if (!__mmControl || __mmNow - Number(__mmControl.updatedAt) > 700) return null;
+  return {
+    w: !!__mmControl.w,
+    a: !!__mmControl.a,
+    s: !!__mmControl.s,
+    d: !!__mmControl.d,
+    aimX: Math.max(0, Math.min(1, Number(__mmControl.aimX) || .5)),
+    aimY: Math.max(0, Math.min(1, Number(__mmControl.aimY) || .5)),
+  };
+}
 function __mmKittyPetReplicaRows() {
   const __mmState = window.__KittyPetOverlayState,
     __mmSource = __mmState && Array.isArray(__mmState.pets)
@@ -28108,20 +28191,12 @@ function __mmDrawKittyPetText(__mmPet, __mmX, __mmY, __mmScale, __mmNow) {
     if (__mmPet.chat && __mmPet.chatSentAt && __mmNow - __mmPet.chatSentAt < 6500) {
       const __mmChatProgress = Math.max(0, Math.min(1, (__mmNow - __mmPet.chatSentAt) / 6500)),
         __mmChatAlpha = Math.min(1, Math.max(0, (1 - __mmChatProgress) * 1.22)),
-        __mmChatY = __mmNameY - 12,
-        __mmChat = __mmPet.chat,
-        __mmPreviousFont = k.font;
-      (k.font = "800 7px Hammersmith One, Arial, sans-serif");
-      const __mmWidth = Math.min(132, Math.max(20, Math.ceil(k.measureText(__mmChat).width) + 9));
-      ((k.globalAlpha = __mmChatAlpha),
-        (k.fillStyle = "rgba(20,7,35,.9)"),
-        k.fillRect(Math.round(__mmX - __mmWidth / 2), Math.round(__mmChatY - 6), __mmWidth, 12),
-        (k.lineWidth = 1),
-        (k.strokeStyle = "rgba(240,171,252,.9)"),
-        k.strokeRect(Math.round(__mmX - __mmWidth / 2) + .5, Math.round(__mmChatY - 6) + .5, __mmWidth - 1, 11),
-        (k.fillStyle = "#fdf4ff"),
-        k.fillText(__mmChat, __mmX, __mmChatY),
-        (k.font = __mmPreviousFont));
+        __mmChatY = __mmNameY - 16;
+      (k.save(),
+        k.translate(__mmX, __mmChatY),
+        k.scale(.24, .24),
+        __mmDrawKittyChatBubble(__mmPet.chat, 0, 0, __mmChatAlpha, !1),
+        k.restore());
     }
   } catch (__mmKittyPetTextError) {
   } finally {
@@ -28150,26 +28225,67 @@ function __mmDrawKittyPets() {
     if (!Number.isFinite(__mmHostX) || !Number.isFinite(__mmHostY)) continue;
     const __mmPhase = __mmNow / 980 + __mmPet.orbitPhase,
       __mmRadius = __mmHostScale * 1.62 + 32 + __mmPet.orbitSlot * 12,
-      __mmTargetX = __mmHostX + Math.cos(__mmPhase) * __mmRadius,
-      __mmTargetY = __mmHostY + Math.sin(__mmPhase) * __mmRadius * .56 - __mmHostScale * .74 + Math.sin(__mmNow / 205 + __mmPet.orbitPhase) * 3.2,
+      __mmOrbitX = __mmHostX + Math.cos(__mmPhase) * __mmRadius,
+      __mmOrbitY = __mmHostY + Math.sin(__mmPhase) * __mmRadius * .56 - __mmHostScale * .74 + Math.sin(__mmNow / 205 + __mmPet.orbitPhase) * 3.2,
       __mmPrevious = __mmKittyPetMotion.get(__mmPet.id),
       __mmElapsed = __mmPrevious ? Math.max(0, Math.min(120, __mmNow - __mmPrevious.at)) : 0,
+      __mmFrame = __mmElapsed ? Math.max(.25, Math.min(2.2, __mmElapsed / 16.67)) : 1,
+      __mmControl = __mmKittyPetDirectControl(__mmPet.id, __mmNow),
+      __mmInputX = __mmControl ? (Number(__mmControl.d) - Number(__mmControl.a)) : 0,
+      __mmInputY = __mmControl ? (Number(__mmControl.s) - Number(__mmControl.w)) : 0;
+    let __mmFreedomX = __mmPrevious ? Number(__mmPrevious.freedomX) || 0 : 0,
+      __mmFreedomY = __mmPrevious ? Number(__mmPrevious.freedomY) || 0 : 0,
+      __mmFreedomVX = __mmPrevious ? Number(__mmPrevious.freedomVX) || 0 : 0,
+      __mmFreedomVY = __mmPrevious ? Number(__mmPrevious.freedomVY) || 0 : 0;
+    ((__mmFreedomVX += __mmInputX * 1.55 * __mmFrame),
+      (__mmFreedomVY += __mmInputY * 1.55 * __mmFrame),
+      (__mmFreedomVX -= __mmFreedomX * .052 * __mmFrame),
+      (__mmFreedomVY -= __mmFreedomY * .052 * __mmFrame),
+      (__mmFreedomVX *= Math.pow(.84, __mmFrame)),
+      (__mmFreedomVY *= Math.pow(.84, __mmFrame)),
+      (__mmFreedomX += __mmFreedomVX * __mmFrame),
+      (__mmFreedomY += __mmFreedomVY * __mmFrame));
+    const __mmFreedomDistance = Math.hypot(__mmFreedomX, __mmFreedomY),
+      __mmFreedomLimit = 105;
+    if (__mmFreedomDistance > __mmFreedomLimit) {
+      const __mmFreedomScale = __mmFreedomLimit / __mmFreedomDistance;
+      ((__mmFreedomX *= __mmFreedomScale),
+        (__mmFreedomY *= __mmFreedomScale),
+        (__mmFreedomVX *= .35),
+        (__mmFreedomVY *= .35));
+    }
+    const __mmTargetX = __mmOrbitX + __mmFreedomX,
+      __mmTargetY = __mmOrbitY + __mmFreedomY,
       __mmJumped = !__mmPrevious || Math.hypot(__mmTargetX - __mmPrevious.x, __mmTargetY - __mmPrevious.y) > 430,
       __mmBlend = __mmJumped ? 1 : 1 - Math.exp(-__mmElapsed / 88),
       __mmMotion = __mmPrevious && !__mmJumped
         ? {
             x: __mmPrevious.x + (__mmTargetX - __mmPrevious.x) * __mmBlend,
             y: __mmPrevious.y + (__mmTargetY - __mmPrevious.y) * __mmBlend,
+            freedomX: __mmFreedomX,
+            freedomY: __mmFreedomY,
+            freedomVX: __mmFreedomVX,
+            freedomVY: __mmFreedomVY,
             at: __mmNow,
           }
-        : { x: __mmTargetX, y: __mmTargetY, at: __mmNow };
+        : {
+            x: __mmTargetX,
+            y: __mmTargetY,
+            freedomX: __mmFreedomX,
+            freedomY: __mmFreedomY,
+            freedomVX: __mmFreedomVX,
+            freedomVY: __mmFreedomVY,
+            at: __mmNow,
+          };
     ((__mmMotion.seenAt = __mmNow), __mmKittyPetMotion.set(__mmPet.id, __mmMotion), __mmActive.add(__mmPet.id));
     const __mmScreenX = __mmMotion.x - __mmLeft,
       __mmScreenY = __mmMotion.y - __mmTop,
       __mmSpriteScale = .43,
       __mmMargin = __mmHostScale * __mmSpriteScale * 2 + 86;
     if (__mmScreenX < -__mmMargin || __mmScreenX > Number(_) + __mmMargin || __mmScreenY < -__mmMargin || __mmScreenY > Number(L) + __mmMargin) continue;
-    const __mmDirection = Math.atan2(__mmHostY - __mmMotion.y, __mmHostX - __mmMotion.x),
+    const __mmDirection = __mmControl
+        ? Math.atan2(__mmTop + __mmControl.aimY * Number(L) - __mmMotion.y, __mmLeft + __mmControl.aimX * Number(_) - __mmMotion.x)
+        : Math.atan2(__mmHostY - __mmMotion.y, __mmHostX - __mmMotion.x),
       __mmSprite = __mmKittyPetPlayerSnapshot(__mmHost, __mmPet, __mmMotion.x, __mmMotion.y, __mmDirection);
     if (!__mmSprite) continue;
     try {
@@ -28189,6 +28305,10 @@ function __mmDrawKittyPets() {
   for (const [__mmId, __mmState] of __mmKittyPetMotion)
     if (!__mmActive.has(__mmId) || __mmNow - Number(__mmState && __mmState.seenAt) > 8000)
       __mmKittyPetMotion.delete(__mmId);
+  const __mmControls = window.__KittyPetDirectControls;
+  if (__mmControls)
+    for (const __mmId of Object.keys(__mmControls))
+      if (!__mmActive.has(__mmId)) delete __mmControls[__mmId];
 }
 Cl = function () {
   __mmBeginVisualFrame();
@@ -55467,8 +55587,11 @@ window.__KittyGameRuntime = {
       const __mmNow = performance.now(),
         __mmPhase = __mmNow / 980 + __mmOrbitPhase,
         __mmRadius = __mmHostScale * 1.62 + 32 + __mmOrbitSlot * 12,
-        __mmPetX = __mmHostX + Math.cos(__mmPhase) * __mmRadius,
-        __mmPetY = __mmHostY + Math.sin(__mmPhase) * __mmRadius * .56 - __mmHostScale * .74 + Math.sin(__mmNow / 205 + __mmOrbitPhase) * 3.2;
+        __mmOrbitX = __mmHostX + Math.cos(__mmPhase) * __mmRadius,
+        __mmOrbitY = __mmHostY + Math.sin(__mmPhase) * __mmRadius * .56 - __mmHostScale * .74 + Math.sin(__mmNow / 205 + __mmOrbitPhase) * 3.2,
+        __mmMotion = __mmKittyPetMotion.get(String(__mmPet && __mmPet.id || "")),
+        __mmPetX = Number.isFinite(Number(__mmMotion && __mmMotion.x)) ? Number(__mmMotion.x) : __mmOrbitX,
+        __mmPetY = Number.isFinite(Number(__mmMotion && __mmMotion.y)) ? Number(__mmMotion.y) : __mmOrbitY;
       return {
         x: (__mmPetX - (__mmCameraX - __mmViewportWidth / 2)) / __mmViewportWidth,
         y: (__mmPetY - (__mmCameraY - __mmViewportHeight / 2)) / __mmViewportHeight
