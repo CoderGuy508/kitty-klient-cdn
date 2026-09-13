@@ -2,7 +2,7 @@
 // @name         kitty klient
 // @author       Coder Guy
 // @credits       random4ik — bot script
-// @version      6.9.13
+// @version      6.9.14
 // @icon         https://cdn.discordapp.com/icons/1540876076224356437/ac27c0ce87c4c46b407ebca78e150aeb.webp?size=2048
 // @description  kitty klient — a MooMoo.io client with adaptive zoom, fast autoheal, gear automation, combat tools, predictive placement, visual markers, CC0 background music, manual quick builds, and a fully rebindable keyboard/mouse controls HUD.
 // @match        *://moomoo.io/*
@@ -267,7 +267,7 @@
     const AUTO_PUSH_FINISHER_MIGRATION_KEY = "kitty-klient-auto-push-finisher-v1";
     const ASSASSIN_RANGE_AUTO_MIGRATION_KEY = "kitty-klient-assassin-range-auto-v1";
     const TAB_SYNC_BRIDGE_KEY = "kitty-klient-tab-sync-bridge-v1";
-const KITTY_KLIENT_VERSION = "6.9.13";
+const KITTY_KLIENT_VERSION = "6.9.14";
     const KITTY_SHARED_STORAGE_APPLIED_EVENT = "KittyMooMooSharedStorageApplied";
     // FRVR's v1.8 client changed the game module and now owns its own Altcha
     // verification flow. The legacy runtime patch relies on exact bundle
@@ -4701,7 +4701,7 @@ const KITTY_KLIENT_VERSION = "6.9.13";
         addHudToggle(kittyInstas, "reverseInsta", "Reverse R order", "R uses Turret + secondary first, then Bull + primary; Shift+R remains Kitty's Crossbow/Musket boost Insta");
         addHudToggle(kittyInstas, "oneTickInsta", "One-Tick Insta", "Shift+P toggles the secondary-first one-server-tick combo; projectile timing is prediction-adjusted");
         addHudToggle(kittyInstas, "sevenShameInsta", "7-Shame Insta", "When the nearest enemy's server-reported Shame count is exactly 7, fire a fully ready lethal Insta. It stays off when that count is unavailable.");
-        addHudToggle(kittyInstas, "appleInsta", "Apple Insta", "Automatically uses Turret + Great Hammer, then Bull + Polearm against a nearby Soldier-helmet target");
+        addHudToggle(kittyInstas, "appleInsta", "Apple Insta", "Automatically uses Turret + Great Hammer, then Bull + Polearm against a nearby Soldier-helmet target only when the Hammer landing lane has open space");
         addHudToggle(kittyInstas, "bleedInsta", "Bleed Insta", "Automatically runs the variant-damage secondary-first combo against a vulnerable non-Soldier target");
         addHudToggle(kittyInstas, "knockbackInsta", "Knockback Insta", "Predicts whether the opening hit pushes a target into an allied spike, then commits the Polearm finisher");
         addHudToggle(kittyInstas, "primaryKnockbackTick", "Primary Knockback Tick", "On the exact predicted push edge, use Bull + a ready melee primary only when its knockback corridor contacts an allied spike. It skips caught targets, but queues a confirmed final trap break for the predicted release tick.");
@@ -11802,7 +11802,12 @@ let __mmSmartPlacementPreview = {
 let __mmAntiInstaTimer = 0,
   __mmAntiInstaLastAt = 0,
   __mmAntiInstaUntil = 0,
-  __mmAntiInstaActionTimer = 0;
+  __mmAntiInstaActionTimer = 0,
+  // A lethal window can briefly borrow Trap Escape's weapon channel for a
+  // Shield block. The escape loop is resumed as soon as that exact block
+  // finishes; this is never a general trap-escape disable.
+  __mmAntiInstaTrapShieldUntil = 0,
+  __mmAntiInstaTrapResumeTimer = 0;
 let __mmAntiSyncLastAt = 0;
 let __mmCombatThreatCalculatedAt = 0,
   __mmCombatThreatCache = null,
@@ -17066,8 +17071,18 @@ const __mmInsta = {
       if (!__mmPlan || !this.turretReady())
         return void this.cleanup("tank-window-turret-unavailable");
       const __mmNow = Date.now(),
-        __mmImpactAt = Math.max(__mmNow, Number(__mmPlan.impactAt) || __mmNow),
-        __mmLeadMs = Math.max(0, __mmImpactAt - __mmNow),
+        __mmPrimaryAt = Math.max(
+          __mmNow,
+          Number(__mmPlan.primaryAt) || Number(__mmPlan.expectedAt) || __mmNow,
+        ),
+        // Lead the shot to its own impact, while keeping the melee packet on
+        // the Tank gear edge. These are different clocks when skinIndex2
+        // arrives after a far turret's ideal launch point.
+        __mmTurretImpactAt = Math.max(
+          __mmNow,
+          Number(__mmPlan.turretImpactAt) || __mmPrimaryAt,
+        ),
+        __mmLeadMs = Math.max(0, __mmTurretImpactAt - __mmNow),
         __mmAngle = this.mouseAimOnly || !__mmContext.target
           ? __mmRawMouseAimDirection()
           : __mmSyncAimAngle(__mmContext.target, __mmLeadMs);
@@ -17083,7 +17098,7 @@ const __mmInsta = {
       }
       this.schedule(
         () => this.executeFollowup(),
-        Math.max(1, Math.min(this.tick() * 2, __mmImpactAt - Date.now())),
+        Math.max(1, Math.min(this.tick() * 2, __mmPrimaryAt - Date.now())),
       );
       return;
     }
@@ -17228,10 +17243,21 @@ const __mmInsta = {
     }
     if (this.profile === "tankPredict") {
       const __mmPlan = this.tankPredictPlan,
+        __mmNow = Date.now(),
+        __mmPrimaryAt = Number(__mmPlan && __mmPlan.primaryAt) ||
+          Number(__mmPlan && __mmPlan.expectedAt) || __mmNow,
         __mmTankVisible = !!(
           __mmContext.target &&
           (Number(__mmContext.target.skinIndex) === 40 ||
             Number(__mmContext.target.skinIndex2) === 40)
+        );
+      // Server-position updates can land a few milliseconds before the visual
+      // Tank value. Stay armed through that small edge instead of discarding a
+      // confirmed next-hat prediction one local callback too early.
+      if (__mmNow + 2 < __mmPrimaryAt)
+        return void this.schedule(
+          () => this.executeFollowup(),
+          Math.max(1, __mmPrimaryAt - __mmNow),
         );
       if (
         !__mmPlan ||
@@ -17263,7 +17289,13 @@ const __mmInsta = {
       const __mmSecondary = this.secondaryFollowup();
       if (__mmSecondary === __mmMusket && __mmWeaponReady(__mmSecondary)) {
         this.pendingSecondaryWeapon = __mmSecondary;
-        this.schedule(() => this.executeTankPredictMusket(), this.tick());
+        // The Musket is a projectile packet following an already-confirmed
+        // melee hit. Use the next local packet phase, not a full server tick,
+        // so the Tank pulse cannot close between the two damage packets.
+        this.schedule(
+          () => this.executeTankPredictMusket(),
+          Math.max(8, Math.min(22, this.tick() * 0.3)),
+        );
       } else this.schedule(() => this.cleanup("complete"), this.tick());
       return;
     }
@@ -17419,6 +17451,11 @@ const __mmInsta = {
       (__mmContext.target && !this.inRange(__mmPendingMusket, __mmContext.target))
     )
       return void this.cleanup("complete");
+    // The preceding Bull + main stage intentionally changed out of Turret
+    // Gear. Commit the Musket gear in this same packet phase; waiting for its
+    // cosmetic echo is slower than the one-tick Tank exposure.
+    this.selectSecondaryDamageGear();
+    __mmGearArbiter.commit();
     const __mmAngle = this.projectileAim(__mmContext.target, __mmPendingMusket);
     try {
       O.send("D", __mmAngle);
@@ -17507,7 +17544,7 @@ const __mmInsta = {
     this.releaseTimer = 0;
     this.releaseAttack();
     this.stopRedDragonAim();
-    !__mmRedDragonComplete && this.clearRedDragonMusketRestore();
+    this.clearRedDragonMusketRestore();
     __mmCompletedFullInsta &&
       !__mmChainBowUpgrade &&
       !__mmRedDragonComplete &&
@@ -17546,21 +17583,14 @@ const __mmInsta = {
       __mmRedDragonPrimary != null &&
       __mmRedDragonMusket === __mmMusket
     ) {
-      // After its 170 ms Soldier settle X-RedDragon equips gear 11, holds
-      // Musket through the 1.5 s reload interval, then re-selects Polearm.
-      // Fall back to the safe normal hat if the cosmetic gear is unavailable.
+      // The Musket shot is complete. Restore the captured primary now rather
+      // than idling on a reloading Musket; reload progress continues without
+      // leaving that temporary Insta hand selected.
       const __mmPostHat = v.skins && v.skins[11] ? 11 : __mmSafeRestoreHat,
         __mmPostTail = this.redDragonTail(),
         __mmRestorePrimary = __mmRedDragonPrimary;
       (__mmEquipGearPair(__mmPostHat, __mmPostTail, !0),
-        je(__mmRedDragonMusket, !0));
-      this.redDragonMusketRestoreTimer = setTimeout(() => {
-        this.redDragonMusketRestoreTimer = 0;
-        if (!v || !v.alive) return;
-        try {
-          je(__mmRestorePrimary, !0);
-        } catch (__mmRedDragonRestoreError) {}
-      }, 1500);
+        __mmRestoreWeapon(__mmRestorePrimary));
     }
     this.snapshot = null;
     this.targetSid = null;
@@ -34543,16 +34573,12 @@ function __mmKittyFastestReloadWeapon() {
   return __mmSecondary;
 }
 function __mmKittyReloadTarget() {
-  const __mmFastest = __mmKittyFastestReloadWeapon();
-  if (__mmFastest == null) return null;
-  if (__mmWeaponIsReloading(__mmFastest)) return __mmFastest;
-  const __mmOther = v && v.weapons
-    ? v.weapons.find(function (__mmWeapon) {
-        return Number(__mmWeapon) !== Number(__mmFastest);
-      })
-    : null;
-  return __mmOther != null && __mmWeaponIsReloading(__mmOther)
-    ? Number(__mmOther)
+  // Reload is a passive hold for the weapon the player has actually selected.
+  // In particular, a just-fired Insta Musket must not steal selection after
+  // cleanup merely because it has the faster reload multiplier.
+  const __mmCurrent = __mmWeaponRechargeCurrentWeapon();
+  return __mmCurrent != null && __mmWeaponIsReloading(__mmCurrent)
+    ? Number(__mmCurrent)
     : null;
 }
 function __mmWeaponRechargeCurrentWeapon() {
@@ -34751,9 +34777,8 @@ function __mmStopWeaponRecharge(__mmRestore) {
 }
 function __mmUpdateWeaponRecharge() {
   if (__mmInstaTestingModeEnabled) return;
-  // The dedicated X-RedDragon Polearm/Musket finish deliberately keeps
-  // Musket selected for its full reload window. Do not let the generic reload
-  // queue swap hands or restore the pre-Insta weapon during that interval.
+  // Retain this guard for a timer left by an older in-flight sequence. New
+  // Insta cleanups restore the primary immediately after their Musket shot.
   if (__mmInsta && __mmInsta.redDragonMusketRestoreTimer)
     return void __mmStopWeaponRecharge(!1);
   // Trap Escape picks one valid breaker for the whole locked-pit transaction.
@@ -38668,6 +38693,71 @@ function __mmKittyBleedReady(__mmEnemy) {
       (__mmPrimaryVariant > 1 && __mmSecondaryVariant >= 1.18))
   );
 }
+function __mmAppleInstaOpenLane(__mmEnemy) {
+  if (!v || !v.alive || !__mmEnemy || !b || !b.weapons || !y) return !1;
+  // Apple Insta opens with Great Hammer. Do not spend the combo merely to
+  // push a Soldier target into a wall, river, or another structure where the
+  // following Polearm cannot connect. This is deliberately a conservative
+  // geometry gate: it accepts a clear landing corridor and leaves tight,
+  // ambiguous positions to the other close-combat instas.
+  const __mmPrimary = v.weapons && v.weapons[0],
+    __mmPrimaryData = b.weapons[__mmPrimary],
+    __mmHammerData = b.weapons[__mmGreatHammer],
+    __mmTargetX = Number(__mmEnemy.x),
+    __mmTargetY = Number(__mmEnemy.y),
+    __mmSelfX = Number(v.x),
+    __mmSelfY = Number(v.y),
+    __mmDistance = Math.hypot(__mmTargetX - __mmSelfX, __mmTargetY - __mmSelfY);
+  if (
+    !__mmPrimaryData ||
+    !__mmHammerData ||
+    !Number.isFinite(__mmDistance) ||
+    __mmDistance < 1 ||
+    !__mmInsta.pathClear(__mmEnemy)
+  )
+    return !1;
+  const __mmTargetScale = Math.max(1, Number(__mmEnemy.scale) || 35),
+    __mmPushDistance = Math.min(
+      155,
+      Math.max(70, (Number(__mmHammerData.knock) || 0.3) * 165),
+    ),
+    __mmUnitX = (__mmTargetX - __mmSelfX) / __mmDistance,
+    __mmUnitY = (__mmTargetY - __mmSelfY) / __mmDistance,
+    __mmLandingX = __mmTargetX + __mmUnitX * __mmPushDistance,
+    __mmLandingY = __mmTargetY + __mmUnitY * __mmPushDistance,
+    __mmPrimaryReach =
+      (Number(__mmPrimaryData.range) || 0) + __mmTargetScale + 6;
+  if (
+    __mmLandingX - __mmTargetScale < 0 ||
+    __mmLandingY - __mmTargetScale < 0 ||
+    __mmLandingX + __mmTargetScale > Number(y.mapScale) ||
+    __mmLandingY + __mmTargetScale > Number(y.mapScale) ||
+    (__mmLandingY >= Number(y.mapScale) / 2 - Number(y.riverWidth) / 2 &&
+      __mmLandingY <= Number(y.mapScale) / 2 + Number(y.riverWidth) / 2) ||
+    Math.hypot(__mmLandingX - __mmSelfX, __mmLandingY - __mmSelfY) >
+      __mmPrimaryReach
+  )
+    return !1;
+  const __mmObjects = __mmActiveObjectSnapshot().all;
+  for (let __mmIndex = 0; __mmIndex < __mmObjects.length; __mmIndex += 1) {
+    const __mmObject = __mmObjects[__mmIndex];
+    if (!__mmObject || !__mmObject.active || __mmObject.ignoreCollision) continue;
+    const __mmBlockerRadius = Math.max(0, __mmAutoSpikeSpamObjectScale(__mmObject)),
+      __mmClearance = __mmTargetScale + __mmBlockerRadius;
+    if (
+      __mmSegmentDistanceSquared(
+        __mmTargetX,
+        __mmTargetY,
+        __mmLandingX,
+        __mmLandingY,
+        Number(__mmObject.x),
+        Number(__mmObject.y),
+      ) < __mmClearance * __mmClearance
+    )
+      return !1;
+  }
+  return !0;
+}
 function __mmKittyKnockbackContact(__mmEnemy, __mmPrediction) {
   if (!__mmEnemy || !__mmPrediction || __mmAutoSpikeSpamTrapForEnemy(__mmEnemy))
     return null;
@@ -40239,6 +40329,18 @@ const __mmTankPredictInsta = {
       __mmSpread = __mmSorted[__mmSorted.length - 1] - __mmSorted[0];
     return __mmSpread <= Math.max(90, __mmServerTickMs() * 1.5);
   },
+  packetLeadMs() {
+    // Hat changes are observed after the server packet arrives.  Move the
+    // local deadline forward by the measured one-way trip, but never borrow a
+    // full tick: a missing/stale ping value must not turn a precise Tank pulse
+    // into an early combo.
+    const __mmPing = Number(window.pingTime),
+      __mmOneWay = Number.isFinite(__mmPing) ? Math.max(0, __mmPing / 2) : 0;
+    return Math.min(
+      Math.max(0, __mmServerTickMs() * 0.45),
+      __mmOneWay,
+    );
+  },
   observe() {
     if (!Array.isArray(E)) return;
     const __mmNow = Date.now(), __mmSeen = Object.create(null);
@@ -40280,21 +40382,36 @@ const __mmTankPredictInsta = {
       __mmTrap = __mmAutoTrapInstaTrapForEnemy(__mmEnemy, __mmActiveTrapObjects()),
       __mmTankBreakContext = !!(__mmTrap && Number(__mmEnemy.weaponIndex) === __mmGreatHammer),
       __mmCadenceAt = this.stable(__mmRecord) ? Number(__mmRecord.nextTankAt) : 0,
+      __mmPacketLead = this.packetLeadMs(),
       __mmExpectedAt = __mmNextHatTank
-        ? __mmNow + __mmServerTickMs()
+        // skinIndex2 announces the coming loadout.  The resulting Tank swing
+        // reaches this client one network leg later, so schedule the melee for
+        // the server edge rather than one complete local tick after it.
+        ? __mmNow + Math.max(4, __mmServerTickMs() - __mmPacketLead)
         : __mmTankBreakContext && __mmCadenceAt > __mmNow
-          ? __mmCadenceAt
+          ? __mmCadenceAt - __mmPacketLead
           : 0;
     if (!__mmExpectedAt) return null;
     const __mmTravel = Math.max(1, __mmInsta.turretTravelMs(__mmEnemy)),
       __mmFireAt = __mmExpectedAt - __mmTravel,
-      __mmTolerance = Math.max(55, __mmServerTickMs() * 0.7);
-    // Start only when this server tick is the turret's fire edge. This avoids
-    // turning a vague future cadence into a long, interruptible pre-arm.
-    if (__mmFireAt > __mmNow + 12 || __mmNow - __mmFireAt > __mmTolerance) return null;
+      __mmTolerance = Math.max(38, __mmServerTickMs() * 0.45),
+      __mmAlreadyFired = Number(__mmRecord.firedForAt) || 0;
+    // A cadence gives enough advance notice to put the turret exactly on the
+    // Tank tick. A next-hat signal arrives too late for a distant turret, but
+    // it is still the exact melee window: fire the turret immediately and put
+    // Bull + main on that edge instead of abandoning the entire Insta.
+    if (
+      __mmFireAt > __mmNow + 12 ||
+      (!__mmNextHatTank && __mmNow - __mmFireAt > __mmTolerance) ||
+      (__mmNextHatTank && __mmNow > __mmExpectedAt + __mmTolerance) ||
+      (__mmAlreadyFired && Math.abs(__mmAlreadyFired - __mmExpectedAt) < __mmTolerance)
+    )
+      return null;
     return {
       expectedAt: __mmExpectedAt,
-      impactAt: Math.max(__mmNow, __mmExpectedAt),
+      primaryAt: Math.max(__mmNow, __mmExpectedAt),
+      turretImpactAt: Math.max(__mmNow, __mmFireAt) + __mmTravel,
+      lateTurret: __mmFireAt < __mmNow,
       source: __mmNextHatTank ? "next-hat" : "repeat Tank break pulse",
       record: __mmRecord,
     };
@@ -40395,6 +40512,7 @@ function __mmUpdateKittyInstas() {
     __mmAppleInstaEnabled &&
     __mmPolearmHammer &&
     Number(__mmEnemy.skinIndex) === 6 &&
+    __mmAppleInstaOpenLane(__mmEnemy) &&
     __mmStartKittyProfile("apple", __mmEnemy, "Soldier-hat Apple Insta")
   )
     return;
@@ -45285,6 +45403,78 @@ function __mmPlaceAntiInstaSpike(__mmAngle) {
   const __mmTool = __mmSelectedTool();
   return __mmSendAutomaticPlacement(__mmSpike, __mmAngle, __mmTool);
 }
+function __mmAntiInstaShieldPlan(__mmFallbackThreat) {
+  const __mmSnapshot = __mmCombatThreatSnapshot(!0),
+    __mmTick = Math.max(1, __mmServerTickMs()),
+    __mmHorizon = Math.max(110, Math.min(360, __mmTick * 3)),
+    __mmEntries = (Array.isArray(__mmSnapshot.entries)
+      ? __mmSnapshot.entries
+      : []
+    ).filter(function (__mmEntry) {
+      return !!(
+        __mmEntry &&
+        Number(__mmEntry.damage) > 0 &&
+        Number(__mmEntry.impactMs) >= 0 &&
+        Number(__mmEntry.impactMs) <= __mmHorizon &&
+        (String(__mmEntry.type) === "melee" ||
+          String(__mmEntry.type) === "projectile" ||
+          String(__mmEntry.type) === "turret")
+      );
+    }),
+    __mmHalfArc = Math.max(
+      0.1,
+      Number(y && y.shieldAngle) || Math.PI / 3,
+    ),
+    __mmCoverage = __mmShieldImpactPlan(__mmEntries, __mmHalfArc),
+    __mmFirstImpact = __mmCoverage
+      ? Math.max(0, Number(__mmCoverage.first.impactMs) || 0)
+      : Math.max(0, Number(__mmFallbackThreat && __mmFallbackThreat.firstImpactMs) || 0),
+    __mmAngle = __mmCoverage && Number.isFinite(Number(__mmCoverage.angle))
+      ? Number(__mmCoverage.angle)
+      : Number(__mmFallbackThreat && __mmFallbackThreat.angle);
+  if (!Number.isFinite(__mmAngle)) return null;
+  return {
+    angle: __mmAngle,
+    impactMs: __mmFirstImpact,
+    // Keep the shield through the first predicted impact and one complete
+    // server edge. This catches the paired weapon packet without freezing a
+    // trapped player in defense for the old full 750 ms default hold.
+    holdMs: Math.max(
+      __mmTick,
+      Math.min(260, Math.round(__mmFirstImpact + __mmTick * 1.25)),
+    ),
+    hits: __mmCoverage ? __mmCoverage.covered.length : 1,
+  };
+}
+function __mmPauseTrapEscapeForAntiInsta(__mmHoldMs) {
+  if (!__mmTrapEscapeEnabled || !v || !v.alive || !__mmIsTrapped())
+    return !1;
+  const __mmNow = Date.now();
+  __mmAntiInstaTrapShieldUntil = Math.max(
+    __mmAntiInstaTrapShieldUntil,
+    __mmNow + Math.max(__mmServerTickMs(), Number(__mmHoldMs) || 0),
+  );
+  // Releasing the held breaker before Shield is selected prevents its F=1
+  // keep-alive packet from winning the same network phase as the block.
+  __mmTrapAttackActive && __mmStopTrapAttack();
+  __mmActionOwner === "trapEscape" &&
+    __mmActionRelease("trapEscape", "predictive Shield window");
+  return !0;
+}
+function __mmResumeTrapEscapeAfterAntiInsta(__mmReason) {
+  (__mmAntiInstaTrapResumeTimer &&
+    clearTimeout(__mmAntiInstaTrapResumeTimer),
+    (__mmAntiInstaTrapResumeTimer = 0),
+    (__mmAntiInstaTrapShieldUntil = 0));
+  if (!__mmTrapEscapeEnabled || !v || !v.alive || !__mmIsTrapped()) return;
+  // Let the Shield action release its own weapon/aim channel first, then
+  // immediately continue the exact same trap-break loop.
+  __mmAntiInstaTrapResumeTimer = setTimeout(function () {
+    ((__mmAntiInstaTrapResumeTimer = 0),
+      __mmTrapEscapeEnabled && v && v.alive && __mmIsTrapped() &&
+        __mmBreakTrap());
+  }, 0);
+}
 function __mmUpdateAntiInsta() {
   if (__mmInstaTestingModeEnabled) return;
   if (
@@ -45296,9 +45486,17 @@ function __mmUpdateAntiInsta() {
   )
     return;
   const __mmNow = Date.now();
-  if (__mmNow - __mmAntiInstaLastAt < 450) return;
+  if (__mmNow - __mmAntiInstaLastAt < Math.max(70, __mmServerTickMs() * 0.65)) return;
   const __mmThreat = __mmLethalCombatThreat();
   if (!__mmThreat) return;
+  const __mmShieldPlan = __mmAntiInstaShieldPlan(__mmThreat),
+    __mmCanShield = !!(
+      __mmShieldPlan &&
+      Array.isArray(v.weapons) &&
+      v.weapons.includes(__mmShieldWeapon)
+    ),
+    __mmTrapPaused = __mmCanShield &&
+      __mmPauseTrapEscapeForAntiInsta(__mmShieldPlan.holdMs);
   __mmResetSpikeGearCounter(!0);
   // Defense owns healing and interruption only. Combat placement is handled
   // exclusively by the unified tick-scoped placer below, so Anti Insta can no
@@ -45307,10 +45505,20 @@ function __mmUpdateAntiInsta() {
   __mmHammerPolearmInsta.isActive() &&
     __mmHammerPolearmInsta.cancel("lethal-combat-threat");
   __mmInstaSyncPending || __mmInstaSyncFiring ? __mmStopInstaSync() : null;
-  __mmUseShieldDefense(null, {angle: __mmThreat.angle, reason: "lethal combat threat"});
+  const __mmShielded = __mmCanShield && __mmUseShieldDefense(null, {
+    angle: __mmShieldPlan.angle,
+    holdMs: __mmShieldPlan.holdMs,
+    forceAntiInsta: !0,
+    reason: "predicted lethal combo (" + __mmShieldPlan.hits + " hits)",
+  });
+  __mmTrapPaused && !__mmShielded &&
+    __mmResumeTrapEscapeAfterAntiInsta("Shield unavailable");
   (__mmAutoHeal(!0),
     (__mmAntiInstaLastAt = __mmNow),
-    (__mmAntiInstaUntil = __mmNow + Math.max(140, __mmServerTickMs())),
+    (__mmAntiInstaUntil = __mmNow + Math.max(
+      __mmServerTickMs(),
+      __mmShieldPlan ? __mmShieldPlan.holdMs : 140,
+    )),
     __mmBumpCombatStat("antiInstas"));
 }
 function __mmAntiSyncThreat() {
@@ -52468,6 +52676,11 @@ function __mmBreakTrap() {
     !__mmIsTrapped()
   )
     return void __mmStopTrapAttack();
+  // A confirmed lethal hit may borrow this exact input channel long enough to
+  // face Shield. Do not immediately steal it back on the next escape tick;
+  // __mmStopShieldDefense schedules this same breaker as soon as the block
+  // window ends.
+  if (Date.now() < __mmAntiInstaTrapShieldUntil) return;
   // An Insta that started immediately before the lock is stale combat work;
   // cancel it now and reclaim the same weapon/hat/aim channels for escape.
   // Returning here used to leave a caught player idle until every Insta stage
@@ -52919,9 +53132,9 @@ function __mmUpdateAutoPushShield(enemy, geometry) {
     O.send("D", __mmAutoPushShieldAngle);
   }
 }
-function __mmCanUseShieldDefense() {
+function __mmCanUseShieldDefense(__mmAllowAntiInsta = !1) {
   return (
-    __mmShieldDefenseEnabled &&
+    (__mmShieldDefenseEnabled || __mmAllowAntiInsta) &&
     __mmActionAvailable("shieldDefense") &&
     v &&
     v.alive &&
@@ -52934,7 +53147,14 @@ function __mmCanUseShieldDefense() {
 }
 function __mmStopShieldDefense(__mmReason) {
   const __mmWeapon = __mmShieldDefenseWeapon,
-    __mmRestore = __mmActionMayRestore("shieldDefense");
+    __mmRestore = __mmActionMayRestore("shieldDefense"),
+    __mmResumeTrapEscape = !!(
+      __mmAntiInstaTrapShieldUntil > 0 &&
+      __mmTrapEscapeEnabled &&
+      v &&
+      v.alive &&
+      __mmIsTrapped()
+    );
   ((__mmShieldDefenseTimer && clearTimeout(__mmShieldDefenseTimer),
     (__mmShieldDefenseTimer = 0),
     (__mmShieldDefenseWeapon = null),
@@ -52947,7 +53167,9 @@ function __mmStopShieldDefense(__mmReason) {
       __mmWeapon != null &&
       __mmWeapon !== __mmShieldWeapon &&
       __mmRestoreWeapon(__mmWeapon),
-    __mmActionRelease("shieldDefense", __mmReason || "defense complete")));
+    __mmActionRelease("shieldDefense", __mmReason || "defense complete")),
+    __mmResumeTrapEscape &&
+      __mmResumeTrapEscapeAfterAntiInsta(__mmReason || "Shield complete"));
 }
 function __mmShieldDefenseAngle(__mmPrimaryThreat) {
   const __mmPlayerPosition = __mmServerEntityPosition(v),
@@ -53018,7 +53240,7 @@ function __mmShieldDefenseAngle(__mmPrimaryThreat) {
     : Math.atan2(__mmY, __mmX);
 }
 function __mmUseShieldDefense(__mmPlayer, __mmOptions = {}) {
-  if (!__mmCanUseShieldDefense()) return !1;
+  if (!__mmCanUseShieldDefense(!!__mmOptions.forceAntiInsta)) return !1;
   const __mmExplicitAngle = Number(__mmOptions && __mmOptions.angle),
     __mmHasExplicitAngle = __mmOptions.angle != null && Number.isFinite(__mmExplicitAngle);
   if (!__mmHasExplicitAngle) {
