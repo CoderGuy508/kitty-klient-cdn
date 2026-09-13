@@ -2,7 +2,7 @@
 // @name         kitty klient
 // @author       Coder Guy
 // @credits       random4ik — bot script
-// @version      6.9.4
+// @version      6.9.5
 // @icon         https://cdn.discordapp.com/icons/1540876076224356437/ac27c0ce87c4c46b407ebca78e150aeb.webp?size=2048
 // @description  kitty klient — a MooMoo.io client with adaptive zoom, fast autoheal, gear automation, combat tools, predictive placement, visual markers, CC0 background music, manual quick builds, and a fully rebindable keyboard/mouse controls HUD.
 // @match        *://moomoo.io/*
@@ -267,7 +267,7 @@
     const AUTO_PUSH_FINISHER_MIGRATION_KEY = "kitty-klient-auto-push-finisher-v1";
     const ASSASSIN_RANGE_AUTO_MIGRATION_KEY = "kitty-klient-assassin-range-auto-v1";
     const TAB_SYNC_BRIDGE_KEY = "kitty-klient-tab-sync-bridge-v1";
-const KITTY_KLIENT_VERSION = "6.9.4";
+const KITTY_KLIENT_VERSION = "6.9.5";
     const KITTY_SHARED_STORAGE_APPLIED_EVENT = "KittyMooMooSharedStorageApplied";
     // FRVR's v1.8 client changed the game module and now owns its own Altcha
     // verification flow. The legacy runtime patch relies on exact bundle
@@ -311,10 +311,14 @@ const KITTY_KLIENT_VERSION = "6.9.4";
     const KITTY_ACCOUNT_DRAWER_REMINDER_MS = 12 * 60 * 1000;
     const KITTY_ACCOUNT_PRESENCE_MS = 20_000;
     const KITTY_PET_STATE_MS = 5_000;
+    const KITTY_PET_VISION_POLL_MS = 1_000;
+    const KITTY_PET_VISION_STREAM_FPS = 30;
+    const KITTY_PET_VISION_FRAME_MS = 50;
     const KITTY_PET_HOSTING_KEY = "kitty-klient-pets-enabled-v1";
     const KITTY_PET_MODAL_ID = "kitty-pet-player-picker";
     const KITTY_PET_HOST_PANEL_ID = "kitty-pet-host-panel";
     const KITTY_PET_MODE_PANEL_ID = "kitty-pet-mode-panel";
+    const KITTY_PET_VISION_ID = "kitty-pet-vision";
     const KITTY_COMBAT_STAT_FIELDS = Object.freeze([
         Object.freeze({ key: "totalKills", label: "Kills", recordLabel: "Best kills" }),
         Object.freeze({ key: "deaths", label: "Deaths", recordLabel: "Most deaths" }),
@@ -5072,6 +5076,12 @@ const KITTY_KLIENT_VERSION = "6.9.4";
     let kittyPetState = { self: null, pets: [] };
     let kittyPetLastRole = "";
     let kittyPetInputLockInstalled = false;
+    let kittyPetVisionPollTimer = 0;
+    let kittyPetVisionPollBusy = false;
+    let kittyPetVisionCanvas = null;
+    let kittyPetVisionStream = null;
+    const kittyPetVisionPeers = new Map();
+    const kittyPetVisionAcknowledgements = new Set();
 
     let kittyAccountSupportRequest = null;
 
@@ -5804,6 +5814,7 @@ const KITTY_KLIENT_VERSION = "6.9.4";
             "#kitty-pet-player-picker .kitty-pet-picker-top{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}#kitty-pet-player-picker h2{margin:0;color:#fff;font-size:20px;line-height:1.1}#kitty-pet-player-picker p{margin:5px 0 0;color:#e9d5ff;font-size:11px}#kitty-pet-player-picker button{min-height:34px;padding:0 10px;border:1px solid rgba(240,171,252,.7);border-radius:8px;background:rgba(49,10,75,.76);color:#fff;font:800 11px/1 system-ui,sans-serif;cursor:pointer;text-shadow:none}#kitty-pet-player-picker button:hover:not(:disabled){filter:brightness(1.15)}#kitty-pet-player-picker button:disabled{opacity:.5;cursor:wait}#kitty-pet-player-picker .kitty-pet-picker-close{min-width:32px;padding:0;border-color:transparent;background:transparent;font-size:20px}",
             "#kitty-pet-player-picker .kitty-pet-picker-list{display:grid;gap:8px;max-height:410px;overflow:auto;padding-right:2px}#kitty-pet-player-picker .kitty-pet-host-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center;padding:10px;border:1px solid rgba(240,171,252,.28);border-radius:10px;background:rgba(23,7,42,.65)}#kitty-pet-player-picker .kitty-pet-host-row strong{display:block;color:#fff;font-size:12px;overflow-wrap:anywhere}#kitty-pet-player-picker .kitty-pet-host-row span{display:block;margin-top:3px;color:#d8b4fe;font-size:10px;overflow-wrap:anywhere}#kitty-pet-player-picker .kitty-pet-picker-status{min-height:17px;margin:0;color:#e9d5ff;font-size:11px}#kitty-pet-player-picker .kitty-pet-picker-status[data-kind='error']{color:#fda4af}#kitty-pet-player-picker .kitty-pet-picker-status[data-kind='ok']{color:#bbf7d0}",
             "#kitty-pet-mode-panel{position:fixed;z-index:2147483645;width:min(300px,calc(100vw - 22px));display:grid;gap:9px;padding:12px;border:1px solid rgba(240,171,252,.74);border-radius:12px;background:linear-gradient(145deg,rgba(35,6,59,.96),rgba(10,4,23,.96));box-shadow:0 12px 32px rgba(0,0,0,.48),0 0 18px rgba(217,70,239,.3);color:#fff;font:600 11px/1.35 system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;text-shadow:none;right:12px;top:12px}#kitty-pet-mode-panel[hidden],#kitty-pet-host-panel[hidden]{display:none!important}#kitty-pet-mode-panel *,#kitty-pet-host-panel *{box-sizing:border-box}#kitty-pet-mode-panel h3,#kitty-pet-host-panel h3{margin:0;color:#fff;font-size:13px;letter-spacing:.05em}#kitty-pet-mode-panel p,#kitty-pet-host-panel p{margin:0;color:#e9d5ff;font-size:10px;line-height:1.4}#kitty-pet-mode-panel select,#kitty-pet-mode-panel input,#kitty-pet-mode-panel button,#kitty-pet-host-panel button{min-width:0;min-height:31px;padding:0 8px;border:1px solid rgba(240,171,252,.55);border-radius:7px;background:rgba(14,4,29,.82);color:#fff;font:800 10px/1 system-ui,sans-serif;text-shadow:none}#kitty-pet-mode-panel button,#kitty-pet-host-panel button{cursor:pointer;background:linear-gradient(135deg,#701a75,#a21caf)}#kitty-pet-mode-panel button:hover,#kitty-pet-host-panel button:hover{filter:brightness(1.14)}#kitty-pet-mode-panel .kitty-pet-select-grid{display:grid;grid-template-columns:1fr 1fr;gap:7px}#kitty-pet-mode-panel label,#kitty-pet-host-panel label{display:grid;gap:4px;color:#f5d0fe;font-size:9px;font-weight:900;letter-spacing:.04em;text-transform:uppercase}#kitty-pet-mode-panel .kitty-pet-chat{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px}#kitty-pet-mode-panel .kitty-pet-leave{border-color:rgba(251,113,133,.7);background:linear-gradient(135deg,#7f1d1d,#be123c)}#moomoo-op-hud #kitty-pet-host-panel{display:grid;gap:9px;width:min(370px,calc(100vw - 40px));box-sizing:border-box;margin:12px auto 0;padding:15px;border:1px solid rgba(240,171,252,.74);border-radius:12px;background:linear-gradient(145deg,rgba(35,6,59,.96),rgba(10,4,23,.96));box-shadow:0 12px 32px rgba(0,0,0,.48),0 0 18px rgba(217,70,239,.3);color:#fff;font:600 11px/1.35 system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;text-align:left;text-shadow:none}#kitty-pet-host-panel .kitty-pet-host-toggle{display:flex;align-items:center;justify-content:flex-start;gap:7px;color:#f5d0fe;font-size:10px;font-weight:800;text-transform:none;letter-spacing:0}#kitty-pet-host-panel .kitty-pet-host-toggle input{width:auto!important;min-height:0!important;accent-color:#e879f9}#kitty-pet-host-panel .kitty-pet-host-list{display:grid;gap:6px;width:100%}#kitty-pet-host-panel .kitty-pet-host-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px;align-items:center;padding:7px;border:1px solid rgba(240,171,252,.2);border-radius:7px;background:rgba(8,2,17,.42)}#kitty-pet-host-panel .kitty-pet-host-row strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#fff;font-size:10px}#kitty-pet-host-panel .kitty-pet-host-row button{min-height:27px;padding:0 7px;border-color:rgba(251,113,133,.6);background:rgba(127,29,29,.55);font-size:9px}",
+            "#kitty-pet-vision{position:fixed;z-index:2147483644;inset:0;overflow:hidden;background:#08030f;color:#f5d0fe;font:700 12px/1.35 system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;pointer-events:none}#kitty-pet-vision[hidden]{display:none!important}#kitty-pet-vision video{position:absolute;inset:-10%;width:120%;height:120%;max-width:none;object-fit:cover;transform:translate3d(var(--kitty-pet-vision-x,0px),var(--kitty-pet-vision-y,0px),0) scale(1.02);transform-origin:center;transition:transform 90ms linear}#kitty-pet-vision .kitty-pet-vision-status{position:absolute;left:50%;top:50%;width:min(290px,calc(100vw - 36px));margin:0;transform:translate(-50%,-50%);padding:12px;border:1px solid rgba(240,171,252,.58);border-radius:10px;background:rgba(20,5,34,.82);box-shadow:0 10px 30px rgba(0,0,0,.5);color:#f5d0fe;text-align:center;text-shadow:none}#kitty-pet-vision[data-live='1'] .kitty-pet-vision-status{display:none}#kitty-pet-vision[data-kind='error'] .kitty-pet-vision-status{color:#fecdd3}",
             "html[data-kitty-pet-mode='1'] #kitty-klient-hud-launcher,html[data-kitty-pet-mode='1'] #moomoo-op-hud,html[data-kitty-pet-mode='1'] #kitty-bot-float-menu,html[data-kitty-pet-mode='1'] #kitty-bot-mouse-lock-indicator,html[data-kitty-pet-mode='1'] #kitty-bot-circle-guide{display:none!important}html[data-kitty-pet-mode='1'] #mainMenu #enterGame{display:none!important}@media(max-width:620px){#kitty-pet-mode-panel{top:auto;right:10px;bottom:10px;width:min(280px,calc(100vw - 20px))}#kitty-pet-mode-panel .kitty-pet-select-grid{grid-template-columns:1fr}}"
         ].join("");
         (document.head || document.documentElement).appendChild(style);
@@ -5971,6 +5982,330 @@ const KITTY_KLIENT_VERSION = "6.9.4";
             window.dispatchEvent(new CustomEvent("KittyKlientPetMode", { detail: { active: role === "pet", role } }));
         }
         renderKittyPetPanels();
+        kittyPetVisionReconcile();
+    }
+
+    function mountKittyPetVision() {
+        if (!document.body) return null;
+        installKittyPetStyles();
+        let root = document.getElementById(KITTY_PET_VISION_ID);
+        if (root) return root;
+        root = document.createElement("section");
+        root.id = KITTY_PET_VISION_ID;
+        root.setAttribute("aria-label", "Live Pet Vision");
+        root.setAttribute("hidden", "");
+        const video = document.createElement("video");
+        video.autoplay = true;
+        video.muted = true;
+        video.playsInline = true;
+        video.dataset.kittyPetVisionVideo = "1";
+        const status = document.createElement("p");
+        status.className = "kitty-pet-vision-status";
+        status.dataset.kittyPetVisionStatus = "1";
+        root.append(video, status);
+        document.body.appendChild(root);
+        return root;
+    }
+
+    function setKittyPetVisionStatus(message, kind = "") {
+        const root = mountKittyPetVision();
+        const status = root?.querySelector("[data-kitty-pet-vision-status]");
+        if (status) status.textContent = String(message || "");
+        if (root) root.dataset.kind = kind;
+    }
+
+    function kittyPetVisionSessionIds() {
+        const self = kittyPetState && kittyPetState.self;
+        if (self && self.role === "pet" && /^[A-Za-z0-9_-]{43}$/.test(String(self.id || ""))) return [String(self.id)];
+        return kittyPetHostSessions().map((pet) => String(pet && pet.id || ""))
+            .filter((id) => /^[A-Za-z0-9_-]{43}$/.test(id));
+    }
+
+    function kittyPetVisionSupported() {
+        return typeof window.RTCPeerConnection === "function" && typeof window.MediaStream === "function";
+    }
+
+    function kittyPetVisionPeer(sessionId) {
+        return kittyPetVisionPeers.get(String(sessionId)) || null;
+    }
+
+    function kittyPetVisionReleaseStream() {
+        if (kittyPetVisionStream) {
+            try { kittyPetVisionStream.getTracks().forEach((track) => track.stop()); } catch (_) {}
+        }
+        kittyPetVisionCanvas = null;
+        kittyPetVisionStream = null;
+    }
+
+    function closeKittyPetVisionPeer(sessionId, retry = false) {
+        const id = String(sessionId || "");
+        const peer = kittyPetVisionPeers.get(id);
+        if (!peer) return;
+        kittyPetVisionPeers.delete(id);
+        if (peer.frameTimer) window.clearInterval(peer.frameTimer);
+        try { peer.channel?.close(); } catch (_) {}
+        try { peer.pc?.close(); } catch (_) {}
+        if (![...kittyPetVisionPeers.values()].some((entry) => entry.role === "host")) kittyPetVisionReleaseStream();
+        if (retry) window.setTimeout(() => kittyPetVisionReconcile(), 1_500);
+    }
+
+    function closeInactiveKittyPetVisionPeers(activeSessionIds) {
+        const active = new Set(activeSessionIds);
+        [...kittyPetVisionPeers.keys()].forEach((id) => {
+            if (!active.has(id)) closeKittyPetVisionPeer(id);
+        });
+    }
+
+    function createKittyPetVisionPeer(sessionId, role) {
+        const existing = kittyPetVisionPeer(sessionId);
+        if (existing) return existing;
+        const pc = new window.RTCPeerConnection({
+            iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+        });
+        const peer = {
+            sessionId: String(sessionId),
+            role,
+            pc,
+            channel: null,
+            pendingCandidates: [],
+            frameTimer: 0
+        };
+        kittyPetVisionPeers.set(peer.sessionId, peer);
+        pc.addEventListener("icecandidate", (event) => {
+            const candidate = event.candidate;
+            if (!candidate) return;
+            const value = typeof candidate.toJSON === "function"
+                ? candidate.toJSON()
+                : {
+                    candidate: candidate.candidate,
+                    sdpMid: candidate.sdpMid,
+                    sdpMLineIndex: candidate.sdpMLineIndex,
+                    usernameFragment: candidate.usernameFragment
+                };
+            void sendKittyPetVisionSignal(peer.sessionId, { type: "candidate", candidate: value });
+        });
+        pc.addEventListener("connectionstatechange", () => {
+            if (pc.connectionState === "connected" && peer.role === "pet") {
+                setKittyPetVisionStatus("Live view connected.", "ok");
+                return;
+            }
+            if (pc.connectionState === "failed") closeKittyPetVisionPeer(peer.sessionId, true);
+        });
+        pc.addEventListener("track", (event) => {
+            if (peer.role !== "pet") return;
+            const root = mountKittyPetVision();
+            const video = root?.querySelector("[data-kitty-pet-vision-video]");
+            const stream = event.streams && event.streams[0]
+                ? event.streams[0]
+                : new window.MediaStream([event.track]);
+            if (video && video.srcObject !== stream) {
+                video.srcObject = stream;
+                void video.play().catch(() => {});
+            }
+            if (root) root.dataset.live = "1";
+            setKittyPetVisionStatus("Live view connected.", "ok");
+        });
+        pc.addEventListener("datachannel", (event) => {
+            if (peer.role !== "pet") return;
+            attachKittyPetVisionDataChannel(peer, event.channel);
+        });
+        return peer;
+    }
+
+    async function sendKittyPetVisionSignal(sessionId, signal) {
+        if (!kittyPetModeActive() && !kittyPetHostSessions().some((pet) => String(pet && pet.id || "") === String(sessionId))) return false;
+        try {
+            await kittyAccountRequest("/v1/pets/vision/signal", { sessionId, signal });
+            return true;
+        } catch {
+            return false;
+        }
+    }
+
+    function kittyPetVisionSourceStream() {
+        const snapshot = kittyPetGameSnapshot();
+        const canvas = document.getElementById("gameCanvas");
+        if (!snapshot || !(canvas instanceof HTMLCanvasElement) || typeof canvas.captureStream !== "function") return null;
+        if (kittyPetVisionStream && kittyPetVisionCanvas === canvas && kittyPetVisionStream.getVideoTracks().some((track) => track.readyState === "live")) {
+            return kittyPetVisionStream;
+        }
+        kittyPetVisionReleaseStream();
+        try {
+            kittyPetVisionStream = canvas.captureStream(KITTY_PET_VISION_STREAM_FPS);
+            kittyPetVisionCanvas = canvas;
+            return kittyPetVisionStream;
+        } catch {
+            kittyPetVisionReleaseStream();
+            return null;
+        }
+    }
+
+    function applyKittyPetVisionFrame(frame) {
+        const x = Number(frame && frame.x);
+        const y = Number(frame && frame.y);
+        if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+        const root = mountKittyPetVision();
+        if (!root) return;
+        const width = Math.max(1, root.clientWidth || window.innerWidth || 1);
+        const height = Math.max(1, root.clientHeight || window.innerHeight || 1);
+        const offsetX = Math.max(-width * 0.1, Math.min(width * 0.1, (0.5 - x) * width));
+        const offsetY = Math.max(-height * 0.1, Math.min(height * 0.1, (0.5 - y) * height));
+        root.style.setProperty("--kitty-pet-vision-x", `${offsetX.toFixed(1)}px`);
+        root.style.setProperty("--kitty-pet-vision-y", `${offsetY.toFixed(1)}px`);
+    }
+
+    function attachKittyPetVisionDataChannel(peer, channel) {
+        if (!channel) return;
+        peer.channel = channel;
+        channel.addEventListener("message", (event) => {
+            try {
+                const frame = JSON.parse(String(event.data || ""));
+                if (frame && frame.type === "frame") applyKittyPetVisionFrame(frame);
+            } catch {}
+        });
+        channel.addEventListener("close", () => {
+            if (peer.channel === channel) peer.channel = null;
+        });
+        if (peer.role === "host") startKittyPetVisionFrameLoop(peer);
+    }
+
+    function startKittyPetVisionFrameLoop(peer) {
+        if (peer.role !== "host" || peer.frameTimer) return;
+        peer.frameTimer = window.setInterval(() => {
+            const channel = peer.channel;
+            if (!channel || channel.readyState !== "open") return;
+            const pet = kittyPetHostSessions().find((entry) => String(entry && entry.id || "") === peer.sessionId);
+            const runtime = window.__KittyGameRuntime;
+            const frame = pet && runtime && typeof runtime.getPetVisionFrame === "function"
+                ? runtime.getPetVisionFrame(pet)
+                : null;
+            if (!frame || !Number.isFinite(Number(frame.x)) || !Number.isFinite(Number(frame.y))) return;
+            try { channel.send(JSON.stringify({ type: "frame", x: Number(frame.x), y: Number(frame.y) })); } catch {}
+        }, KITTY_PET_VISION_FRAME_MS);
+    }
+
+    async function drainKittyPetVisionCandidates(peer) {
+        while (peer.pendingCandidates.length && peer.pc.remoteDescription) {
+            const candidate = peer.pendingCandidates.shift();
+            try { await peer.pc.addIceCandidate(candidate); } catch {}
+        }
+    }
+
+    async function startKittyPetVisionHost(sessionId) {
+        if (!kittyPetVisionSupported() || kittyPetVisionPeer(sessionId)) return;
+        const stream = kittyPetVisionSourceStream();
+        if (!stream) return;
+        const peer = createKittyPetVisionPeer(sessionId, "host");
+        try {
+            stream.getVideoTracks().forEach((track) => peer.pc.addTrack(track, stream));
+            const channel = peer.pc.createDataChannel("kitty-pet-vision", { ordered: false, maxRetransmits: 0 });
+            attachKittyPetVisionDataChannel(peer, channel);
+            const offer = await peer.pc.createOffer();
+            await peer.pc.setLocalDescription(offer);
+            if (!await sendKittyPetVisionSignal(sessionId, { type: "offer", description: peer.pc.localDescription })) {
+                closeKittyPetVisionPeer(sessionId, true);
+            }
+        } catch {
+            closeKittyPetVisionPeer(sessionId, true);
+        }
+    }
+
+    async function handleKittyPetVisionSignal(sessionId, signal) {
+        if (!signal || typeof signal !== "object") return true;
+        const type = String(signal.type || "");
+        const petMode = kittyPetModeActive();
+        if (type === "offer") {
+            if (!petMode || !signal.description) return true;
+            const old = kittyPetVisionPeer(sessionId);
+            if (old) closeKittyPetVisionPeer(sessionId);
+            const peer = createKittyPetVisionPeer(sessionId, "pet");
+            try {
+                await peer.pc.setRemoteDescription(signal.description);
+                await drainKittyPetVisionCandidates(peer);
+                const answer = await peer.pc.createAnswer();
+                await peer.pc.setLocalDescription(answer);
+                return await sendKittyPetVisionSignal(sessionId, { type: "answer", description: peer.pc.localDescription });
+            } catch {
+                closeKittyPetVisionPeer(sessionId);
+                setKittyPetVisionStatus("Could not connect the live view. Retrying…", "error");
+                return true;
+            }
+        }
+        const peer = kittyPetVisionPeer(sessionId);
+        if (!peer) return false;
+        try {
+            if (type === "answer" && peer.role === "host" && signal.description) {
+                await peer.pc.setRemoteDescription(signal.description);
+                await drainKittyPetVisionCandidates(peer);
+                return true;
+            }
+            if (type === "candidate" && signal.candidate) {
+                if (peer.pc.remoteDescription) await peer.pc.addIceCandidate(signal.candidate);
+                else peer.pendingCandidates.push(signal.candidate);
+                return true;
+            }
+        } catch {}
+        return true;
+    }
+
+    async function pollKittyPetVisionSignals() {
+        if (kittyPetVisionPollBusy || !readKittyAccountSession()) return;
+        const sessionIds = kittyPetVisionSessionIds();
+        if (!sessionIds.length) return;
+        kittyPetVisionPollBusy = true;
+        const acknowledgements = [...kittyPetVisionAcknowledgements];
+        try {
+            const result = await kittyAccountRequest("/v1/pets/vision/poll", {
+                sessionIds,
+                acknowledgedIds: acknowledgements
+            });
+            acknowledgements.forEach((id) => kittyPetVisionAcknowledgements.delete(id));
+            const signals = Array.isArray(result && result.signals) ? result.signals : [];
+            for (const entry of signals) {
+                const id = Number(entry && entry.id);
+                const sessionId = String(entry && entry.sessionId || "");
+                if (!Number.isSafeInteger(id) || !sessionIds.includes(sessionId)) continue;
+                if (await handleKittyPetVisionSignal(sessionId, entry.signal)) kittyPetVisionAcknowledgements.add(id);
+            }
+        } catch {
+            if (kittyPetModeActive()) setKittyPetVisionStatus("Waiting for the direct live view…", "");
+        } finally {
+            kittyPetVisionPollBusy = false;
+        }
+    }
+
+    function kittyPetVisionReconcile() {
+        const sessionIds = kittyPetVisionSessionIds();
+        closeInactiveKittyPetVisionPeers(sessionIds);
+        const root = mountKittyPetVision();
+        const petMode = kittyPetModeActive();
+        if (root) {
+            root.toggleAttribute("hidden", !petMode);
+            if (!petMode) {
+                root.dataset.live = "0";
+                const video = root.querySelector("[data-kitty-pet-vision-video]");
+                if (video) video.srcObject = null;
+            } else if (root.dataset.live !== "1") {
+                setKittyPetVisionStatus(kittyPetVisionSupported()
+                    ? "Connecting directly to your host’s live game view…"
+                    : "This browser does not support direct Pet Vision.", kittyPetVisionSupported() ? "" : "error");
+            }
+        }
+        if (sessionIds.length && kittyPetVisionSupported()) {
+            if (!kittyPetVisionPollTimer) {
+                kittyPetVisionPollTimer = window.setInterval(() => {
+                    kittyPetVisionReconcile();
+                    void pollKittyPetVisionSignals();
+                }, KITTY_PET_VISION_POLL_MS);
+            }
+            if (!petMode) sessionIds.forEach((id) => { void startKittyPetVisionHost(id); });
+            void pollKittyPetVisionSignals();
+        } else if (!sessionIds.length && kittyPetVisionPollTimer) {
+            window.clearInterval(kittyPetVisionPollTimer);
+            kittyPetVisionPollTimer = 0;
+            kittyPetVisionAcknowledgements.clear();
+            kittyPetVisionReleaseStream();
+        }
     }
 
     function installKittyPetInputLock() {
@@ -6193,7 +6528,7 @@ const KITTY_KLIENT_VERSION = "6.9.4";
             if (petActive) {
                 const self = kittyPetState.self || {};
                 const copy = modePanel.querySelector("[data-kitty-pet-copy]");
-                if (copy) copy.textContent = `Floating with ${String(self.hostUsername || "your host")} · normal game, bots, and Esc HUD controls are locked.`;
+                if (copy) copy.textContent = `Floating with ${String(self.hostUsername || "your host")} · their live game view connects directly to this pet tab while normal game, bots, and Esc HUD controls stay locked.`;
                 const catalog = kittyPetCatalog();
                 [
                     ["hatId", "hats"], ["tailId", "tails"],
@@ -55110,6 +55445,36 @@ window.__KittyGameRuntime = {
       };
     } catch (_) {
       return { clear: !1, reason: "placement validator unavailable", scale: 45 };
+    }
+  },
+  // Pet Vision sends only this tiny camera offset over its direct WebRTC data
+  // channel. The host's game canvas stays the source of every world/entity
+  // pixel, while the pet's view follows the same orbit position the host
+  // renderer uses for that pet replica.
+  getPetVisionFrame: function (__mmPet) {
+    try {
+      if (!v || !v.alive) return null;
+      const __mmHostX = Number.isFinite(Number(v.x2)) ? Number(v.x2) : Number(v.x),
+        __mmHostY = Number.isFinite(Number(v.y2)) ? Number(v.y2) : Number(v.y),
+        __mmHostScale = Math.max(18, Number(v.scale) || 35),
+        __mmViewportWidth = Math.max(1, Number(_)),
+        __mmViewportHeight = Math.max(1, Number(L)),
+        __mmCameraX = Number(oe),
+        __mmCameraY = Number(ae),
+        __mmOrbitSlot = Math.max(0, Math.min(7, Math.floor(Number(__mmPet && __mmPet.orbitSlot) || 0))),
+        __mmOrbitPhase = Number(__mmPet && __mmPet.orbitPhase) || 0;
+      if (![__mmHostX, __mmHostY, __mmCameraX, __mmCameraY].every(Number.isFinite)) return null;
+      const __mmNow = performance.now(),
+        __mmPhase = __mmNow / 980 + __mmOrbitPhase,
+        __mmRadius = __mmHostScale * 1.62 + 32 + __mmOrbitSlot * 12,
+        __mmPetX = __mmHostX + Math.cos(__mmPhase) * __mmRadius,
+        __mmPetY = __mmHostY + Math.sin(__mmPhase) * __mmRadius * .56 - __mmHostScale * .74 + Math.sin(__mmNow / 205 + __mmOrbitPhase) * 3.2;
+      return {
+        x: (__mmPetX - (__mmCameraX - __mmViewportWidth / 2)) / __mmViewportWidth,
+        y: (__mmPetY - (__mmCameraY - __mmViewportHeight / 2)) / __mmViewportHeight
+      };
+    } catch (_) {
+      return null;
     }
   },
   getWorldScreenPosition: function (__mmPosition) {
