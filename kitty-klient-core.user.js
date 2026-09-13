@@ -2,7 +2,7 @@
 // @name         kitty klient
 // @author       Coder Guy
 // @credits       random4ik — bot script
-// @version      6.9.8
+// @version      6.9.9
 // @icon         https://cdn.discordapp.com/icons/1540876076224356437/ac27c0ce87c4c46b407ebca78e150aeb.webp?size=2048
 // @description  kitty klient — a MooMoo.io client with adaptive zoom, fast autoheal, gear automation, combat tools, predictive placement, visual markers, CC0 background music, manual quick builds, and a fully rebindable keyboard/mouse controls HUD.
 // @match        *://moomoo.io/*
@@ -267,7 +267,7 @@
     const AUTO_PUSH_FINISHER_MIGRATION_KEY = "kitty-klient-auto-push-finisher-v1";
     const ASSASSIN_RANGE_AUTO_MIGRATION_KEY = "kitty-klient-assassin-range-auto-v1";
     const TAB_SYNC_BRIDGE_KEY = "kitty-klient-tab-sync-bridge-v1";
-const KITTY_KLIENT_VERSION = "6.9.8";
+const KITTY_KLIENT_VERSION = "6.9.9";
     const KITTY_SHARED_STORAGE_APPLIED_EVENT = "KittyMooMooSharedStorageApplied";
     // FRVR's v1.8 client changed the game module and now owns its own Altcha
     // verification flow. The legacy runtime patch relies on exact bundle
@@ -316,8 +316,6 @@ const KITTY_KLIENT_VERSION = "6.9.8";
     const KITTY_PET_VISION_FRAME_MS = 50;
     const KITTY_PET_VISION_CONTROL_MS = 45;
     const KITTY_PET_HOSTING_KEY = "kitty-klient-pets-enabled-v1";
-    const KITTY_PET_NAME_KEY = "kitty-klient-pet-name-v1";
-    const KITTY_PET_SKIN_COLOR_KEY = "kitty-klient-pet-skin-color-v1";
     const KITTY_PET_DEFAULT_SKIN_COLOR = "#f6c7a5";
     const KITTY_PET_MODAL_ID = "kitty-pet-player-picker";
     const KITTY_PET_HOST_PANEL_ID = "kitty-pet-host-panel";
@@ -5812,41 +5810,14 @@ const KITTY_KLIENT_VERSION = "6.9.8";
 
     function kittyPetMainMenuName() {
         const input = document.getElementById("nameInput");
-        return normalizeKittyPetName(String(input && input.value || "").replace(/^(?:k-)+/i, ""));
+        return normalizeKittyPetName(input && input.value);
     }
 
-    function kittyPetProfileDraft(root = document.getElementById(KITTY_PET_MODAL_ID)) {
-        const nameInput = root?.querySelector("[data-kitty-pet-name]");
-        const skinColorInput = root?.querySelector("[data-kitty-pet-skin-color]");
+    function kittyPetExistingIdentity() {
         return {
-            petName: normalizeKittyPetName(nameInput && nameInput.value),
-            skinColor: normalizeKittyPetSkinColor(skinColorInput && skinColorInput.value)
+            petName: kittyPetMainMenuName() || "Pet",
+            skinColor: normalizeKittyPetSkinColor(hudState && hudState.selfColor)
         };
-    }
-
-    function saveKittyPetProfileDraft(profile) {
-        try {
-            localStorage.setItem(KITTY_PET_NAME_KEY, normalizeKittyPetName(profile && profile.petName));
-            localStorage.setItem(KITTY_PET_SKIN_COLOR_KEY, normalizeKittyPetSkinColor(profile && profile.skinColor));
-        } catch {}
-    }
-
-    function populateKittyPetProfileDraft(root) {
-        if (!root) return;
-        let storedName = "";
-        let storedColor = "";
-        try {
-            storedName = localStorage.getItem(KITTY_PET_NAME_KEY) || "";
-            storedColor = localStorage.getItem(KITTY_PET_SKIN_COLOR_KEY) || "";
-        } catch {}
-        const nameInput = root.querySelector("[data-kitty-pet-name]");
-        const skinColorInput = root.querySelector("[data-kitty-pet-skin-color]");
-        if (nameInput && document.activeElement !== nameInput) {
-            nameInput.value = normalizeKittyPetName(storedName) || kittyPetMainMenuName() || "Pet";
-        }
-        if (skinColorInput && document.activeElement !== skinColorInput) {
-            skinColorInput.value = normalizeKittyPetSkinColor(storedColor);
-        }
     }
 
     function kittyPetModeActive() {
@@ -5869,7 +5840,7 @@ const KITTY_KLIENT_VERSION = "6.9.8";
             "#kitty-pet-player-picker{position:fixed;z-index:2147483647;inset:0;display:grid;place-items:center;padding:16px;background:rgba(5,2,13,.78);backdrop-filter:blur(8px);color:#fff;font:600 12px/1.4 system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}",
             "#kitty-pet-player-picker[hidden]{display:none!important}#kitty-pet-player-picker *{box-sizing:border-box}#kitty-pet-player-picker .kitty-pet-picker-card{width:min(570px,calc(100vw - 24px));max-height:min(690px,calc(100vh - 24px));display:grid;gap:12px;overflow:auto;padding:17px;border:1px solid #f0abfc;border-radius:15px;background:linear-gradient(145deg,rgba(36,7,62,.98),rgba(12,5,26,.98));box-shadow:0 24px 70px rgba(0,0,0,.7),0 0 28px rgba(217,70,239,.35)}",
             "#kitty-pet-player-picker .kitty-pet-picker-top{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}#kitty-pet-player-picker h2{margin:0;color:#fff;font-size:20px;line-height:1.1}#kitty-pet-player-picker p{margin:5px 0 0;color:#e9d5ff;font-size:11px}#kitty-pet-player-picker button{min-height:34px;padding:0 10px;border:1px solid rgba(240,171,252,.7);border-radius:8px;background:rgba(49,10,75,.76);color:#fff;font:800 11px/1 system-ui,sans-serif;cursor:pointer;text-shadow:none}#kitty-pet-player-picker button:hover:not(:disabled){filter:brightness(1.15)}#kitty-pet-player-picker button:disabled{opacity:.5;cursor:wait}#kitty-pet-player-picker .kitty-pet-picker-close{min-width:32px;padding:0;border-color:transparent;background:transparent;font-size:20px}",
-            "#kitty-pet-player-picker .kitty-pet-profile{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:end;padding:10px;border:1px solid rgba(240,171,252,.28);border-radius:10px;background:rgba(23,7,42,.65)}#kitty-pet-player-picker .kitty-pet-profile label{display:grid;gap:4px;color:#f5d0fe;font-size:9px;font-weight:900;letter-spacing:.04em;text-transform:uppercase}#kitty-pet-player-picker .kitty-pet-profile input{min-width:0;min-height:34px;padding:0 8px;border:1px solid rgba(240,171,252,.55);border-radius:7px;background:rgba(14,4,29,.82);color:#fff;font:800 11px/1 system-ui,sans-serif;text-shadow:none}#kitty-pet-player-picker .kitty-pet-profile input[type='color']{width:48px;padding:3px;cursor:pointer}#kitty-pet-player-picker .kitty-pet-picker-list{display:grid;gap:8px;max-height:410px;overflow:auto;padding-right:2px}#kitty-pet-player-picker .kitty-pet-host-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center;padding:10px;border:1px solid rgba(240,171,252,.28);border-radius:10px;background:rgba(23,7,42,.65)}#kitty-pet-player-picker .kitty-pet-host-row strong{display:block;color:#fff;font-size:12px;overflow-wrap:anywhere}#kitty-pet-player-picker .kitty-pet-host-row span{display:block;margin-top:3px;color:#d8b4fe;font-size:10px;overflow-wrap:anywhere}#kitty-pet-player-picker .kitty-pet-picker-status{min-height:17px;margin:0;color:#e9d5ff;font-size:11px}#kitty-pet-player-picker .kitty-pet-picker-status[data-kind='error']{color:#fda4af}#kitty-pet-player-picker .kitty-pet-picker-status[data-kind='ok']{color:#bbf7d0}",
+            "#kitty-pet-player-picker .kitty-pet-picker-list{display:grid;gap:8px;max-height:410px;overflow:auto;padding-right:2px}#kitty-pet-player-picker .kitty-pet-host-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center;padding:10px;border:1px solid rgba(240,171,252,.28);border-radius:10px;background:rgba(23,7,42,.65)}#kitty-pet-player-picker .kitty-pet-host-row strong{display:block;color:#fff;font-size:12px;overflow-wrap:anywhere}#kitty-pet-player-picker .kitty-pet-host-row span{display:block;margin-top:3px;color:#d8b4fe;font-size:10px;overflow-wrap:anywhere}#kitty-pet-player-picker .kitty-pet-picker-status{min-height:17px;margin:0;color:#e9d5ff;font-size:11px}#kitty-pet-player-picker .kitty-pet-picker-status[data-kind='error']{color:#fda4af}#kitty-pet-player-picker .kitty-pet-picker-status[data-kind='ok']{color:#bbf7d0}",
             "#kitty-pet-mode-panel{position:fixed;z-index:2147483645;width:min(300px,calc(100vw - 22px));display:grid;gap:9px;padding:12px;border:1px solid rgba(240,171,252,.74);border-radius:12px;background:linear-gradient(145deg,rgba(35,6,59,.96),rgba(10,4,23,.96));box-shadow:0 12px 32px rgba(0,0,0,.48),0 0 18px rgba(217,70,239,.3);color:#fff;font:600 11px/1.35 system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;text-shadow:none;right:12px;top:12px}#kitty-pet-mode-panel[hidden],#kitty-pet-host-panel[hidden]{display:none!important}#kitty-pet-mode-panel *,#kitty-pet-host-panel *{box-sizing:border-box}#kitty-pet-mode-panel h3,#kitty-pet-host-panel h3{margin:0;color:#fff;font-size:13px;letter-spacing:.05em}#kitty-pet-mode-panel p,#kitty-pet-host-panel p{margin:0;color:#e9d5ff;font-size:10px;line-height:1.4}#kitty-pet-mode-panel select,#kitty-pet-mode-panel input,#kitty-pet-mode-panel button,#kitty-pet-host-panel button{min-width:0;min-height:31px;padding:0 8px;border:1px solid rgba(240,171,252,.55);border-radius:7px;background:rgba(14,4,29,.82);color:#fff;font:800 10px/1 system-ui,sans-serif;text-shadow:none}#kitty-pet-mode-panel button,#kitty-pet-host-panel button{cursor:pointer;background:linear-gradient(135deg,#701a75,#a21caf)}#kitty-pet-mode-panel button:hover,#kitty-pet-host-panel button:hover{filter:brightness(1.14)}#kitty-pet-mode-panel .kitty-pet-select-grid{display:grid;grid-template-columns:1fr 1fr;gap:7px}#kitty-pet-mode-panel label,#kitty-pet-host-panel label{display:grid;gap:4px;color:#f5d0fe;font-size:9px;font-weight:900;letter-spacing:.04em;text-transform:uppercase}#kitty-pet-mode-panel .kitty-pet-chat{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px}#kitty-pet-mode-panel .kitty-pet-leave{border-color:rgba(251,113,133,.7);background:linear-gradient(135deg,#7f1d1d,#be123c)}#moomoo-op-hud #kitty-pet-host-panel{display:grid;gap:9px;width:min(370px,calc(100vw - 40px));box-sizing:border-box;margin:12px auto 0;padding:15px;border:1px solid rgba(240,171,252,.74);border-radius:12px;background:linear-gradient(145deg,rgba(35,6,59,.96),rgba(10,4,23,.96));box-shadow:0 12px 32px rgba(0,0,0,.48),0 0 18px rgba(217,70,239,.3);color:#fff;font:600 11px/1.35 system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;text-align:left;text-shadow:none}#kitty-pet-host-panel .kitty-pet-host-toggle{display:flex;align-items:center;justify-content:flex-start;gap:7px;color:#f5d0fe;font-size:10px;font-weight:800;text-transform:none;letter-spacing:0}#kitty-pet-host-panel .kitty-pet-host-toggle input{width:auto!important;min-height:0!important;accent-color:#e879f9}#kitty-pet-host-panel .kitty-pet-host-list{display:grid;gap:6px;width:100%}#kitty-pet-host-panel .kitty-pet-host-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px;align-items:center;padding:7px;border:1px solid rgba(240,171,252,.2);border-radius:7px;background:rgba(8,2,17,.42)}#kitty-pet-host-panel .kitty-pet-host-row strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#fff;font-size:10px}#kitty-pet-host-panel .kitty-pet-host-row button{min-height:27px;padding:0 7px;border-color:rgba(251,113,133,.6);background:rgba(127,29,29,.55);font-size:9px}",
             "#kitty-pet-vision{position:fixed;z-index:2147483644;inset:0;overflow:hidden;background:#08030f;color:#f5d0fe;font:700 12px/1.35 system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;pointer-events:none}#kitty-pet-vision[hidden]{display:none!important}#kitty-pet-vision video{position:absolute;inset:-10%;width:120%;height:120%;max-width:none;object-fit:cover;transform:translate3d(var(--kitty-pet-vision-x,0px),var(--kitty-pet-vision-y,0px),0) scale(1.02);transform-origin:center;transition:transform 90ms linear}#kitty-pet-vision .kitty-pet-vision-status{position:absolute;left:50%;top:50%;width:min(290px,calc(100vw - 36px));margin:0;transform:translate(-50%,-50%);padding:12px;border:1px solid rgba(240,171,252,.58);border-radius:10px;background:rgba(20,5,34,.82);box-shadow:0 10px 30px rgba(0,0,0,.5);color:#f5d0fe;text-align:center;text-shadow:none}#kitty-pet-vision[data-live='1'] .kitty-pet-vision-status{display:none}#kitty-pet-vision[data-kind='error'] .kitty-pet-vision-status{color:#fecdd3}",
             "html[data-kitty-pet-mode='1'] #kitty-klient-hud-launcher,html[data-kitty-pet-mode='1'] #moomoo-op-hud,html[data-kitty-pet-mode='1'] #kitty-bot-float-menu,html[data-kitty-pet-mode='1'] #kitty-bot-mouse-lock-indicator,html[data-kitty-pet-mode='1'] #kitty-bot-circle-guide{display:none!important}html[data-kitty-pet-mode='1'] #mainMenu #enterGame{display:none!important}@media(max-width:620px){#kitty-pet-mode-panel{top:auto;right:10px;bottom:10px;width:min(280px,calc(100vw - 20px))}#kitty-pet-mode-panel .kitty-pet-select-grid{grid-template-columns:1fr}}"
@@ -6464,7 +6435,6 @@ const KITTY_KLIENT_VERSION = "6.9.8";
             const result = await kittyAccountRequest("/v1/pets/configure", changes);
             if (result && result.self) {
                 kittyPetState = { ...kittyPetState, self: result.self };
-                saveKittyPetProfileDraft({ petName: result.self.petUsername, skinColor: result.self.skinColor });
                 const index = (kittyPetState.pets || []).findIndex((pet) => String(pet.id) === String(result.self.id));
                 const replica = {
                     id: result.self.id,
@@ -6553,30 +6523,6 @@ const KITTY_KLIENT_VERSION = "6.9.8";
             label.appendChild(select);
             selectGrid.appendChild(label);
         });
-        const identityGrid = document.createElement("div");
-        identityGrid.className = "kitty-pet-select-grid";
-        const nameLabel = document.createElement("label");
-        nameLabel.textContent = "Pet name";
-        const nameInput = document.createElement("input");
-        nameInput.type = "text";
-        nameInput.maxLength = 20;
-        nameInput.placeholder = "Pet name (no k- needed)";
-        nameInput.dataset.kittyPetIdentityName = "1";
-        nameInput.addEventListener("change", () => {
-            void updateKittyPetCosmetics({ petName: normalizeKittyPetName(nameInput.value) }, panel);
-        });
-        nameLabel.appendChild(nameInput);
-        const colorLabel = document.createElement("label");
-        colorLabel.textContent = "Skin color";
-        const colorInput = document.createElement("input");
-        colorInput.type = "color";
-        colorInput.value = KITTY_PET_DEFAULT_SKIN_COLOR;
-        colorInput.dataset.kittyPetIdentityColor = "1";
-        colorInput.addEventListener("change", () => {
-            void updateKittyPetCosmetics({ skinColor: normalizeKittyPetSkinColor(colorInput.value) }, panel);
-        });
-        colorLabel.appendChild(colorInput);
-        identityGrid.append(nameLabel, colorLabel);
         const chat = document.createElement("div");
         chat.className = "kitty-pet-chat";
         const input = document.createElement("input");
@@ -6604,7 +6550,7 @@ const KITTY_KLIENT_VERSION = "6.9.8";
         leave.addEventListener("click", () => { void leaveKittyPetMode(panel); });
         const status = document.createElement("p");
         status.dataset.kittyPetStatus = "1";
-        panel.append(title, copy, selectGrid, identityGrid, chat, leave, status);
+        panel.append(title, copy, selectGrid, chat, leave, status);
         document.body.appendChild(panel);
         return panel;
     }
@@ -6692,10 +6638,6 @@ const KITTY_KLIENT_VERSION = "6.9.8";
                         self[property]
                     );
                 });
-                const nameInput = modePanel.querySelector("[data-kitty-pet-identity-name]");
-                if (nameInput && document.activeElement !== nameInput) nameInput.value = String(self.petUsername || "").slice(0, 20);
-                const colorInput = modePanel.querySelector("[data-kitty-pet-identity-color]");
-                if (colorInput && document.activeElement !== colorInput) colorInput.value = normalizeKittyPetSkinColor(self.skinColor);
             }
         }
         const hostPanel = mountKittyPetHostPanel();
@@ -6761,7 +6703,7 @@ const KITTY_KLIENT_VERSION = "6.9.8";
         const title = document.createElement("h2");
         title.textContent = "Play as Pet";
         const copy = document.createElement("p");
-        copy.textContent = "Choose an online Kitty user running the Pet Mode update. You become a small visual-only companion on their current MooMoo server.";
+        copy.textContent = "Choose an online Kitty user running the Pet Mode update. Your pet uses your current MooMoo name and existing Your player color.";
         heading.append(title, copy);
         const close = document.createElement("button");
         close.type = "button";
@@ -6770,26 +6712,6 @@ const KITTY_KLIENT_VERSION = "6.9.8";
         close.setAttribute("aria-label", "Close player selection");
         close.addEventListener("click", closeKittyPetPlayerPicker);
         top.append(heading, close);
-        const profile = document.createElement("div");
-        profile.className = "kitty-pet-profile";
-        const nameLabel = document.createElement("label");
-        nameLabel.textContent = "Pet name";
-        const nameInput = document.createElement("input");
-        nameInput.type = "text";
-        nameInput.maxLength = 20;
-        nameInput.placeholder = "Pet name (no k- needed)";
-        nameInput.dataset.kittyPetName = "1";
-        nameInput.addEventListener("input", () => { saveKittyPetProfileDraft(kittyPetProfileDraft(root)); });
-        nameLabel.appendChild(nameInput);
-        const colorLabel = document.createElement("label");
-        colorLabel.textContent = "Skin color";
-        const colorInput = document.createElement("input");
-        colorInput.type = "color";
-        colorInput.value = KITTY_PET_DEFAULT_SKIN_COLOR;
-        colorInput.dataset.kittyPetSkinColor = "1";
-        colorInput.addEventListener("input", () => { saveKittyPetProfileDraft(kittyPetProfileDraft(root)); });
-        colorLabel.appendChild(colorInput);
-        profile.append(nameLabel, colorLabel);
         const list = document.createElement("div");
         list.className = "kitty-pet-picker-list";
         list.dataset.kittyPetPickerList = "1";
@@ -6799,7 +6721,7 @@ const KITTY_KLIENT_VERSION = "6.9.8";
         root.addEventListener("click", (event) => {
             if (event.target === root) closeKittyPetPlayerPicker();
         });
-        card.append(top, profile, list, status);
+        card.append(top, list, status);
         root.appendChild(card);
         document.body.appendChild(root);
         return root;
@@ -6807,11 +6729,7 @@ const KITTY_KLIENT_VERSION = "6.9.8";
 
     async function joinKittyPetHost(host, root) {
         if (!host || !host.username || !root) return;
-        const profile = kittyPetProfileDraft(root);
-        if (!profile.petName) {
-            kittyPetPickerStatus(root, "Choose a pet name first.", "error");
-            return;
-        }
+        const profile = kittyPetExistingIdentity();
         const list = root.querySelector("[data-kitty-pet-picker-list]");
         list?.querySelectorAll("button").forEach((button) => { button.disabled = true; });
         kittyPetPickerStatus(root, `Joining ${host.username} as a pet…`);
@@ -6837,7 +6755,6 @@ const KITTY_KLIENT_VERSION = "6.9.8";
         const root = mountKittyPetPlayerPicker();
         if (!root) return;
         root.removeAttribute("hidden");
-        populateKittyPetProfileDraft(root);
         const list = root.querySelector("[data-kitty-pet-picker-list]");
         if (!readKittyAccountSession()) {
             if (list) list.replaceChildren();
