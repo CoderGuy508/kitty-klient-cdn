@@ -2,7 +2,7 @@
 // @name         kitty klient
 // @author       Coder Guy
 // @credits       random4ik — bot script
-// @version      7.0.3
+// @version      7.0.4
 // @icon         https://cdn.discordapp.com/icons/1540876076224356437/ac27c0ce87c4c46b407ebca78e150aeb.webp?size=2048
 // @description  kitty klient — a MooMoo.io client with adaptive zoom, fast autoheal, gear automation, combat tools, predictive placement, visual markers, CC0 background music, manual quick builds, and a fully rebindable keyboard/mouse controls HUD.
 // @match        *://moomoo.io/*
@@ -267,7 +267,7 @@
     const AUTO_PUSH_FINISHER_MIGRATION_KEY = "kitty-klient-auto-push-finisher-v1";
     const ASSASSIN_RANGE_AUTO_MIGRATION_KEY = "kitty-klient-assassin-range-auto-v1";
     const TAB_SYNC_BRIDGE_KEY = "kitty-klient-tab-sync-bridge-v1";
-const KITTY_KLIENT_VERSION = "7.0.3";
+const KITTY_KLIENT_VERSION = "7.0.4";
     const KITTY_SHARED_STORAGE_APPLIED_EVENT = "KittyMooMooSharedStorageApplied";
     // FRVR's v1.8 client changed the game module and now owns its own Altcha
     // verification flow. The legacy runtime patch relies on exact bundle
@@ -11647,6 +11647,10 @@ let __mmAutoHealTimer = 0,
   __mmAutoHealLastHitAt = 0,
   __mmAutoHealFoodAwaitingAckAt = 0,
   __mmLastWeapon = null,
+  // weaponIndex is server-mirrored and can still report main for a tick after
+  // a native 2 press. Preserve the player's intentional hand separately so
+  // food and one-shot placement restore the hand they actually chose.
+  __mmManualSelectedWeapon = null,
   __mmAutoHealWeapon = null;
 let __mmAutoPurchaseTimer = 0,
   __mmAutoPurchasePending = null;
@@ -33930,17 +33934,18 @@ function __mmAtFullHealth() {
   return v && v.alive && v.health >= v.maxHealth;
 }
 function __mmSelectedWeapon() {
-  return !v || !v.alive
-    ? null
-    // weaponIndex is the live hand the player had before the placeable was
-    // selected. __mmLastWeapon also records temporary Tank/hammer/insta
-    // selections, so treating it as authoritative made ordinary placement
-    // restore the last automated secondary even when the player had main out.
-    : v.weapons.includes(v.weaponIndex)
-      ? v.weaponIndex
-      : v.weapons.includes(__mmLastWeapon)
-        ? __mmLastWeapon
-        : v.weapons[0];
+  if (!v || !v.alive) return null;
+  // Prefer only an intentional native hand selection. The mirrored player
+  // field is the fallback because it often lags behind a 1/2 key press while
+  // a food or placement packet is being built. Never use __mmLastWeapon as
+  // the first choice: automation updates it for Tank/insta phases.
+  const __mmManual = Number(__mmManualSelectedWeapon);
+  if (v.weapons.includes(__mmManual)) return __mmManual;
+  return v.weapons.includes(v.weaponIndex)
+    ? v.weaponIndex
+    : v.weapons.includes(__mmLastWeapon)
+      ? __mmLastWeapon
+      : v.weapons[0];
 }
 function __mmHoldingMcGrabby() {
   return !!(
@@ -35464,9 +35469,10 @@ function __mmRememberManualWeaponSelection(__mmItem, __mmIsWeapon) {
     __mmActionOwner !== "weaponRecharge"
   )
     return;
-  // Match Glotus: a native 1/2 choice reaches the game, but it does not
-  // reset UseFastest. The next safe server phase restores the reload hand
-  // selected by the faster-first controller.
+  // Keep the player's chosen hand for restoration after food and one-shot
+  // place calls. Reload's own selections are filtered above, so this does not
+  // change UseFastest's reload policy.
+  __mmManualSelectedWeapon = __mmWeapon;
 }
 function __mmRestoreWeaponRechargeTool(__mmTool) {
   __mmWeaponRechargeSelecting += 1;
