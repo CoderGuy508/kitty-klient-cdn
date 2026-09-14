@@ -2,7 +2,7 @@
 // @name         kitty klient
 // @author       Coder Guy
 // @credits       random4ik — bot script
-// @version      7.0.7
+// @version      7.0.8
 // @icon         https://cdn.discordapp.com/icons/1540876076224356437/ac27c0ce87c4c46b407ebca78e150aeb.webp?size=2048
 // @description  kitty klient — a MooMoo.io client with adaptive zoom, fast autoheal, gear automation, combat tools, predictive placement, visual markers, CC0 background music, manual quick builds, and a fully rebindable keyboard/mouse controls HUD.
 // @match        *://moomoo.io/*
@@ -267,7 +267,7 @@
     const AUTO_PUSH_FINISHER_MIGRATION_KEY = "kitty-klient-auto-push-finisher-v1";
     const ASSASSIN_RANGE_AUTO_MIGRATION_KEY = "kitty-klient-assassin-range-auto-v1";
     const TAB_SYNC_BRIDGE_KEY = "kitty-klient-tab-sync-bridge-v1";
-const KITTY_KLIENT_VERSION = "7.0.7";
+const KITTY_KLIENT_VERSION = "7.0.8";
     const KITTY_SHARED_STORAGE_APPLIED_EVENT = "KittyMooMooSharedStorageApplied";
     // FRVR's v1.8 client changed the game module and now owns its own Altcha
     // verification flow. The legacy runtime patch relies on exact bundle
@@ -13333,6 +13333,9 @@ const __mmLiveState = {
 };
 const __mmActionPriorities = Object.freeze({
   trapEscape: 100,
+  // Keep an enemy-holding pit above ordinary placement and strike work. Trap
+  // escape, Shield defense, healing, and immediate counterplay remain ahead.
+  trapReplace: 84,
   // Glotus Autobreak is a short, nearby maintenance action. It yields to
   // real input, placement and every combat/defense owner, but can cleanly
   // interrupt unattended cleanup work.
@@ -28195,10 +28198,10 @@ function __mmAutoEnemySpikeBreakable(__mmSpike) {
 function __mmAutoEnemySpikeBreakPlan() {
   if (!v || !v.alive || !Array.isArray(v.weapons)) return null;
   const __mmPrimary = Number(v.weapons[0]),
-    __mmSecondary = Number(v.weapons[1]),
-    __mmPrimaryAllowed =
-      Number.isInteger(__mmPrimary) && __mmPrimary !== 5 && __mmPrimary !== 8,
-    __mmSecondaryIsHammer = __mmSecondary === 10,
+    __mmPrimaryAllowed = Number.isInteger(__mmPrimary),
+    __mmHasGreatHammer = v.weapons.some(function (__mmWeapon) {
+      return Number(__mmWeapon) === Number(__mmGreatHammer);
+    }),
     __mmSpikes = __mmActiveObjectSnapshot(!0).spikes;
   let __mmNearest = null,
     __mmNearestDistance = Infinity;
@@ -28227,32 +28230,18 @@ function __mmAutoEnemySpikeBreakPlan() {
     const __mmPrimaryRange = __mmPrimaryAllowed
         ? __mmAutoEnemySpikeBreakWeaponRange(__mmPrimary, __mmSpike)
         : 0,
-      __mmHammerRange = __mmSecondaryIsHammer
-        ? __mmAutoEnemySpikeBreakWeaponRange(__mmSecondary, __mmSpike)
+      __mmHammerRange = __mmHasGreatHammer
+        ? __mmAutoEnemySpikeBreakWeaponRange(__mmGreatHammer, __mmSpike)
         : 0,
       __mmPrimaryInRange = __mmPrimaryRange > 0 && __mmDistance <= __mmPrimaryRange,
       __mmHammerInRange = __mmHammerRange > 0 && __mmDistance <= __mmHammerRange;
-    // This is Glotus's weapon rule: Hammer owns ordinary spike breaking;
-    // a legal main weapon takes over only when it can one-hit the spike and
-    // Hammer is still reloading or slower for that exact destruction.
+    // Great Hammer owns every hostile-spike break when it is equipped. Do not
+    // burn a loaded main to save its reload: preserving Hammer for a later
+    // Insta is less valuable than opening the dangerous spike immediately.
+    // When Hammer is absent, use the actual primary slot as the fallback.
     let __mmWeapon = null;
-    if (__mmHammerInRange) {
-      const __mmPrimaryDamage = __mmPrimaryInRange
-          ? __mmWeaponStructureDamage(v, __mmPrimary, __mmSpike)
-          : 0,
-        __mmPrimarySpeed = Number(
-          b && b.weapons && b.weapons[__mmPrimary] && b.weapons[__mmPrimary].speed,
-        ) || Infinity,
-        __mmHammerSpeed = Number(
-          b && b.weapons && b.weapons[__mmSecondary] && b.weapons[__mmSecondary].speed,
-        ) || Infinity;
-      if (
-        __mmPrimaryInRange &&
-        __mmPrimaryDamage + 0.001 >= __mmHealth &&
-        (!__mmWeaponReady(__mmSecondary) || __mmPrimarySpeed < __mmHammerSpeed)
-      )
-        __mmWeapon = __mmPrimary;
-      else __mmWeapon = __mmSecondary;
+    if (__mmHasGreatHammer) {
+      if (__mmHammerInRange) __mmWeapon = __mmGreatHammer;
     } else if (__mmPrimaryInRange) __mmWeapon = __mmPrimary;
     if (__mmWeapon == null) continue;
     __mmNearest = {
@@ -40398,9 +40387,10 @@ function __mmAutoPushPredictReplacement(enemy, trap, spike, hazards) {
         item=spikeItem;candidate=alternative;lethal=true;
       }
     }
+    const owner = object === trap ? "trapReplace" : "smartAutoPlace";
     if (!candidate || !candidate.preplace || Math.hypot(candidate.x-object.x,candidate.y-object.y)>14 ||
-        !__mmReserveTacticalChannel("placement","smartAutoPlace",64) ||
-        !__mmTacticalPlacementKey("smartAutoPlace",candidate)) continue;
+        !__mmReserveTacticalChannel("placement",owner) ||
+        !__mmTacticalPlacementKey(owner,candidate)) continue;
     if (!__mmSendPredictedSmartTrapReplace(item,candidate,__mmSelectedTool())) continue;
     __mmPushReplacementAttempts.set(object,now);
     __mmAutoSpikeSpamReservations.push({item,x:candidate.x,y:candidate.y,scale:candidate.scale,expiresAt:now+650});
@@ -50182,7 +50172,7 @@ function __mmSmartTrapReplaceMayPlace() {
   // that held attack's placement moment, but never insert a trap over a
   // higher-priority safety/combo action.
   return !!(
-    __mmActionCanPreempt("smartAutoPlace") ||
+    __mmActionCanPreempt("trapReplace") ||
     (__mmActionOwner === "manualAttack" &&
       (__mmPrimaryHeld || __mmSecondaryHeld))
   );
@@ -50361,8 +50351,8 @@ function __mmTryPredictSmartTrapReplace(
         __mmCandidate.x - Number(__mmTrap.x),
         __mmCandidate.y - Number(__mmTrap.y),
       ) > 14 ||
-      !__mmReserveTacticalChannel("placement", "smartAutoPlace", 64) ||
-      !__mmTacticalPlacementKey("smartAutoPlace", __mmCandidate)
+      !__mmReserveTacticalChannel("placement", "trapReplace") ||
+      !__mmTacticalPlacementKey("trapReplace", __mmCandidate)
     )
       continue;
     if (
@@ -50460,8 +50450,8 @@ function __mmTrySmartTrapReplace(__mmKnown, __mmEnemy, __mmNow) {
     (__mmCandidate.priority = !0),
     __mmCandidate.reasons.push("exact trap replace"));
   if (
-    !__mmReserveTacticalChannel("placement", "smartAutoPlace", 64) ||
-    !__mmTacticalPlacementKey("smartAutoPlace", __mmCandidate)
+    !__mmReserveTacticalChannel("placement", "trapReplace") ||
+    !__mmTacticalPlacementKey("trapReplace", __mmCandidate)
   )
     return !1;
   const __mmTool = __mmSelectedTool();
@@ -56978,73 +56968,15 @@ function __mmKittyNearestPlayerBuiltObject() {
   return __mmNearest;
 }
 function __mmKittyDestroyingWeapon() {
-  if (!v || !v.alive || !v.weapons) return null;
-  const __mmPrimary = v.weapons[0],
-    __mmSecondary = v.weapons[1],
-    __mmPrimaryData =
-      __mmPrimary == null ? null : b && b.weapons && b.weapons[__mmPrimary],
-    __mmPrimaryDamage = Number(
-      __mmPrimaryData && (__mmPrimaryData.dmg ?? __mmPrimaryData.damage),
-    ),
-    // Right click is a melee/break channel. A Stick does not grant permission
-    // to promote a ranged secondary into a projectile attack.
-    __mmPrimaryIsStick =
-      __mmPrimary != null &&
-      __mmPrimaryData &&
-      __mmPrimaryData.projectile == null &&
-      !__mmPrimaryData.shield &&
-      Number.isFinite(__mmPrimaryDamage) &&
-      __mmPrimaryDamage <= 1,
-    // This is fixed Kitty' notStick check. It intentionally treats the
-    // primary slot as the normal right-click breaker unless slot two is the
-    // Great Hammer; a katana or a projectile does not replace that choice.
-    __mmPrimaryUsable =
-      __mmPrimary != null &&
-      (!Number.isFinite(__mmPrimaryDamage) || __mmPrimaryDamage !== 1),
-    __mmIsHammer = Number(__mmSecondary) === Number(__mmGreatHammer),
-    __mmTarget = __mmKittyNearestPlayerBuiltObject();
-  if (__mmIsHammer && __mmSecondary != null) {
-    // Kitty lets a loaded primary take a player-built object that it can
-    // finish in one swing when the hammer is unavailable or slower.  That
-    // avoids wasting a hammer swing, while all other hammer right-clicks stay
-    // on the hammer.
-    if (
-      __mmPrimaryUsable &&
-      Number(__mmPrimary) !== 5 &&
-      __mmTarget &&
-      __mmWeaponReady(__mmPrimary) &&
-      (!__mmWeaponReady(__mmSecondary) ||
-        __mmManualWeaponCooldown(__mmPrimary) <=
-          __mmManualWeaponCooldown(__mmSecondary)) &&
-      __mmWeaponStructureDamage(v, __mmPrimary, __mmTarget) + 0.001 >=
-        Number(__mmTarget.health)
-    )
-      return Number(__mmPrimary);
-    return Number(__mmSecondary);
-  }
-  if (
-    __mmPrimaryUsable &&
-    __mmPrimaryData &&
-    __mmPrimaryData.projectile == null &&
-    !__mmPrimaryData.shield
-  )
-    return Number(__mmPrimary);
-  // A bare Stick may still stay in the manual melee channel. If neither slot
-  // is melee, do nothing instead of silently firing a projectile.
-  if (
-    __mmPrimaryIsStick &&
-    __mmPrimaryData &&
-    __mmPrimaryData.projectile == null &&
-    !__mmPrimaryData.shield
-  )
-    return Number(__mmPrimary);
-  const __mmSecondaryData =
-    __mmSecondary == null ? null : b && b.weapons && b.weapons[__mmSecondary];
-  return __mmSecondaryData &&
-    __mmSecondaryData.projectile == null &&
-    !__mmSecondaryData.shield
-    ? Number(__mmSecondary)
-    : null;
+  if (!v || !v.alive || !Array.isArray(v.weapons)) return null;
+  // The held break path follows AutoBreak exactly: Great Hammer wins whenever
+  // it is equipped, regardless of which slot carries it or whether a main
+  // swing could finish the current object. Without it, stay on the main hand.
+  if (v.weapons.some(function (__mmWeapon) {
+    return Number(__mmWeapon) === Number(__mmGreatHammer);
+  })) return __mmGreatHammer;
+  const __mmPrimary = Number(v.weapons[0]);
+  return Number.isInteger(__mmPrimary) ? __mmPrimary : null;
 }
 function __mmRightClickWeapon(__mmShieldPlan) {
   if (
@@ -57056,40 +56988,11 @@ function __mmRightClickWeapon(__mmShieldPlan) {
   __mmShieldPlan === undefined &&
     (__mmShieldPlan = __mmRightClickShieldPlan());
   const __mmSecondary = __mmSecondaryWeapon();
-  // A physical right click owns slot two. Shield Defense is naturally covered
-  // because the shield itself lives in that secondary slot.
+  // A real Shield defense still owns the physical right-click while it is
+  // blocking an incoming attack. Every other held break uses Hammer first.
   if (Number(__mmSecondary) === Number(__mmShieldWeapon) && __mmShieldPlan)
     return __mmShieldWeapon;
-  const __mmPrimary = v && v.weapons && v.weapons[0],
-    __mmSecondaryData =
-      __mmSecondary == null ? null : b && b.weapons && b.weapons[__mmSecondary],
-    __mmPrimaryData =
-      __mmPrimary == null ? null : b && b.weapons && b.weapons[__mmPrimary],
-    __mmSecondaryMelee = !!(
-      __mmSecondaryData &&
-      __mmSecondaryData.projectile == null &&
-      !__mmSecondaryData.shield
-    ),
-    __mmPrimaryMelee = !!(
-      __mmPrimaryData &&
-      __mmPrimaryData.projectile == null &&
-      !__mmPrimaryData.shield
-    );
-  // Great Hammer is normally held in the secondary slot, exactly as Kitty
-  // does. Its one exception is a loaded, no-slower main weapon that can
-  // one-hit the nearest player-built object; use that free finish instead of
-  // spending the hammer swing. Other secondary melee weapons retain Kitty's
-  // normal held-secondary behavior.
-  if (Number(__mmSecondary) === Number(__mmGreatHammer)) {
-    const __mmHammerChoice = __mmKittyDestroyingWeapon();
-    if (__mmHammerChoice != null) return Number(__mmHammerChoice);
-  }
-  // Held right click is a melee/break channel. Never promote a Crossbow,
-  // Musket, Bow, or other projectile slot into it; if slot two is ranged,
-  // fall back to the main melee weapon instead.
-  if (__mmSecondaryMelee) return Number(__mmSecondary);
-  if (__mmPrimaryMelee) return Number(__mmPrimary);
-  return null;
+  return __mmKittyDestroyingWeapon();
 }
 function __mmServerTickMs() {
   return Math.max(
