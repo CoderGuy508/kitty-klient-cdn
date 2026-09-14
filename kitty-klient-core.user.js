@@ -2,7 +2,7 @@
 // @name         kitty klient
 // @author       Coder Guy
 // @credits       random4ik — bot script
-// @version      7.0.4
+// @version      7.0.5
 // @icon         https://cdn.discordapp.com/icons/1540876076224356437/ac27c0ce87c4c46b407ebca78e150aeb.webp?size=2048
 // @description  kitty klient — a MooMoo.io client with adaptive zoom, fast autoheal, gear automation, combat tools, predictive placement, visual markers, CC0 background music, manual quick builds, and a fully rebindable keyboard/mouse controls HUD.
 // @match        *://moomoo.io/*
@@ -267,7 +267,7 @@
     const AUTO_PUSH_FINISHER_MIGRATION_KEY = "kitty-klient-auto-push-finisher-v1";
     const ASSASSIN_RANGE_AUTO_MIGRATION_KEY = "kitty-klient-assassin-range-auto-v1";
     const TAB_SYNC_BRIDGE_KEY = "kitty-klient-tab-sync-bridge-v1";
-const KITTY_KLIENT_VERSION = "7.0.4";
+const KITTY_KLIENT_VERSION = "7.0.5";
     const KITTY_SHARED_STORAGE_APPLIED_EVENT = "KittyMooMooSharedStorageApplied";
     // FRVR's v1.8 client changed the game module and now owns its own Altcha
     // verification flow. The legacy runtime patch relies on exact bundle
@@ -16616,7 +16616,9 @@ const __mmInsta = {
           this.tick() / 3 + Math.max(0, Number(window.pingTime) || 0) / 2,
         ),
       );
-    return Math.atan2(__mmTarget.y - v.y, __mmTarget.x - v.x);
+    return typeof __mmStableCombatAim === "function"
+      ? __mmStableCombatAim(__mmTarget.x, __mmTarget.y)
+      : Math.atan2(__mmTarget.y - v.y, __mmTarget.x - v.x);
   },
   projectileAim(__mmTarget, __mmWeapon = null) {
     if (this.mouseAimOnly || !__mmTarget || !v) return this.aim(null);
@@ -16835,14 +16837,14 @@ const __mmInsta = {
     const __mmHat =
       this.profile === "polearmAids" && v.skins && v.skins[40]
         ? 40
-        : v.skins && v.skins[__mmTurretGear]
+        : this.turretReady()
           ? __mmTurretGear
           : null;
-    __mmEquipGearPair(
-      __mmHat,
-      this.damageTail(),
-      !0,
-    );
+    // Never leave a Turret intent armed during its reload. Callers treat a
+    // missing gear phase as a cancelled shot, so a stale Tank-window callback
+    // cannot lock the player into Turret Gear without a bullet to send.
+    if (__mmHat == null) return null;
+    __mmEquipGearPair(__mmHat, this.damageTail(), !0);
     return __mmHat;
   },
   turretReady() {
@@ -16851,6 +16853,7 @@ const __mmInsta = {
       v.alive &&
       v.skins &&
       v.skins[__mmTurretGear] &&
+      !__mmTurretLiveReloading(v) &&
       __mmTurretCooldownRemaining(v, Date.now()) <= 0
     );
   },
@@ -17224,7 +17227,9 @@ const __mmInsta = {
       // This gear packet is the turret shot. Commit it immediately: waiting
       // for a cosmetic acknowledgement would put the projectile behind the
       // one-tick Tank exposure we deliberately predicted.
-      this.selectSecondaryDamageGear();
+      const __mmGearHat = this.selectSecondaryDamageGear();
+      if (__mmGearHat !== __mmTurretGear || !this.turretReady())
+        return void this.cleanup("tank-window-turret-reloading");
       __mmGearArbiter.commit();
       try {
         (O.send("D", __mmAngle), __mmAssumeTurretGearShot());
@@ -17735,6 +17740,10 @@ const __mmInsta = {
     this.releaseAttack();
     this.stopRedDragonAim();
     this.clearRedDragonMusketRestore();
+    // A Tank window can expire while a Turret phase is pending. Drop that
+    // exact intent before restoring so it cannot keep winning the gear
+    // arbiter after this Insta has stopped.
+    __mmGearArbiter.intents.delete("insta");
     __mmCompletedFullInsta &&
       !__mmChainBowUpgrade &&
       !__mmRedDragonComplete &&
@@ -17896,7 +17905,7 @@ const __mmBoostInsta = {
   },
   aim(__mmTarget) {
     return __mmTarget
-      ? Math.atan2(__mmTarget.y - v.y, __mmTarget.x - v.x)
+      ? __mmStableCombatAim(__mmTarget.x, __mmTarget.y)
       : __mmRawMouseAimDirection();
   },
   projectileTravelMs(__mmTarget, __mmWeapon) {
@@ -24973,6 +24982,15 @@ function __mmAdvancePlayerToolCooldowns(__mmPlayer, __mmNow) {
   ((__mmEntry.remaining = Math.max(0, __mmRemaining - __mmElapsed)),
     (__mmEntry.readyAt = __mmNow + __mmEntry.remaining));
   return __mmState;
+}
+function __mmTurretLiveReloading(__mmPlayer = v) {
+  // Some server builds expose the Turret's gear cooldown in reloads[53].
+  // Treat it as an additional hard gate when present; the local reservation
+  // remains the fallback for builds which do not expose that entry.
+  const __mmReload = __mmPlayer && __mmPlayer.reloads
+    ? Number(__mmPlayer.reloads[__mmTurretGear])
+    : NaN;
+  return Number.isFinite(__mmReload) && __mmReload > 0;
 }
 function __mmTurretCooldownRemaining(__mmPlayer, __mmNow = Date.now()) {
   if (!__mmPlayer || __mmPlayer.sid == null) return 0;
@@ -41213,9 +41231,9 @@ const __mmTankPredictInsta = {
     if (!v || !__mmEnemy) return __mmRawMouseAimDirection();
     const __mmTarget = this.projectedPosition(__mmEnemy, __mmRecord, __mmAt),
       __mmSelf = __mmServerEntityPosition(v) || v;
-    return Math.atan2(
-      Number(__mmTarget.y) - Number(__mmSelf.y),
-      Number(__mmTarget.x) - Number(__mmSelf.x),
+    return __mmStableCombatAim(
+      Number(__mmTarget.x),
+      Number(__mmTarget.y),
     );
   },
   observe() {
@@ -41255,7 +41273,8 @@ const __mmTankPredictInsta = {
   },
   plan(__mmEnemy, __mmNow = Date.now()) {
     if (!__mmEnemy || __mmEnemy.sid == null || Number(__mmEnemy.skinIndex) === 40 ||
-        !v || !v.alive || !__mmInsta.turretInRange(__mmEnemy)) return null;
+        !v || !v.alive || !__mmInsta.turretReady() ||
+        !__mmInsta.turretInRange(__mmEnemy)) return null;
     const __mmRecord = this.records[String(__mmEnemy.sid)];
     if (!__mmRecord || __mmNow < __mmRecord.retryAfter) return null;
     const __mmNextHatTank = Number(__mmEnemy.skinIndex2) === 40,
@@ -47017,6 +47036,36 @@ function __mmSyncEnemyHatImpact(__mmTarget, __mmImpactAt, __mmNow = Date.now()) 
     defensive: __mmDefensive,
   };
 }
+let __mmLastStableCombatAim = null;
+function __mmStableCombatAim(__mmTargetX, __mmTargetY, __mmFallback = null) {
+  const __mmSelf = __mmServerEntityPosition(v) || v,
+    __mmX = Number(__mmTargetX),
+    __mmY = Number(__mmTargetY),
+    __mmSelfX = Number(__mmSelf && __mmSelf.x),
+    __mmSelfY = Number(__mmSelf && __mmSelf.y),
+    __mmDx = __mmX - __mmSelfX,
+    __mmDy = __mmY - __mmSelfY;
+  // Entity position frames can briefly contain the player's own coordinates
+  // during an Insta handoff. Math.atan2(0, 0) becomes 0, which was creating
+  // the visible east-facing snap before and inside otherwise valid Instas.
+  if (
+    Number.isFinite(__mmDx) &&
+    Number.isFinite(__mmDy) &&
+    Math.hypot(__mmDx, __mmDy) > 0.5
+  ) {
+    const __mmAngle = Math.atan2(__mmDy, __mmDx);
+    if (Number.isFinite(__mmAngle)) {
+      __mmLastStableCombatAim = __mmAngle;
+      return __mmAngle;
+    }
+  }
+  const __mmPrevious = Number(__mmLastStableCombatAim);
+  if (Number.isFinite(__mmPrevious)) return __mmPrevious;
+  const __mmFallbackAngle = Number(__mmFallback);
+  if (Number.isFinite(__mmFallbackAngle)) return __mmFallbackAngle;
+  const __mmMouse = Number(__mmRawMouseAimDirection());
+  return Number.isFinite(__mmMouse) ? __mmMouse : 0;
+}
 function __mmSyncAimAngle(__mmTarget, __mmTravelMs) {
   const __mmNow = Date.now(),
     __mmPing = Number(window.pingTime),
@@ -47040,9 +47089,9 @@ function __mmSyncAimAngle(__mmTarget, __mmTravelMs) {
   )
     return __mmTankPredictInsta.aimAt(__mmTarget, __mmTankRecord, __mmImpactAt);
   const __mmVelocity = __mmSyncPlayerVelocity(__mmTarget),
-    __mmTargetX = __mmTarget.x + __mmVelocity.x * __mmLead,
-    __mmTargetY = __mmTarget.y + __mmVelocity.y * __mmLead;
-  return Math.atan2(__mmTargetY - v.y, __mmTargetX - v.x);
+    __mmTargetX = Number(__mmTarget.x) + (Number(__mmVelocity.x) || 0) * __mmLead,
+    __mmTargetY = Number(__mmTarget.y) + (Number(__mmVelocity.y) || 0) * __mmLead;
+  return __mmStableCombatAim(__mmTargetX, __mmTargetY);
 }
 function __mmCanFireInstaSync() {
   return !!(
