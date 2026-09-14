@@ -2,7 +2,7 @@
 // @name         kitty klient
 // @author       Coder Guy
 // @credits       random4ik — bot script
-// @version      7.0.9
+// @version      7.0.10
 // @icon         https://cdn.discordapp.com/icons/1540876076224356437/ac27c0ce87c4c46b407ebca78e150aeb.webp?size=2048
 // @description  kitty klient — a MooMoo.io client with adaptive zoom, fast autoheal, gear automation, combat tools, predictive placement, visual markers, CC0 background music, manual quick builds, and a fully rebindable keyboard/mouse controls HUD.
 // @match        *://moomoo.io/*
@@ -267,7 +267,7 @@
     const AUTO_PUSH_FINISHER_MIGRATION_KEY = "kitty-klient-auto-push-finisher-v1";
     const ASSASSIN_RANGE_AUTO_MIGRATION_KEY = "kitty-klient-assassin-range-auto-v1";
     const TAB_SYNC_BRIDGE_KEY = "kitty-klient-tab-sync-bridge-v1";
-const KITTY_KLIENT_VERSION = "7.0.9";
+const KITTY_KLIENT_VERSION = "7.0.10";
     const KITTY_SHARED_STORAGE_APPLIED_EVENT = "KittyMooMooSharedStorageApplied";
     // FRVR's v1.8 client changed the game module and now owns its own Altcha
     // verification flow. The legacy runtime patch relies on exact bundle
@@ -655,9 +655,11 @@ const KITTY_KLIENT_VERSION = "7.0.9";
                     items: data.list.map((entry) => entry && entry.pre)
                 };
             }
-            data.weapons.forEach((entry) => {
-                if (entry && entry.pre != null) entry.pre = null;
-            });
+            // Keep weapon branches intact by default so Kitty does not offer
+            // unrelated weapon paths (for example, Stick -> Katana). Items
+            // are different: MooMoo uses `pre` only to choose a card lane,
+            // and Glotus intentionally bypasses that lane check so valid
+            // upgrades such as Spinning Spikes remain available.
             data.list.forEach((entry) => {
                 if (entry && entry.pre != null) entry.pre = null;
             });
@@ -28167,6 +28169,10 @@ function __mmUpdateAutoSteal() {
 let __mmAutoEnemySpikeBreakTimer = 0,
   __mmAutoEnemySpikeBreakRestoreTool = null,
   __mmAutoEnemySpikeBreakAimAngle = null,
+  // Keep one breaker and target for the whole spike. Re-planning it every
+  // tactical tick was the source of the visible main/Hammer selection churn.
+  __mmAutoEnemySpikeBreakLockedWeapon = null,
+  __mmAutoEnemySpikeBreakLockedTargetKey = null,
   // A one-hit hostile-spike break hands the same tick to the placement ring.
   // Keep that short handoff separate from generic object replacement: it
   // exists only to mirror Glotus AutoBreak -> AutoPlacer combat pressure.
@@ -28201,66 +28207,67 @@ function __mmAutoEnemySpikeBreakable(__mmSpike) {
     __mmName = String((__mmData && __mmData.name) || "").toLowerCase();
   return __mmName.includes("spikes") && !__mmFriendlyStructure(__mmSpike);
 }
+function __mmAutoEnemySpikeBreakPreferredWeapon() {
+  if (!v || !v.alive || !Array.isArray(v.weapons)) return null;
+  // Great Hammer is a fixed AutoBreak preference whenever it is owned. Only
+  // fall back to main when Hammer is not equipped at all.
+  if (v.weapons.some(function (__mmWeapon) {
+    return Number(__mmWeapon) === Number(__mmGreatHammer);
+  })) return Number(__mmGreatHammer);
+  const __mmPrimary = Number(v.weapons[0]);
+  return Number.isInteger(__mmPrimary) ? __mmPrimary : null;
+}
 function __mmAutoEnemySpikeBreakPlan() {
   if (!v || !v.alive || !Array.isArray(v.weapons)) return null;
-  const __mmPrimary = Number(v.weapons[0]),
-    __mmPrimaryAllowed = Number.isInteger(__mmPrimary),
-    __mmHasGreatHammer = v.weapons.some(function (__mmWeapon) {
-      return Number(__mmWeapon) === Number(__mmGreatHammer);
-    }),
+  const __mmPreferred = __mmAutoEnemySpikeBreakPreferredWeapon(),
     __mmSpikes = __mmActiveObjectSnapshot(!0).spikes;
+  if (__mmPreferred == null) return null;
+  const __mmLockedWeapon = Number(__mmAutoEnemySpikeBreakLockedWeapon),
+    __mmWeapon = v.weapons.includes(__mmLockedWeapon)
+      ? __mmLockedWeapon
+      : __mmPreferred;
   let __mmNearest = null,
-    __mmNearestDistance = Infinity;
+    __mmNearestDistance = Infinity,
+    __mmLocked = null;
   for (let __mmIndex = 0; __mmIndex < __mmSpikes.length; __mmIndex++) {
     const __mmSpike = __mmSpikes[__mmIndex];
     if (!__mmAutoEnemySpikeBreakable(__mmSpike)) continue;
+    const __mmDistance = Math.hypot(
+        Number(__mmSpike.x) - Number(v.x),
+        Number(__mmSpike.y) - Number(v.y),
+      ),
+      __mmRange = __mmAutoEnemySpikeBreakWeaponRange(__mmWeapon, __mmSpike);
+    // Range is the one required mechanical check: sending an attack beyond a
+    // weapon's hitbox cannot break the spike and only spends its reload.
+    if (!Number.isFinite(__mmDistance) || __mmRange <= 0 || __mmDistance > __mmRange)
+      continue;
     const __mmState = __mmBreakableState(__mmSpike),
       __mmData = b && b.list && b.list[__mmSpike.id],
-      // A brand-new spike is already targetable before its first object-hit
-      // delta initializes Kitty's breakable record. Glotus does not wait for
-      // that record, so use the visible/server item health as the fallback.
       __mmHealth = Number(
         (__mmState && __mmState.health) ?? __mmSpike.health ?? (__mmData && __mmData.health),
       ),
-      __mmDistance = Math.hypot(
-        Number(__mmSpike.x) - Number(v.x),
-        Number(__mmSpike.y) - Number(v.y),
-      );
-    if (
-      !Number.isFinite(__mmHealth) ||
-      __mmHealth <= 0.001 ||
-      !Number.isFinite(__mmDistance) ||
-      __mmDistance >= __mmNearestDistance
-    )
-      continue;
-    const __mmPrimaryRange = __mmPrimaryAllowed
-        ? __mmAutoEnemySpikeBreakWeaponRange(__mmPrimary, __mmSpike)
-        : 0,
-      __mmHammerRange = __mmHasGreatHammer
-        ? __mmAutoEnemySpikeBreakWeaponRange(__mmGreatHammer, __mmSpike)
-        : 0,
-      __mmPrimaryInRange = __mmPrimaryRange > 0 && __mmDistance <= __mmPrimaryRange,
-      __mmHammerInRange = __mmHammerRange > 0 && __mmDistance <= __mmHammerRange;
-    // Great Hammer owns every hostile-spike break when it is equipped. Do not
-    // burn a loaded main to save its reload: preserving Hammer for a later
-    // Insta is less valuable than opening the dangerous spike immediately.
-    // When Hammer is absent, use the actual primary slot as the fallback.
-    let __mmWeapon = null;
-    if (__mmHasGreatHammer) {
-      if (__mmHammerInRange) __mmWeapon = __mmGreatHammer;
-    } else if (__mmPrimaryInRange) __mmWeapon = __mmPrimary;
-    if (__mmWeapon == null) continue;
-    __mmNearest = {
-      spike: __mmSpike,
-      weapon: __mmWeapon,
-      health: __mmHealth,
-      damage: __mmWeaponStructureDamage(v, __mmWeapon, __mmSpike),
-      angle: Math.atan2(Number(__mmSpike.y) - Number(v.y), Number(__mmSpike.x) - Number(v.x)),
-      distance: __mmDistance,
-    };
-    __mmNearestDistance = __mmDistance;
+      __mmPlan = {
+        spike: __mmSpike,
+        key: __mmAutoEnemySpikeBreakObjectKey(__mmSpike),
+        weapon: __mmWeapon,
+        health: Number.isFinite(__mmHealth) ? __mmHealth : 0,
+        damage: __mmWeaponStructureDamage(v, __mmWeapon, __mmSpike),
+        angle: Math.atan2(Number(__mmSpike.y) - Number(v.y), Number(__mmSpike.x) - Number(v.x)),
+        distance: __mmDistance,
+      };
+    if (__mmPlan.key === __mmAutoEnemySpikeBreakLockedTargetKey) {
+      __mmLocked = __mmPlan;
+      break;
+    }
+    if (__mmDistance < __mmNearestDistance)
+      ((__mmNearest = __mmPlan), (__mmNearestDistance = __mmDistance));
   }
-  return __mmNearest;
+  // A vanished, moved, or out-of-reach target is the only reason AutoBreak
+  // may choose another spike. It never flips hands while a valid target lives.
+  if (!__mmLocked && __mmAutoEnemySpikeBreakLockedTargetKey != null)
+    ((__mmAutoEnemySpikeBreakLockedTargetKey = null),
+      (__mmAutoEnemySpikeBreakLockedWeapon = null));
+  return __mmLocked || __mmNearest;
 }
 function __mmAutoEnemySpikeBreakObjectKey(__mmObject) {
   if (!__mmObject) return null;
@@ -28424,13 +28431,17 @@ function __mmUpdateAutoEnemySpikeBreakReplacement() {
   return __mmPlaced ? 1 : 0;
 }
 function __mmStopAutoEnemySpikeBreak(__mmReason) {
-  const __mmRestore = __mmActionMayRestore("enemySpikeBreak"),
+  const __mmDisable = String(__mmReason || "").includes("disabled"),
+    __mmRestore = __mmActionMayRestore("enemySpikeBreak"),
     __mmTool = __mmAutoEnemySpikeBreakRestoreTool,
     __mmHadAim = Number.isFinite(__mmAutoEnemySpikeBreakAimAngle);
   (__mmAutoEnemySpikeBreakTimer && clearTimeout(__mmAutoEnemySpikeBreakTimer),
     (__mmAutoEnemySpikeBreakTimer = 0),
     (__mmAutoEnemySpikeBreakRestoreTool = null),
     (__mmAutoEnemySpikeBreakAimAngle = null),
+    __mmDisable &&
+      ((__mmAutoEnemySpikeBreakLockedWeapon = null),
+      (__mmAutoEnemySpikeBreakLockedTargetKey = null)),
     __mmRestore && __mmTool && __mmRestoreTool(__mmTool),
     __mmActionRelease("enemySpikeBreak", __mmReason || "spike swing sent"),
     __mmHadAim && __mmScheduleMouseAimReturn());
@@ -28513,10 +28524,13 @@ function __mmAutoEnemySpikeBreakShouldYield() {
   return __mmAutoEnemySpikeBreakThreatIsClose(__mmCombatThreatSnapshot());
 }
 function __mmUpdateAutoEnemySpikeBreak() {
+  // The action stays below manual attacks and defensive/combat owners through
+  // its normal priority (58). Apart from that arbitration and a real weapon
+  // reload/range check, AutoBreak no longer adds threat, input, trap, or Insta
+  // yield guards of its own.
   if (
     !__mmAutoEnemySpikeBreakEnabled ||
     __mmAutoEnemySpikeBreakTimer ||
-    __mmAutoEnemySpikeBreakShouldYield() ||
     !__mmActionCanPreempt("enemySpikeBreak")
   )
     return;
@@ -28524,14 +28538,15 @@ function __mmUpdateAutoEnemySpikeBreak() {
   if (!__mmPlan || !__mmWeaponReady(__mmPlan.weapon)) return;
   __mmActionOwner === "weaponRecharge" && __mmPauseWeaponRecharge(!0);
   if (!__mmActionClaim("enemySpikeBreak", "Glotus-style hostile spike break")) return;
-  ((__mmAutoEnemySpikeBreakRestoreTool = __mmSelectedTool()),
+  ((__mmAutoEnemySpikeBreakLockedWeapon = Number(__mmPlan.weapon)),
+    (__mmAutoEnemySpikeBreakLockedTargetKey = __mmPlan.key),
+    (__mmAutoEnemySpikeBreakRestoreTool = __mmSelectedTool()),
     (__mmAutoEnemySpikeBreakAimAngle = __mmPlan.angle));
   try {
     // AutoBreak's structure swing always uses Tank when it is owned. The
     // one-tick lease raises damage on both one-hit and multi-hit spikes, then
     // releases before the next threat or gear decision.
-    if (v.skins && v.skins[40] && !__mmActivateImmediateTankTick())
-      return void __mmStopAutoEnemySpikeBreak("Tank phase unavailable");
+    v.skins && v.skins[40] && __mmActivateImmediateTankTick();
     (O.send("D", __mmPlan.angle),
       je(__mmPlan.weapon, !0),
       O.send("F", 1, __mmPlan.angle),
@@ -31311,19 +31326,23 @@ function __mmStartUpgradeChoiceFilter() {
     __mmScheduleUpgradeChoiceFilter());
 }
 function __mmApplyUpgradeUnlock() {
-  const __mmApply = function (__mmEntries, __mmOriginal) {
+  const __mmApply = function (__mmEntries, __mmOriginal, __mmBypassBranches) {
     if (!Array.isArray(__mmEntries)) return;
     for (let __mmIndex = 0; __mmIndex < __mmEntries.length; __mmIndex++) {
       const __mmEntry = __mmEntries[__mmIndex],
         __mmPrerequisite = __mmOriginal[__mmIndex];
       if (!__mmEntry || __mmPrerequisite == null) continue;
-      __mmEntry.pre = __mmAllItemsUnlockEnabled ? null : __mmPrerequisite;
+      __mmEntry.pre = (__mmBypassBranches || __mmAllItemsUnlockEnabled)
+        ? null
+        : __mmPrerequisite;
     }
   };
-  // Fallback for game builds where the early module-loader signature changes.
-  // This still edits the same item-data objects before the chooser is opened.
-  (__mmApply(b && b.weapons, __mmOriginalWeaponPrerequisites),
-    __mmApply(b && b.list, __mmOriginalItemPrerequisites));
+  // Match Glotus for build-item cards: pre is a visual branch selector,
+  // not an ownership requirement. Keep it bypassed for items so greater
+  // spikes can become spinning spikes with any valid weapon kit. Weapon
+  // branches stay normal unless the explicit all-upgrades setting is enabled.
+  (__mmApply(b && b.weapons, __mmOriginalWeaponPrerequisites, !1),
+    __mmApply(b && b.list, __mmOriginalItemPrerequisites, !0));
 }
 function __mmHudState() {
   return {
@@ -53883,10 +53902,9 @@ function __mmRestoreTrapHat() {
   ((__mmTrapHat = null), (__mmTrapHatRestoreAttempts = 0));
 }
 function __mmStopTrapAttack() {
-  const __mmRestore = __mmActionMayRestore("trapEscape"),
-    __mmReleaseAngle = Number.isFinite(__mmTrapAimAngle)
-      ? __mmTrapAimAngle
-      : Ci();
+  const __mmReleaseAngle = Number.isFinite(__mmTrapAimAngle)
+    ? __mmTrapAimAngle
+    : Ci();
   (__mmTrapEscapeOwnReplaceTimer &&
     clearTimeout(__mmTrapEscapeOwnReplaceTimer),
     (__mmTrapEscapeOwnReplaceTimer = 0),
@@ -53908,8 +53926,10 @@ function __mmStopTrapAttack() {
     (__mmTrapManualReadyAt = 0),
     (__mmTrapWeaponSelectAt = 0),
     __mmTrapAttackActive &&
+      // The breaker is the final intentional trap-escape hand. Do not restore
+      // the hand from before the lock here: that commonly reselected main
+      // after a Great Hammer escape and spent a fresh main reload.
       ((__mmTrapAttackActive = !1),
-      __mmRestore && __mmRestoreWeapon(__mmTrapWeapon),
       (__mmTrapWeapon = null)),
     (__mmTrapAimAngle = null),
     (__mmTrapSpikeReplaceSlot = null),
@@ -57515,42 +57535,15 @@ function __mmSecondaryTransitionIsEmergency(__mmShieldPlan) {
           Math.max(90, __mmServerTickMs() * 1.5)))
   );
 }
-function __mmDeferSecondaryForPrimaryReload(__mmWeapon, __mmShieldPlan) {
-  if (
-    !v ||
-    !v.alive ||
-    !Array.isArray(v.weapons) ||
-    __mmWeaponGrindHold ||
-    __mmCleanupAttackHeld ||
-    __mmManualHotbarRightBuildActive ||
-    __mmSecondaryTransitionIsEmergency(__mmShieldPlan)
-  )
-    return !1;
-  const __mmPrimary = Number(v.weapons[0]),
-    __mmSecondary = Number(__mmWeapon);
-  if (
-    !Number.isInteger(__mmPrimary) ||
-    !Number.isInteger(__mmSecondary) ||
-    __mmPrimary === __mmSecondary
-  )
-    return !1;
-  // Keep the main selected through the swing cooldown. Starting the normal
-  // Hammer hold before this boundary let the reload worker select main again,
-  // then the right-click loop immediately selected Hammer a second time.
-  const __mmMainClockPending =
-    Number(__mmPrimaryManualWeapon) === __mmPrimary &&
-    Date.now() < Number(__mmPrimaryManualReadyAt || 0);
-  return __mmMainClockPending || __mmWeaponIsReloading(__mmPrimary);
-}
 function __mmPulseSecondaryWeapon(__mmTimingTick = !1) {
   if (!__mmSecondaryHeld) return;
   const __mmShieldPlan = __mmRightClickShieldPlan(),
     __mmWeapon = __mmRightClickWeapon(__mmShieldPlan);
   if (__mmWeapon == null) return;
-  // A normal main -> Hammer handoff must leave main selected until its reload
-  // completes. Shield, trapped escape, Insta and immediate lethal defense
-  // remain free to take the secondary hand without waiting.
-  if (__mmDeferSecondaryForPrimaryReload(__mmWeapon, __mmShieldPlan)) return;
+  // A real right-click owns its breaker immediately. Reload automation is
+  // already paused by the manual action claim, so delaying this selection
+  // only leaves main visibly selected and can turn a short right-click into
+  // an unintended main-hand hold.
   // Reconcile a contextual Shield/main/secondary change before testing the
   // cooldown. Previously Tank could be armed from the previous weapon's ready
   // clock, which made it appear before the newly selected weapon could swing.
@@ -57773,6 +57766,12 @@ function __mmStartConfiguredSecondary(__mmEvent) {
     (__mmSecondaryRestoreWeapon = __mmRestoreSelection),
     (__mmSecondaryShieldUsed = !1),
     (__mmSecondaryManualToolRestore = __mmManualHotbarToolCurrent()),
+    // Right-clicking a breaker is an intentional hand choice. Keep it as the
+    // manual selection after this hold rather than letting the preceding main
+    // click become the restore target. Shield is temporary defensive input and
+    // still restores the hand that was selected before it.
+    !__mmShieldPlan &&
+      ((__mmManualSelectedWeapon = __mmWeapon), __mmClearManualHotbarTool()),
     Number(__mmSecondaryManualWeapon) !== __mmWeapon &&
       ((__mmSecondaryManualWeapon = __mmWeapon),
       (__mmSecondaryManualReadyAt = 0)),
