@@ -2,7 +2,7 @@
 // @name         kitty klient
 // @author       Coder Guy
 // @credits       random4ik — bot script
-// @version      7.0.8
+// @version      7.0.9
 // @icon         https://cdn.discordapp.com/icons/1540876076224356437/ac27c0ce87c4c46b407ebca78e150aeb.webp?size=2048
 // @description  kitty klient — a MooMoo.io client with adaptive zoom, fast autoheal, gear automation, combat tools, predictive placement, visual markers, CC0 background music, manual quick builds, and a fully rebindable keyboard/mouse controls HUD.
 // @match        *://moomoo.io/*
@@ -267,7 +267,7 @@
     const AUTO_PUSH_FINISHER_MIGRATION_KEY = "kitty-klient-auto-push-finisher-v1";
     const ASSASSIN_RANGE_AUTO_MIGRATION_KEY = "kitty-klient-assassin-range-auto-v1";
     const TAB_SYNC_BRIDGE_KEY = "kitty-klient-tab-sync-bridge-v1";
-const KITTY_KLIENT_VERSION = "7.0.8";
+const KITTY_KLIENT_VERSION = "7.0.9";
     const KITTY_SHARED_STORAGE_APPLIED_EVENT = "KittyMooMooSharedStorageApplied";
     // FRVR's v1.8 client changed the game module and now owns its own Altcha
     // verification flow. The legacy runtime patch relies on exact bundle
@@ -11653,6 +11653,11 @@ let __mmAutoHealTimer = 0,
   // a native 2 press. Preserve the player's intentional hand separately so
   // food and one-shot placement restore the hand they actually chose.
   __mmManualSelectedWeapon = null,
+  // A player-selected non-weapon hotbar slot is a persistent manual intent.
+  // Automation may borrow a weapon for an emergency, but normal clicks always
+  // return to this exact food/build slot instead of silently taking main.
+  __mmManualHotbarTool = null,
+  __mmManualHotbarRightBuildActive = !1,
   __mmAutoHealWeapon = null;
 let __mmAutoPurchaseTimer = 0,
   __mmAutoPurchasePending = null;
@@ -12291,6 +12296,7 @@ let __mmPrimaryHeld = !1,
   __mmSecondaryShieldUsed = !1,
   __mmSecondaryShieldAimAt = 0,
   __mmSecondaryRestoreWeapon = null,
+  __mmSecondaryManualToolRestore = null,
   __mmRightClickShieldPlanAt = 0,
   __mmRightClickShieldPlanCache = null,
   __mmPrimaryClickHat = null,
@@ -34325,8 +34331,75 @@ function __mmHoldingMcGrabby() {
 function __mmRestoreWeapon(__mmWeapon) {
   v && v.alive && v.weapons.includes(__mmWeapon) && je(__mmWeapon, !0);
 }
+function __mmManualHotbarToolCurrent() {
+  if (!v || !v.alive || !__mmManualHotbarTool) return null;
+  const __mmItem = Number(__mmManualHotbarTool.item);
+  return Number.isInteger(__mmItem) &&
+    Array.isArray(v.items) &&
+    v.items.includes(__mmItem)
+    ? { item: __mmItem, weapon: !1 }
+    : null;
+}
+function __mmSetManualHotbarTool(__mmItem) {
+  if (!v || !v.alive || !Array.isArray(v.items)) return !1;
+  const __mmSelected = Number(__mmItem);
+  if (!Number.isInteger(__mmSelected) || !v.items.includes(__mmSelected))
+    return !1;
+  (__mmManualHotbarTool = { item: __mmSelected },
+    __mmActionOwner === "weaponRecharge" && __mmPauseWeaponRecharge(!0));
+  return !0;
+}
+function __mmClearManualHotbarTool() {
+  __mmManualHotbarTool = null;
+}
+function __mmManualHotbarPlaceable() {
+  const __mmTool = __mmManualHotbarToolCurrent();
+  return __mmTool && __mmIsPlaceableItem(__mmTool.item) ? __mmTool : null;
+}
+function __mmPlaceManualHotbarTool(__mmTool = __mmManualHotbarPlaceable()) {
+  if (
+    !__mmTool ||
+    !v ||
+    !v.alive ||
+    !__mmCanUseBuildItem(__mmTool.item) ||
+    __mmMaxBuildCount(__mmTool.item) < 1
+  )
+    return !1;
+  const __mmAngle = Ci();
+  try {
+    // This is the player's chosen hotbar slot, so leave it selected after the
+    // place packet. It must not borrow main just to restore a one-shot build.
+    (je(__mmTool.item),
+      O.send("F", 1, __mmAngle),
+      O.send("F", 0, __mmAngle),
+      __mmScheduleMouseAimReturn());
+    return !0;
+  } catch (__mmManualHotbarPlaceError) {
+    try {
+      O.send("F", 0, __mmAngle);
+    } catch (__mmManualHotbarPlaceReleaseError) {}
+    return !1;
+  }
+}
+function __mmUseManualHotbarPrimary() {
+  const __mmTool = __mmManualHotbarToolCurrent();
+  if (!__mmTool) return !1;
+  if (__mmIsPlaceableItem(__mmTool.item))
+    return __mmPlaceManualHotbarTool(__mmTool) || !0;
+  // Food is the only ordinary non-placeable hotbar use. Keep its native
+  // one-shot behavior, while __mmSelectedTool restores the same food slot.
+  if (v && Number(__mmTool.item) === Number(v.items && v.items[0])) {
+    __mmUseFood();
+    return !0;
+  }
+  // A manually chosen slot must never fall through to primary attack, even
+  // if it is temporarily unusable or is a future native utility item.
+  return !0;
+}
 function __mmSelectedTool() {
   if (!v || !v.alive) return null;
+  const __mmManualTool = __mmManualHotbarToolCurrent();
+  if (__mmManualTool) return __mmManualTool;
   const __mmBuild = Number(v.buildIndex);
   if (
     Number.isInteger(__mmBuild) &&
@@ -35694,6 +35767,7 @@ function __mmWeaponRechargeOverridden() {
     __mmFoodSpamTimer ||
     __mmAutoHealWasHealing ||
     __mmShieldDefenseTimer ||
+    __mmManualHotbarToolCurrent() != null ||
     !__mmActionAvailable("weaponRecharge")
   );
 }
@@ -35845,7 +35919,7 @@ function __mmRecordNativeWeaponSlot(__mmSlot) {
   if (!v || !v.alive || !Array.isArray(v.weapons)) return;
   const __mmWeapon = Number(v.weapons[__mmSlot]);
   if (!Number.isInteger(__mmWeapon) || __mmWeapon < 0) return;
-  __mmManualSelectedWeapon = __mmWeapon;
+  (__mmManualSelectedWeapon = __mmWeapon, __mmClearManualHotbarTool());
 }
 window.addEventListener("keydown", function (__mmEvent) {
   const __mmTarget = __mmEvent && __mmEvent.target,
@@ -47905,6 +47979,96 @@ function __mmHotbarPlaceableLocatorItemForTarget(__mmTarget, __mmActionBar) {
   }
   return null;
 }
+function __mmManualHotbarItemAtTarget(__mmTarget) {
+  const __mmActionBar = document.getElementById("actionBar");
+  if (!__mmActionBar || !__mmTarget || typeof __mmTarget.closest !== "function")
+    return null;
+  const __mmSlot = __mmTarget.closest(
+    "[id^='actionBarItem'],[data-item],[data-item-id]",
+  );
+  if (!__mmSlot || !__mmActionBar.contains(__mmSlot) || !v || !Array.isArray(v.items))
+    return null;
+  const __mmDataItem = Number(
+    __mmSlot.dataset.item || __mmSlot.dataset.itemId,
+  );
+  // Main and secondary remain normal weapon slots even if an action-bar
+  // implementation exposes their id through a generic data-item attribute.
+  if (
+    Number.isInteger(__mmDataItem) &&
+    Array.isArray(v.weapons) &&
+    v.weapons.includes(__mmDataItem)
+  )
+    return null;
+  if (Number.isInteger(__mmDataItem) && v.items.includes(__mmDataItem))
+    return __mmDataItem;
+  const __mmMatch = String(__mmSlot.id || "").match(/actionBarItem(\d+)/);
+  const __mmWeaponCount = b && Array.isArray(b.weapons) ? b.weapons.length : 0,
+    __mmSlotIndex = __mmMatch ? Number(__mmMatch[1]) : NaN,
+    __mmItem = __mmSlotIndex - __mmWeaponCount;
+  if (Array.isArray(v.weapons) && v.weapons.includes(__mmSlotIndex)) return null;
+  return Number.isInteger(__mmItem) && v.items.includes(__mmItem)
+    ? __mmItem
+    : null;
+}
+function __mmCaptureManualHotbarSelection() {
+  // Native 1–9 and action-bar handlers select synchronously after this capture
+  // listener. Resolve on the next task so their real selected item, rather
+  // than a guessed hotbar position, becomes the persistent manual tool.
+  setTimeout(function () {
+    if (!v || !v.alive) return;
+    if (Date.now() - Number(__mmLastSelectionAt || 0) <= 140) {
+      if (__mmLastSelectionWasWeapon) {
+        __mmClearManualHotbarTool();
+        return;
+      }
+      __mmSetManualHotbarTool(__mmLastSelectionItem);
+      return;
+    }
+    const __mmBuild = Number(v.buildIndex);
+    if (Number.isInteger(__mmBuild) && __mmBuild >= 0)
+      return void __mmSetManualHotbarTool(__mmBuild);
+    if (v.weapons && v.weapons.includes(Number(v.weaponIndex)))
+      __mmClearManualHotbarTool();
+  }, 0);
+}
+document.addEventListener(
+  "keydown",
+  function (__mmEvent) {
+    if (
+      !__mmEvent.isTrusted ||
+      __mmEvent.repeat ||
+      __mmBindingTypingTarget(__mmEvent.target) ||
+      __mmEvent.ctrlKey ||
+      __mmEvent.altKey ||
+      __mmEvent.metaKey ||
+      !/^(?:Digit|Numpad)[1-9]$/.test(String(__mmEvent.code || ""))
+    )
+      return;
+    // 1 is main and 2 is secondary. They must never inherit the sticky
+    // build/food intent even if another listener consumes the native shortcut.
+    /^(?:Digit|Numpad)[12]$/.test(String(__mmEvent.code || "")) &&
+      __mmClearManualHotbarTool();
+    __mmCaptureManualHotbarSelection();
+  },
+  !0,
+);
+document.addEventListener(
+  "mousedown",
+  function (__mmEvent) {
+    if (!__mmEvent.isTrusted || __mmEvent.button !== 0) return;
+    const __mmItem = __mmManualHotbarItemAtTarget(__mmEvent.target);
+    if (__mmItem == null) {
+      const __mmActionBar = document.getElementById("actionBar");
+      if (__mmActionBar && __mmActionBar.contains(__mmEvent.target))
+        // An unmapped native slot is main/secondary or an empty bar cell.
+        // In either case it must not retain a previous manual build intent.
+        (__mmClearManualHotbarTool(), __mmCaptureManualHotbarSelection());
+      return;
+    }
+    (__mmSetManualHotbarTool(__mmItem), __mmCaptureManualHotbarSelection());
+  },
+  !0,
+);
 function __mmInstallHotbarPlaceableLocator() {
   const __mmActionBar = document.getElementById("actionBar");
   if (!__mmActionBar) {
@@ -56723,6 +56887,19 @@ document.addEventListener(
     )
       return;
     ((__mmPhysicalPrimaryDown = !0), (__mmPhysicalInputAt = Date.now()));
+    // A player-selected hotbar item owns the primary click. Do this before
+    // Bush/Auto Insta/main-attack routing so a selected spike never becomes a
+    // main swing on the next click.
+    if (__mmManualHotbarToolCurrent()) {
+      ((__mmSecondaryHeld || __mmRightClickHat != null) &&
+        (__mmFinishSecondaryInput(), __mmForceRestoreRightClickHat()),
+        __mmPrimaryHeld && __mmStopPrimaryInput(),
+        __mmActionOwner === "weaponRecharge" && __mmPauseWeaponRecharge(!0));
+      if (__mmUseManualHotbarPrimary()) {
+        (__mmEvent.preventDefault(), __mmEvent.stopImmediatePropagation());
+        return;
+      }
+    }
     if (__mmHandleBushCombatClick(__mmEvent)) return;
     if (__mmBoostInsta.isActive()) {
       (__mmEvent.preventDefault(), __mmEvent.stopImmediatePropagation());
@@ -57322,11 +57499,58 @@ function __mmForceRestoreRightClickHat() {
       !__mmCombatHatLockActive() &&
       __mmEquipHatNow(__mmHat, !0));
 }
+function __mmSecondaryTransitionIsEmergency(__mmShieldPlan) {
+  if (
+    __mmShieldPlan ||
+    __mmTrapEscapeOwnsCombatInput() ||
+    __mmRightClickTankOverrideActive()
+  )
+    return !0;
+  const __mmThreat = __mmCombatThreatSnapshot();
+  return !!(
+    __mmThreat &&
+    (__mmThreat.lethal ||
+      (__mmThreat.urgent &&
+        Number(__mmThreat.firstImpactMs) <=
+          Math.max(90, __mmServerTickMs() * 1.5)))
+  );
+}
+function __mmDeferSecondaryForPrimaryReload(__mmWeapon, __mmShieldPlan) {
+  if (
+    !v ||
+    !v.alive ||
+    !Array.isArray(v.weapons) ||
+    __mmWeaponGrindHold ||
+    __mmCleanupAttackHeld ||
+    __mmManualHotbarRightBuildActive ||
+    __mmSecondaryTransitionIsEmergency(__mmShieldPlan)
+  )
+    return !1;
+  const __mmPrimary = Number(v.weapons[0]),
+    __mmSecondary = Number(__mmWeapon);
+  if (
+    !Number.isInteger(__mmPrimary) ||
+    !Number.isInteger(__mmSecondary) ||
+    __mmPrimary === __mmSecondary
+  )
+    return !1;
+  // Keep the main selected through the swing cooldown. Starting the normal
+  // Hammer hold before this boundary let the reload worker select main again,
+  // then the right-click loop immediately selected Hammer a second time.
+  const __mmMainClockPending =
+    Number(__mmPrimaryManualWeapon) === __mmPrimary &&
+    Date.now() < Number(__mmPrimaryManualReadyAt || 0);
+  return __mmMainClockPending || __mmWeaponIsReloading(__mmPrimary);
+}
 function __mmPulseSecondaryWeapon(__mmTimingTick = !1) {
   if (!__mmSecondaryHeld) return;
   const __mmShieldPlan = __mmRightClickShieldPlan(),
     __mmWeapon = __mmRightClickWeapon(__mmShieldPlan);
   if (__mmWeapon == null) return;
+  // A normal main -> Hammer handoff must leave main selected until its reload
+  // completes. Shield, trapped escape, Insta and immediate lethal defense
+  // remain free to take the secondary hand without waiting.
+  if (__mmDeferSecondaryForPrimaryReload(__mmWeapon, __mmShieldPlan)) return;
   // Reconcile a contextual Shield/main/secondary change before testing the
   // cooldown. Previously Tank could be armed from the previous weapon's ready
   // clock, which made it appear before the newly selected weapon could swing.
@@ -57468,6 +57692,7 @@ function __mmObserveHeldGearSwing(__mmPlayerSid, __mmWeapon) {
 }
 function __mmStopSecondary() {
   const __mmRestoreSelection = __mmSecondaryRestoreWeapon,
+    __mmManualToolRestore = __mmSecondaryManualToolRestore,
     __mmUsedShield = __mmSecondaryShieldUsed,
     __mmMayRestoreWeapon = __mmActionMayRestore("manualAttack");
   (__mmClearSecondaryAttackRelease(),
@@ -57481,6 +57706,8 @@ function __mmStopSecondary() {
     (__mmSecondaryShieldUsed = !1),
     (__mmSecondaryShieldAimAt = 0),
     (__mmSecondaryRestoreWeapon = null),
+    (__mmSecondaryManualToolRestore = null),
+    (__mmManualHotbarRightBuildActive = !1),
     (__mmRightClickShieldPlanAt = 0),
     (__mmRightClickShieldPlanCache = null),
     (U = 0),
@@ -57493,6 +57720,13 @@ function __mmStopSecondary() {
     !__mmPrimaryHeld && __mmActionRelease("manualAttack", "right click released"));
   __mmResetManualHatOutput(!0);
   if (
+    __mmManualToolRestore &&
+    __mmMayRestoreWeapon &&
+    v &&
+    v.alive
+  )
+    __mmRestoreTool(__mmManualToolRestore);
+  else if (
     __mmUsedShield &&
     __mmMayRestoreWeapon &&
     v &&
@@ -57525,25 +57759,32 @@ function __mmStartConfiguredSecondary(__mmEvent) {
     __mmPlannedWeapon = __mmRightClickWeapon(__mmShieldPlan);
   if (__mmPlannedWeapon == null)
     return (__mmRestoreRightClickHat(), !1);
-  (__mmPrimaryHeld || __mmPrimaryClickHat != null) &&
-    (__mmStopPrimaryInput(), __mmForceRestoreBullForPrimary());
   if (!__mmActionClaim("manualAttack", "configured secondary")) return !1;
-  const __mmWeapon = Number(__mmPlannedWeapon);
-  return (
-    __mmCancelCombatHatLock(!1),
+  const __mmWeapon = Number(__mmPlannedWeapon),
+    __mmRestoreSelection = __mmSelectedWeapon();
+  // Claim the right-click handoff before releasing left-click. That prevents
+  // the safe-window reload worker from borrowing Hammer or main between the
+  // two inputs; the secondary pulse below waits on main's reload when needed.
+  (__mmCancelCombatHatLock(!1),
     __mmResetManualHatOutput(!0),
     __mmClearSecondaryReleaseRestore(),
     (__mmSecondaryGearEpoch += 1),
     (U = 1),
-    (__mmSecondaryRestoreWeapon = __mmSelectedWeapon()),
+    (__mmSecondaryRestoreWeapon = __mmRestoreSelection),
     (__mmSecondaryShieldUsed = !1),
+    (__mmSecondaryManualToolRestore = __mmManualHotbarToolCurrent()),
     Number(__mmSecondaryManualWeapon) !== __mmWeapon &&
       ((__mmSecondaryManualWeapon = __mmWeapon),
       (__mmSecondaryManualReadyAt = 0)),
     (__mmSecondaryHeld = !0),
-    __mmStartHeldAttackPulse(),
-    !0
-  );
+    (__mmPrimaryHeld || __mmPrimaryClickHat != null) &&
+      (__mmStopPrimaryInput(), __mmForceRestoreBullForPrimary()),
+    // Right-click on a chosen build slot is one place followed immediately by
+    // the configured destroy hold. That direct follow-up deliberately bypasses
+    // the normal main-reload handoff gate for this explicit manual action.
+    (__mmManualHotbarRightBuildActive = __mmPlaceManualHotbarTool()),
+    __mmStartHeldAttackPulse());
+  return !0;
 }
 document.addEventListener(
   "mousedown",
@@ -57842,7 +58083,9 @@ Sl = function () {
     (__mmManualGearResolvedInput = ""),
     __mmResetManualHatOutput(!0),
     (__mmPrimaryManualReadyAt = 0),
-    (__mmSecondaryManualReadyAt = 0));
+    (__mmSecondaryManualReadyAt = 0),
+    __mmClearManualHotbarTool(),
+    (__mmManualHotbarRightBuildActive = !1));
   __mmRecordDeathHistory(v);
   __mmQueueAngelDeathAnimation(v);
   __mmWeaponXpReset();
