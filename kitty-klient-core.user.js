@@ -2,7 +2,7 @@
 // @name         kitty klient
 // @author       Coder Guy
 // @credits       random4ik — bot script
-// @version      7.0.2
+// @version      7.0.3
 // @icon         https://cdn.discordapp.com/icons/1540876076224356437/ac27c0ce87c4c46b407ebca78e150aeb.webp?size=2048
 // @description  kitty klient — a MooMoo.io client with adaptive zoom, fast autoheal, gear automation, combat tools, predictive placement, visual markers, CC0 background music, manual quick builds, and a fully rebindable keyboard/mouse controls HUD.
 // @match        *://moomoo.io/*
@@ -267,7 +267,7 @@
     const AUTO_PUSH_FINISHER_MIGRATION_KEY = "kitty-klient-auto-push-finisher-v1";
     const ASSASSIN_RANGE_AUTO_MIGRATION_KEY = "kitty-klient-assassin-range-auto-v1";
     const TAB_SYNC_BRIDGE_KEY = "kitty-klient-tab-sync-bridge-v1";
-const KITTY_KLIENT_VERSION = "7.0.2";
+const KITTY_KLIENT_VERSION = "7.0.3";
     const KITTY_SHARED_STORAGE_APPLIED_EVENT = "KittyMooMooSharedStorageApplied";
     // FRVR's v1.8 client changed the game module and now owns its own Altcha
     // verification flow. The legacy runtime patch relies on exact bundle
@@ -11632,7 +11632,6 @@ let __mmAutoHealTimer = 0,
   __mmAutoHealLastObservedHealth = null,
   __mmAutoHealLastDamageAt = 0,
   __mmAutoHealLastDamageTick = -1,
-  __mmAutoHealLastBurstTick = -Infinity,
   __mmAutoHealShameCount = 0,
   // Bull's passive damage provides a safe, server-recognized damage/heal pair
   // that can reduce the rapid-heal Shame counter.  The controller keeps its
@@ -35939,7 +35938,6 @@ function __mmResetAutoHeal() {
     (__mmAutoHealPending = !1),
     (__mmAutoHealBitesRemaining = 0),
     (__mmAutoHealNextBiteAt = 0),
-    (__mmAutoHealLastBurstTick = -Infinity),
     (__mmAutoHealLastHitDamage = 0),
     (__mmAutoHealLastHitAt = 0),
     (__mmAutoHealFoodAwaitingAckAt = 0),
@@ -35948,48 +35946,25 @@ function __mmResetAutoHeal() {
   (!__mmAutoHealEnabled || !v || !v.alive) &&
     __mmStopAutoHealBullReset(!0);
 }
-function __mmGlotusAutoHealForce(__mmThreat, __mmEmergency) {
-  if (!v || !v.alive) return !1;
-  const __mmHealth = Math.max(0, Number(v.health) || 0),
-    __mmPotential = Math.max(
-      0,
-      Number(__mmThreat && __mmThreat.damage) || 0,
-      Number(__mmThreat && __mmThreat.potentialDamage) || 0,
-    ),
-    // Glotus marks detectedDangerEnemy with the Soldier multiplier and
-    // detectedEnemy with the currently-equipped multiplier. Kitty's threat
-    // snapshot is pre-multiplier, so the two comparisons map directly to the
-    // same projected health windows.
-    __mmSoldierLethal = __mmPotential * 0.75 >= __mmHealth,
-    __mmCurrentLethal = __mmPotential >= __mmHealth;
-  return !!(
-    __mmEmergency ||
-    Number(v.health) <= 20 ||
-    (__mmThreat && (__mmThreat.urgent || __mmThreat.lethal)) ||
-    __mmSoldierLethal ||
-    __mmCurrentLethal ||
-    (__mmDefaultSoldierThreat() && Number(__mmPendingHat) !== 6)
-  );
-}
-function __mmGlotusSafeHealTime() {
-  const __mmDamageAt = Number(__mmAutoHealLastDamageAt) || 0,
-    __mmPing = Math.max(
-      0,
-      Number(window.pingTime) || Number(window.ping) || 0,
-    );
-  // Glotus's isSaveHealTime(): Date.now() - receivedDamage + pong >= 125.
-  return !__mmDamageAt || Date.now() - __mmDamageAt + __mmPing >= 125;
-}
 function __mmAutoHeal(__mmEmergency) {
   if (!__mmAutoHealEnabled || !v || !v.alive)
     return void __mmResetAutoHeal();
   __mmObserveAutoHealHealth(v.health);
+  // The same forecast that drives Anti Insta also removes the Shame delay when
+  // damage already in flight would consume the current health. It does not
+  // create speculative food retries; an actual damage/health event still owns
+  // the heal queue.
   const __mmIncomingThreat = __mmCombatThreatSnapshot(),
     __mmFoodValue = __mmAutoHealFoodValue();
-  __mmEmergency = __mmGlotusAutoHealForce(__mmIncomingThreat, !!__mmEmergency);
-  // Anti-Insta owns its predicted food edge before the normal Glotus pass.
-  // Its burst uses the same food count and restoration path below.
+  __mmEmergency = !!(
+    __mmEmergency || __mmAutoHealBurstDanger(__mmIncomingThreat, __mmFoodValue)
+  );
+  // Glotus pre-heals on a credible Insta setup rather than waiting for the
+  // first health packet. Do this before ordinary post-hit healing so the
+  // preemptive full refill has the entire current server window to arrive.
   if (__mmTryAntiInstaPreHeal(__mmIncomingThreat)) return;
+  // Shame! (hat 45) means the server is rejecting food for its 30-second
+  // penalty. Do not burn resources or flood selection/attack packets during it.
   if (Number(v.skinIndex) === 45) {
     ((__mmAutoHealShameCount = 8),
       (__mmAutoHealPending = !1),
@@ -35999,18 +35974,25 @@ function __mmAutoHeal(__mmEmergency) {
     return;
   }
   if (v.health >= v.maxHealth || !__mmCanEat()) return void __mmResetAutoHeal();
-  const __mmMissingHealth = Math.max(0, Number(v.maxHealth) - Number(v.health)),
-    __mmNeedTimes = Math.ceil(__mmMissingHealth / Math.max(1, __mmFoodValue)),
-    __mmForceHeal =
-      __mmAutoHealShameCount < 7 &&
-      __mmEmergency &&
-      Number(v.health) < Math.min(95, Number(v.maxHealth) || 100),
-    __mmHealingTimes = __mmForceHeal
-      ? __mmNeedTimes || 1
-      : __mmGlotusSafeHealTime() && Number(v.health) < Number(v.maxHealth)
-        ? __mmNeedTimes || 1
-        : null;
-  if (__mmHealingTimes == null) return;
+  if (__mmAutoHealPending) {
+    // Calculate the whole refill from the hit packet, then keep sending it on
+    // the server tick. This is optimistic (it never waits for a heal reply),
+    // but avoids the current server dropping a pile of same-frame F packets.
+    const __mmMissingHealth = Math.max(0, v.maxHealth - v.health),
+      __mmNow = Date.now(),
+      __mmSafeAt = __mmAutoHealSafeAt(__mmEmergency, __mmFoodValue);
+    ((__mmAutoHealBitesRemaining = Math.min(
+      Math.ceil(__mmMissingHealth / __mmFoodValue),
+      __mmFoodCharges(),
+    )),
+      (__mmAutoHealPending = !1),
+      (__mmAutoHealNextBiteAt = Math.max(__mmNow, __mmSafeAt || 0)));
+  }
+  const __mmNow = Date.now();
+  if (!__mmAutoHealBitesRemaining || __mmNow < __mmAutoHealNextBiteAt)
+    return;
+  if (!__mmAutoHealCanSendBite(__mmEmergency, __mmNow))
+    return;
   // A held mouse attack remains the action owner while food is pulsed between
   // swings. __mmUseFood restores the selected tool and resumes the live held
   // attack immediately, so healing does not require releasing either button.
@@ -36028,34 +36010,19 @@ function __mmAutoHeal(__mmEmergency) {
   )
     return;
   const __mmFoodSentAt = Date.now();
-  const __mmBurstTick = __mmCurrentTacticalTick(__mmFoodSentAt);
-  // Glotus evaluates Autoheal once from ModuleHandler.postTick. Kitty also
-  // has a short fallback loop, so remember the tactical tick and prevent that
-  // fallback from duplicating Glotus's burst before the health reply arrives.
-  if (__mmAutoHealLastBurstTick === __mmBurstTick) {
-    __mmOwnsAction && __mmActionRelease("autoHeal", "already healed this tick");
-    return;
-  }
-  // Glotus iterates i <= healingTimes, so one extra food packet accompanies
-  // its calculated refill. Keep that exact packet count, bounded only by the
-  // food the server can currently accept.
-  const __mmBites = Math.min(
-    __mmFoodCharges(),
-    Math.max(1, __mmHealingTimes + 1),
-  );
-  if (!__mmBites) {
-    __mmOwnsAction && __mmActionRelease("autoHeal", "no food charges");
-    return;
-  }
   ((__mmAutoHealWasHealing = !0),
-    (__mmAutoHealLastBurstTick = __mmBurstTick),
     __mmAutoHealRecordFoodAttempt(__mmFoodSentAt),
-    __mmUseFoodBurst(__mmBites),
+    __mmUseFood(),
     (__mmAutoHealWasHealing = !1),
-    (__mmAutoHealPending = !1),
-    (__mmAutoHealBitesRemaining = 0),
-    (__mmAutoHealFoodAwaitingAckAt = 0),
-    (__mmAutoHealNextBiteAt = __mmFoodSentAt),
+    (__mmAutoHealBitesRemaining -= 1),
+    // Non-lethal refills wait for an acknowledgement / Shame-safe interval.
+    // Burst and low-health recovery deliberately keep the old fastest path.
+    !__mmEmergency && (__mmAutoHealFoodAwaitingAckAt = __mmFoodSentAt),
+    (__mmAutoHealNextBiteAt =
+      __mmFoodSentAt +
+      (__mmEmergency
+        ? Math.max(1, __mmServerTickMs())
+        : __mmAutoHealShameSpacingMs())),
     __mmOwnsAction && __mmActionRelease("autoHeal", "food sent"));
 }
 function __mmToggleAutoHeal() {
