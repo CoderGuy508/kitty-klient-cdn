@@ -2,7 +2,7 @@
 // @name         kitty klient
 // @author       Coder Guy
 // @credits       random4ik — bot script
-// @version      7.0.5
+// @version      7.0.6
 // @icon         https://cdn.discordapp.com/icons/1540876076224356437/ac27c0ce87c4c46b407ebca78e150aeb.webp?size=2048
 // @description  kitty klient — a MooMoo.io client with adaptive zoom, fast autoheal, gear automation, combat tools, predictive placement, visual markers, CC0 background music, manual quick builds, and a fully rebindable keyboard/mouse controls HUD.
 // @match        *://moomoo.io/*
@@ -267,7 +267,7 @@
     const AUTO_PUSH_FINISHER_MIGRATION_KEY = "kitty-klient-auto-push-finisher-v1";
     const ASSASSIN_RANGE_AUTO_MIGRATION_KEY = "kitty-klient-assassin-range-auto-v1";
     const TAB_SYNC_BRIDGE_KEY = "kitty-klient-tab-sync-bridge-v1";
-const KITTY_KLIENT_VERSION = "7.0.5";
+const KITTY_KLIENT_VERSION = "7.0.6";
     const KITTY_SHARED_STORAGE_APPLIED_EVENT = "KittyMooMooSharedStorageApplied";
     // FRVR's v1.8 client changed the game module and now owns its own Altcha
     // verification flow. The legacy runtime patch relies on exact bundle
@@ -27884,9 +27884,24 @@ let __mmAutoEnemySpikeBreakTimer = 0,
   // exists only to mirror Glotus AutoBreak -> AutoPlacer combat pressure.
   __mmAutoEnemySpikeBreakReplacement = null;
 function __mmAutoEnemySpikeBreakWeaponRange(__mmWeapon, __mmSpike) {
-  const __mmData = b && b.weapons && b.weapons[__mmWeapon];
-  if (!__mmData || __mmData.projectile != null || __mmData.shield) return 0;
-  return Math.max(0, Number(__mmData.range) || 0) + __mmCleanupObjectScale(__mmSpike);
+  const __mmData = b && b.weapons && b.weapons[__mmWeapon],
+    // MooMoo resolves structure contact against the item's collision hitbox,
+    // not its rendered size. This exactly follows Glotus's range + hitScale
+    // rule, with collisionScale only as a compatibility fallback.
+    __mmHitScale = Math.max(
+      0,
+      Number(__mmSpike && __mmSpike.hitScale) ||
+        Number(__mmSpike && __mmSpike.collisionScale) ||
+        __mmCleanupObjectScale(__mmSpike),
+    );
+  if (
+    !__mmData ||
+    __mmData.projectile != null ||
+    __mmData.shield ||
+    !Number.isFinite(Number(__mmData.dmg ?? __mmData.damage))
+  )
+    return 0;
+  return Math.max(0, Number(__mmData.range) || 0) + __mmHitScale;
 }
 function __mmAutoEnemySpikeBreakable(__mmSpike) {
   // Use the same ownership predicate as Kitty's incoming-spike defense.
@@ -27983,7 +27998,7 @@ function __mmAutoEnemySpikeBreakObjectKey(__mmObject) {
 function __mmAutoEnemySpikeBreakMaximumDamage(__mmPlan) {
   if (!__mmPlan || !__mmPlan.spike) return 0;
   let __mmDamage = Math.max(0, Number(__mmPlan.damage) || 0);
-  // AutoBreak borrows Tank for an otherwise non-lethal structure hit. Use the
+  // AutoBreak always takes its structure swing in Tank when available. Use the
   // same gear state when deciding whether this attack can open a new slot.
   if (v && v.skins && v.skins[40])
     try {
@@ -28146,6 +28161,33 @@ function __mmStopAutoEnemySpikeBreak(__mmReason) {
     __mmActionRelease("enemySpikeBreak", __mmReason || "spike swing sent"),
     __mmHadAim && __mmScheduleMouseAimReturn());
 }
+const __mmAutoEnemySpikeBreakThreatDistance = 260;
+function __mmAutoEnemySpikeBreakThreatIsClose(__mmThreat) {
+  if (!__mmThreat || (!__mmThreat.urgent && !__mmThreat.lethal)) return !1;
+  const __mmEntries = Array.isArray(__mmThreat.entries) ? __mmThreat.entries : [];
+  for (let __mmIndex = 0; __mmIndex < __mmEntries.length; __mmIndex++) {
+    const __mmEntry = __mmEntries[__mmIndex], __mmSource = __mmEntry && __mmEntry.source;
+    if (!__mmSource) continue;
+    // A predicted projectile collision is a real threat even when its owner is
+    // far away. It already passed the collision forecast, so do not weaken
+    // this protection merely by shrinking melee's broad acquisition radius.
+    if (["projectile", "turret"].includes(__mmEntry.type)) return !0;
+    const __mmWeapon = b && b.weapons && b.weapons[Number(__mmSource.weaponIndex)],
+      __mmReach = __mmWeapon && __mmWeapon.projectile == null
+        ? Math.min(
+            __mmAutoEnemySpikeBreakThreatDistance,
+            Math.max(0, Number(__mmWeapon.range) || 0) +
+              (Number(v.scale) || 35) + (Number(__mmSource.scale) || 35) + 20,
+          )
+        : __mmAutoEnemySpikeBreakThreatDistance,
+      __mmDistance = Math.hypot(
+        Number(__mmSource.x) - Number(v.x),
+        Number(__mmSource.y) - Number(v.y),
+      );
+    if (Number.isFinite(__mmDistance) && __mmDistance <= __mmReach) return !0;
+  }
+  return !1;
+}
 function __mmAutoEnemySpikeBreakShouldYield() {
   if (
     !v ||
@@ -28161,8 +28203,7 @@ function __mmAutoEnemySpikeBreakShouldYield() {
     __mmCombatHatAntiInstaActive()
   )
     return !0;
-  const __mmThreat = __mmCombatThreatSnapshot();
-  return !!(__mmThreat && (__mmThreat.urgent || __mmThreat.lethal));
+  return __mmAutoEnemySpikeBreakThreatIsClose(__mmCombatThreatSnapshot());
 }
 function __mmUpdateAutoEnemySpikeBreak() {
   if (
@@ -28179,15 +28220,10 @@ function __mmUpdateAutoEnemySpikeBreak() {
   ((__mmAutoEnemySpikeBreakRestoreTool = __mmSelectedTool()),
     (__mmAutoEnemySpikeBreakAimAngle = __mmPlan.angle));
   try {
-    // Glotus requests Tank only when the selected swing will not finish the
-    // structure. The lease covers this packet phase and releases before the
-    // following threat/gear decision.
-    if (
-      __mmPlan.damage + 0.001 < __mmPlan.health &&
-      v.skins &&
-      v.skins[40] &&
-      !__mmActivateImmediateTankTick()
-    )
+    // AutoBreak's structure swing always uses Tank when it is owned. The
+    // one-tick lease raises damage on both one-hit and multi-hit spikes, then
+    // releases before the next threat or gear decision.
+    if (v.skins && v.skins[40] && !__mmActivateImmediateTankTick())
       return void __mmStopAutoEnemySpikeBreak("Tank phase unavailable");
     (O.send("D", __mmPlan.angle),
       je(__mmPlan.weapon, !0),
