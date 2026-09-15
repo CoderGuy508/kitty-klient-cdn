@@ -2,7 +2,7 @@
 // @name         kitty klient
 // @author       Coder Guy
 // @credits       random4ik — bot script
-// @version      7.0.18
+// @version      7.0.19
 // @icon         https://cdn.discordapp.com/icons/1540876076224356437/ac27c0ce87c4c46b407ebca78e150aeb.webp?size=2048
 // @description  kitty klient — a MooMoo.io client with adaptive zoom, fast autoheal, gear automation, combat tools, predictive placement, visual markers, CC0 background music, manual quick builds, and a fully rebindable keyboard/mouse controls HUD.
 // @match        *://moomoo.io/*
@@ -267,7 +267,7 @@
     const AUTO_PUSH_FINISHER_MIGRATION_KEY = "kitty-klient-auto-push-finisher-v1";
     const ASSASSIN_RANGE_AUTO_MIGRATION_KEY = "kitty-klient-assassin-range-auto-v1";
     const TAB_SYNC_BRIDGE_KEY = "kitty-klient-tab-sync-bridge-v1";
-const KITTY_KLIENT_VERSION = "7.0.18";
+const KITTY_KLIENT_VERSION = "7.0.19";
     const KITTY_SHARED_STORAGE_APPLIED_EVENT = "KittyMooMooSharedStorageApplied";
     // FRVR's v1.8 client changed the game module and now owns its own Altcha
     // verification flow. The legacy runtime patch relies on exact bundle
@@ -48102,47 +48102,76 @@ function __mmProjectileEnemyTarget(__mmProjectile) {
     __mmSpeed <= 0
   )
     return null;
+  const __mmUnitX = Math.cos(__mmDirection),
+    __mmUnitY = Math.sin(__mmDirection);
   let __mmTarget = null,
-    __mmForwardBest = Infinity;
+    __mmArrivalBest = Infinity;
   for (let __mmIndex = 0; __mmIndex < __mmPlayers.length; __mmIndex++) {
     const __mmPlayer = __mmPlayers[__mmIndex];
     if (!__mmIsEnemyPlayer(__mmPlayer)) continue;
-    let __mmDx = __mmPlayer.x - __mmX,
-      __mmDy = __mmPlayer.y - __mmY,
-      __mmForward =
-        __mmDx * Math.cos(__mmDirection) +
-        __mmDy * Math.sin(__mmDirection);
-    const __mmVelocity = __mmSyncPlayerVelocity(__mmPlayer),
-      __mmInitialArrival = Math.max(0, __mmForward) / __mmSpeed,
-      __mmLead = Math.min(400, __mmInitialArrival);
-    (__mmDx += __mmVelocity.x * __mmLead,
-      __mmDy += __mmVelocity.y * __mmLead,
-      (__mmForward =
-        __mmDx * Math.cos(__mmDirection) +
-        __mmDy * Math.sin(__mmDirection)));
-    const __mmSide = Math.abs(
-        __mmDx * Math.sin(__mmDirection) -
-          __mmDy * Math.cos(__mmDirection),
-      ),
+    const __mmDx = Number(__mmPlayer.x) - __mmX,
+      __mmDy = Number(__mmPlayer.y) - __mmY,
+      __mmForward = __mmDx * __mmUnitX + __mmDy * __mmUnitY,
+      __mmSide = __mmDx * __mmUnitY - __mmDy * __mmUnitX,
+      __mmVelocity = __mmSyncPlayerVelocity(__mmPlayer),
+      __mmForwardVelocity = __mmVelocity.x * __mmUnitX +
+        __mmVelocity.y * __mmUnitY,
+      __mmSideVelocity = __mmVelocity.x * __mmUnitY -
+        __mmVelocity.y * __mmUnitX,
+      __mmClosingSpeed = __mmSpeed - __mmForwardVelocity,
+      __mmArrival = __mmForward / __mmClosingSpeed,
+      __mmPredictedSide = __mmSide + __mmSideVelocity * __mmArrival,
       __mmHitRadius =
         (Number(__mmPlayer.scale) || 35) +
         (Number(__mmProjectile.scale) || 0) +
-        18;
+        18,
+      __mmTravelDistance = __mmSpeed * __mmArrival;
+    // Solve the projectile/target intercept instead of projecting the target
+    // only once. This prevents a sync from keying off a runner it will miss
+    // and gives the main-swing scheduler the actual Turret arrival edge.
     if (
-      __mmForward < 0 ||
-      __mmSide > __mmHitRadius ||
-      (Number.isFinite(__mmRange) && __mmForward > __mmRange + __mmHitRadius) ||
-      __mmForward >= __mmForwardBest
+      !Number.isFinite(__mmArrival) ||
+      __mmArrival < 0 ||
+      __mmArrival > 900 ||
+      Math.abs(__mmPredictedSide) > __mmHitRadius ||
+      (Number.isFinite(__mmRange) &&
+        __mmTravelDistance > __mmRange + __mmHitRadius) ||
+      __mmArrival >= __mmArrivalBest
     )
       continue;
-    ((__mmTarget = __mmPlayer), (__mmForwardBest = __mmForward));
+    ((__mmTarget = __mmPlayer), (__mmArrivalBest = __mmArrival));
   }
   return __mmTarget
     ? {
         target: __mmTarget,
-        arrivalMs: __mmForwardBest / __mmSpeed,
+        arrivalMs: __mmArrivalBest,
       }
     : null;
+}
+function __mmSyncPrimaryMeleeShot(
+  __mmTarget,
+  __mmIncomingArrivalMs,
+  __mmNow = Date.now(),
+) {
+  if (!v || !v.alive || !__mmTarget || !v.skins || !v.skins[7]) return null;
+  const __mmPrimary = __mmInsta.supportedPrimary(),
+    __mmArrival = Math.max(0, Number(__mmIncomingArrivalMs) || 0),
+    // A melee packet needs a small server-edge lead. Keep it below one tick
+    // so Bull + main still shares the incoming Turret's damage phase.
+    __mmDispatchMs = Math.max(8, Math.min(34, __mmServerTickMs() * 0.32));
+  if (
+    __mmPrimary == null ||
+    !__mmInsta.inRange(__mmPrimary, __mmTarget) ||
+    !__mmInsta.pathClear(__mmTarget) ||
+    !__mmWeaponReadyWithin(__mmPrimary, Math.max(0, __mmArrival - __mmDispatchMs))
+  )
+    return null;
+  return {
+    type: "melee",
+    weapon: __mmPrimary,
+    travelMs: __mmDispatchMs,
+    priority: 0,
+  };
 }
 function __mmSyncProjectileWeapons(__mmTarget) {
   if (!v || !v.alive || !v.weapons || !__mmTarget) return [];
@@ -48173,6 +48202,7 @@ function __mmSyncProjectileWeapons(__mmTarget) {
     __mmShots.push({
       type: "projectile",
       weapon: __mmWeapon,
+      priority: 2,
       // A weapon packet normally lands between server updates. Include half a
       // tick of launch latency so the arrival scheduler does not fire late.
       travelMs:
@@ -48194,15 +48224,26 @@ function __mmSyncTurretShot(__mmTarget, __mmNow = Date.now()) {
   // Turret as permanently unavailable for the incoming bullet.
   return {
     type: "turret",
+    priority: 1,
     readyInMs: Math.max(0, __mmTurretCooldownRemaining(v, __mmNow)),
     // Turret shots use the bullet travel profile. Account for one gear-apply
     // tick before its shot can leave the player.
     travelMs: __mmServerTickMs() + __mmDistance / __mmTurretProjectileSpeed,
   };
 }
-function __mmSyncShotsForTarget(__mmTarget, __mmNow = Date.now()) {
-  const __mmTurret = __mmSyncTurretShot(__mmTarget, __mmNow);
-  return (__mmTurret ? [__mmTurret] : []).concat(
+function __mmSyncShotsForTarget(
+  __mmTarget,
+  __mmNow = Date.now(),
+  __mmIncomingArrivalMs = 0,
+) {
+  const __mmPrimary = __mmSyncPrimaryMeleeShot(
+      __mmTarget,
+      __mmIncomingArrivalMs,
+      __mmNow,
+    ),
+    __mmTurret = __mmSyncTurretShot(__mmTarget, __mmNow);
+  return (__mmPrimary ? [__mmPrimary] : []).concat(
+    __mmTurret ? [__mmTurret] : [],
     __mmSyncProjectileWeapons(__mmTarget),
   );
 }
@@ -48398,6 +48439,41 @@ function __mmFireInstaSync(__mmShot, __mmTargetSid) {
       )));
     return;
   }
+  if (__mmShot.type === "melee") {
+    const __mmMeleeWeapon = Number(__mmShot.weapon);
+    // The incoming Turret has already identified a contactable target, but
+    // verify range and a clear arc again at the actual server-edge send. A
+    // runner or new wall must cancel this one swing instead of spending a
+    // loaded main into empty space.
+    if (
+      !v.skins ||
+      !v.skins[7] ||
+      !__mmWeaponReady(__mmMeleeWeapon) ||
+      !v.weapons.includes(__mmMeleeWeapon) ||
+      !__mmInsta.inRange(__mmMeleeWeapon, __mmTarget) ||
+      !__mmInsta.pathClear(__mmTarget)
+    )
+      return void __mmFinishInstaSync();
+    const __mmMeleeAngle = __mmSyncAimAngle(__mmTarget, 0);
+    ((__mmInstaSyncRestoreTool = __mmSelectedTool()),
+      (__mmInstaSyncRestoreHat = __mmInstaSafeRestoreHat(
+        __mmBushRestoreHat(v.skinIndex),
+      )),
+      __mmEquipHatNow(7),
+      // Bull and F=1 must leave in this exact order. Waiting for a visual hat
+      // echo moves the swing beyond the allied Turret's impact server tick.
+      __mmGearArbiter.commit(),
+      je(__mmMeleeWeapon, !0),
+      O.send("D", __mmMeleeAngle),
+      O.send("F", 1, __mmMeleeAngle),
+      __mmBumpCombatStat("autoSyncs"),
+      (__mmInstaSyncWeaponHeld = !0),
+      (__mmInstaSyncReleaseTimer = setTimeout(
+        __mmFinishInstaSync,
+        __mmServerTickMs(),
+      )));
+    return;
+  }
   if (
     __mmShot.weapon == null ||
     !__mmWeaponReady(__mmShot.weapon) ||
@@ -48423,7 +48499,11 @@ function __mmScheduleInstaSync(__mmProjectile, __mmTargetInfo) {
   )
     return !1;
   const __mmNow = Date.now(),
-    __mmShots = __mmSyncShotsForTarget(__mmTargetInfo.target, __mmNow),
+    __mmShots = __mmSyncShotsForTarget(
+      __mmTargetInfo.target,
+      __mmNow,
+      __mmTargetInfo.arrivalMs,
+    ),
     __mmPing = Number(window.pingTime),
     __mmOneWayPing = Number.isFinite(__mmPing) ? Math.max(0, __mmPing / 2) : 0,
     // Account for timer wake-up variance so the matching shot is sent just
@@ -48457,7 +48537,16 @@ function __mmScheduleInstaSync(__mmProjectile, __mmTargetInfo) {
       Number(__mmShot.readyInMs) > __mmDelay + Math.max(10, __mmServerTickMs() * 0.2)
     )
       continue;
-    if (!__mmChoice || __mmDelay < __mmChoice.delay)
+    // Glotus's Turret Sync first takes the loaded primary when it can share
+    // the allied Turret's impact tick. Keep that high-value melee route ahead
+    // of a second projectile; within the same route, send the latest usable
+    // packet to minimize stale target movement before the shared hit.
+    if (
+      !__mmChoice ||
+      Number(__mmShot.priority) < Number(__mmChoice.shot.priority) ||
+      (Number(__mmShot.priority) === Number(__mmChoice.shot.priority) &&
+        __mmDelay > __mmChoice.delay)
+    )
       __mmChoice = {
         shot: {
           ...__mmShot,
