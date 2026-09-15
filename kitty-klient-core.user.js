@@ -2,7 +2,7 @@
 // @name         kitty klient
 // @author       Coder Guy
 // @credits       random4ik — bot script
-// @version      7.0.20
+// @version      7.0.21
 // @icon         https://cdn.discordapp.com/icons/1540876076224356437/ac27c0ce87c4c46b407ebca78e150aeb.webp?size=2048
 // @description  kitty klient — a MooMoo.io client with adaptive zoom, fast autoheal, gear automation, combat tools, predictive placement, visual markers, CC0 background music, manual quick builds, and a fully rebindable keyboard/mouse controls HUD.
 // @match        *://moomoo.io/*
@@ -267,7 +267,7 @@
     const AUTO_PUSH_FINISHER_MIGRATION_KEY = "kitty-klient-auto-push-finisher-v1";
     const ASSASSIN_RANGE_AUTO_MIGRATION_KEY = "kitty-klient-assassin-range-auto-v1";
     const TAB_SYNC_BRIDGE_KEY = "kitty-klient-tab-sync-bridge-v1";
-const KITTY_KLIENT_VERSION = "7.0.20";
+const KITTY_KLIENT_VERSION = "7.0.21";
     const KITTY_SHARED_STORAGE_APPLIED_EVENT = "KittyMooMooSharedStorageApplied";
     // FRVR's v1.8 client changed the game module and now owns its own Altcha
     // verification flow. The legacy runtime patch relies on exact bundle
@@ -15086,8 +15086,6 @@ Ci = function () {
     ? __mmClientVisualRotationAngle
     : __mmRenderingSmoothAim && Number.isFinite(__mmLocalVisualAimAngle)
     ? __mmLocalVisualAimAngle
-    : __mmTrapAttackActive && Number.isFinite(__mmTrapAimAngle)
-    ? __mmTrapAimAngle
     : Number.isFinite(__mmShieldGuardAngle) ? __mmShieldGuardAngle
     : Number.isFinite(__mmAutoPushShieldAngle) ? __mmAutoPushShieldAngle
     : Number.isFinite(__mmPlacementDefenseShieldAngle)
@@ -15806,7 +15804,6 @@ function __mmForcedDirectionStillActive() {
     (__mmAutoAimEnabled &&
       __mmPrimaryHeld &&
       Number.isFinite(__mmAutoAimAngle)) ||
-    (__mmTrapAttackActive && Number.isFinite(__mmTrapAimAngle)) ||
     Number.isFinite(__mmShieldGuardAngle) ||
     Number.isFinite(__mmAutoPushShieldAngle) ||
     Number.isFinite(__mmPlacementDefenseShieldAngle) ||
@@ -15876,6 +15873,22 @@ function __mmScheduleMouseAimReturn() {
     __mmReturnDirectionToMouse,
     __mmServerTickMs(),
   );
+}
+function __mmReturnTrapBreakAimToMouse() {
+  const __mmMouseAngle = __mmRawMouseAimDirection();
+  if (!Number.isFinite(__mmMouseAngle) || !v || !v.alive) return;
+  try {
+    // Trap Escape sends this directly after the target-facing F=1 packet.
+    // Keep it out of the normal delayed return queue: a live pit breaker must
+    // face only for its one break tick, never through the reload interval.
+    ((It = __mmMouseAngle),
+      (__mmSendingMouseAimReturn = !0),
+      O.send("D", __mmMouseAngle),
+      (__mmLastForcedDirectionAt = 0));
+  } catch (__mmTrapMouseAimReturnError) {
+  } finally {
+    __mmSendingMouseAimReturn = !1;
+  }
 }
 function __mmObserveForcedDirectionPacket(__mmArgs) {
   if (!__mmArgs) return;
@@ -56039,9 +56052,8 @@ function __mmBreakTrap() {
     (__mmTrapAttackActive = !0),
     (__mmTrapWeapon = __mmSelectedWeapon()),
     (__mmTrapHat == null && (__mmTrapHat = __mmTrapRestoreHat))));
-  // Trap Escape keeps its verified pit aim and held F=1 stream, but mirrors
-  // right-click by pulsing Tank only for each loaded breaking swing.
-  const __mmPreviousTrapAim = __mmTrapAimAngle;
+  // Retain the target angle as attack metadata only. It must not become a
+  // persistent visual/server facing direction between the ready break ticks.
   __mmTrapAimAngle = __mmAngle;
   // The Soldier knockback finish belongs to the locking pit itself. Contact
   // spikes keep the normal Great Hammer auto-break path, even while trapped.
@@ -56085,12 +56097,7 @@ function __mmBreakTrap() {
       : __mmPlan.cooldown,
     __mmChangedWeapon =
       __mmTrapAttackHeld &&
-      Number(__mmTrapAttackHeldWeapon) !== Number(__mmWeapon),
-    __mmNeedHold =
-      !__mmTrapAttackHeld ||
-      __mmChangedWeapon ||
-      __mmNow - __mmTrapAttackLastHoldAt >=
-        Math.max(20, __mmServerTickMs() * 0.65);
+      Number(__mmTrapAttackHeldWeapon) !== Number(__mmWeapon);
   if (!__mmUpdateTrapEscapeGear(__mmWeapon)) return;
   const __mmSwingReady = __mmManualWeaponArming(
     __mmWeapon,
@@ -56113,20 +56120,17 @@ function __mmBreakTrap() {
   try {
     // A tool swap is only permitted when the locked breaker is no longer
     // usable. Normal reload phases stay on the same hand.
-    __mmChangedWeapon &&
-      O.send(
-        "F",
-        0,
-        Number.isFinite(__mmPreviousTrapAim)
-          ? __mmPreviousTrapAim
-          : __mmAngle,
-      );
+    __mmChangedWeapon && O.send("F", 0, __mmRawMouseAimDirection());
     (Number(__mmSelectedWeapon()) !== Number(__mmWeapon) || __mmChangedWeapon) &&
       je(__mmWeapon, !0);
-    O.send("D", __mmAngle);
-    if (__mmNeedHold) {
+    // Hold/aim only on the predicted loaded swing. The follow-up D packet
+    // restores the live cursor direction in this same task, so reload and
+    // placement phases never leave the player staring at the pit or spike.
+    if (__mmSwingReady) {
+      O.send("D", __mmAngle);
       (O.send("F", 1, __mmAngle),
-        (__mmTrapAttackLastHoldAt = __mmNow));
+        (__mmTrapAttackLastHoldAt = __mmNow),
+        __mmReturnTrapBreakAimToMouse());
     }
     // F=1 may remain held, but each predicted ready phase is a new Tank
     // swing. Advance the local clock on that phase so Tank is not refreshed
