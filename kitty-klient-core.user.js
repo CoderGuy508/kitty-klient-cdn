@@ -2,7 +2,7 @@
 // @name         kitty klient
 // @author       Coder Guy
 // @credits       random4ik — bot script
-// @version      7.0.12
+// @version      7.0.13
 // @icon         https://cdn.discordapp.com/icons/1540876076224356437/ac27c0ce87c4c46b407ebca78e150aeb.webp?size=2048
 // @description  kitty klient — a MooMoo.io client with adaptive zoom, fast autoheal, gear automation, combat tools, predictive placement, visual markers, CC0 background music, manual quick builds, and a fully rebindable keyboard/mouse controls HUD.
 // @match        *://moomoo.io/*
@@ -11902,9 +11902,6 @@ let __mmAntiCollisionTimer = 0,
   __mmAntiCollisionBlocked = !1,
   __mmAntiCollisionBlockedObject = null,
   __mmAntiCollisionBlockedKey = null,
-  __mmAntiCollisionBypassArmedKey = null,
-  __mmAntiCollisionBypassArmedUntil = 0,
-  __mmAntiCollisionBypassActiveKey = null,
   __mmAntiCollisionLastPopupKey = null,
   __mmAntiCollisionLastPopupAt = 0,
   __mmAntiCollisionRightClickTimer = 0;
@@ -12376,6 +12373,11 @@ let __mmTrapAttackTimer = 0,
   // one-swing on/off cadence.
   __mmTrapAttackLastHoldAt = 0,
   __mmTrapAttackHeldWeapon = null,
+  // Preserve the selected main for the server acknowledgement after a
+  // Soldier final-hit escape. Otherwise the next fast escape pass can see the
+  // old trap snapshot and immediately swap back to Great Hammer.
+  __mmTrapFinalKnockbackTargetKey = null,
+  __mmTrapFinalKnockbackUntil = 0,
   __mmTrapManualReadyAt = 0,
   // A credible incoming Insta temporarily owns the trap-break window. This
   // expires on its own so normal escape resumes as soon as the danger passes.
@@ -13812,7 +13814,8 @@ function __mmApplyMenuMovement() {
   if (__mmAntiCollisionEnabled && !__mmInstaTestingModeEnabled) {
     const __mmThreat = __mmAntiCollisionThreat(
       __mmDirection,
-      __mmAntiCollisionBypassActiveKey,
+      null,
+      !0,
     );
     if (__mmThreat) return void __mmAntiCollisionStop(__mmThreat);
   }
@@ -13878,7 +13881,8 @@ function __mmApplyConfiguredMovement() {
   if (__mmAntiCollisionEnabled && !__mmInstaTestingModeEnabled) {
     const __mmThreat = __mmAntiCollisionThreat(
       __mmDirection,
-      __mmAntiCollisionBypassActiveKey,
+      null,
+      !0,
     );
     if (__mmThreat) return void __mmAntiCollisionStop(__mmThreat);
   }
@@ -14613,7 +14617,9 @@ function __mmRunServerTacticalTick() {
         __mmUpdateSoldier());
     });
     __mmOperationStage("tick-restore", function () {
-      (__mmUpdateAutomaticStateRepair(), __mmRecoverStrayCombatHat());
+      (__mmUpdateAutomaticStateRepair(),
+        __mmRecoverStrayCombatHat(),
+        __mmUpdateIdleHeldWeapon());
     });
   } finally {
     (__mmGearArbiter.commit(),
@@ -14779,7 +14785,9 @@ function __mmRunOperationPipeline() {
       });
     __mmOperationStageDue("restore", __mmActiveCombat ? 24 : 40, __mmNow) &&
       __mmOperationStage("restore", function () {
-        (__mmUpdateAutomaticStateRepair(), __mmRecoverStrayCombatHat());
+        (__mmUpdateAutomaticStateRepair(),
+          __mmRecoverStrayCombatHat(),
+          __mmUpdateIdleHeldWeapon());
       });
   } finally {
     ((__mmOperationPipelineStage = "idle"),
@@ -20426,6 +20434,7 @@ function __mmSyncUseCatchupGear() {
     !__mmSyncCatchupGearEnabled ||
     !v ||
     !v.alive ||
+    __mmIsTrapped() ||
     __mmSyncCombatActive()
   )
     return void __mmSyncRestoreCatchupGear();
@@ -32968,6 +32977,9 @@ function __mmIdleEnemyTurretNearby() {
 }
 function __mmResolveDefaultHat() {
   if (!v || !v.alive) return null;
+  // Speed hats offer no escape value inside a pit and can displace the Tank or
+  // Soldier packet that is needed for the next breaker swing.
+  if (__mmIsTrapped()) return v.skins && v.skins[6] ? 6 : 0;
   const __mmActual = Number.isFinite(Number(__mmActualHat))
       ? Number(__mmActualHat)
       : 0,
@@ -33821,6 +33833,14 @@ const __mmGearArbiter = {
     let __mmWinner = null;
     for (const [__mmSource, __mmIntent] of this.intents) {
       if (__mmIntent[__mmSlot] == null) continue;
+      // A queued movement lease may outlive the exact frame that caught us.
+      // Never let it resolve to Booster, Flipper, or Snow while the local pit
+      // lock is confirmed; Trap Escape or the safety resolver owns that hat.
+      if (
+        __mmSlot === "hat" &&
+        __mmTrappedSpeedHatBlocked(__mmIntent[__mmSlot])
+      )
+        continue;
       if (
         !__mmWinner ||
         __mmIntent.priority > __mmWinner.intent.priority ||
@@ -33941,6 +33961,7 @@ function __mmEquipHatNow(
     !v ||
     !v.alive ||
     __mmHat == null ||
+    __mmTrappedSpeedHatBlocked(__mmHat) ||
     (__mmTrapTankGearLocked() && Number(__mmHat) !== 40) ||
     (__mmHat !== 0 && !(v.skins && v.skins[__mmHat])) ||
     (!__mmCombatHatBypass && !__mmCombatHatPacketAllowed(__mmHat))
@@ -33992,6 +34013,7 @@ function __mmEquipGearPair(
   __mmHat = __mmCombatSafeHat(__mmHat);
   const __mmHatValid = !!(
       __mmHat != null &&
+      !__mmTrappedSpeedHatBlocked(__mmHat) &&
       (!__mmTrapTankGearLocked() || Number(__mmHat) === 40) &&
       (__mmHat === 0 || (v.skins && v.skins[__mmHat])) &&
       (__mmCombatHatBypass || __mmCombatHatPacketAllowed(__mmHat))
@@ -34492,8 +34514,42 @@ function __mmHoldingMcGrabby() {
     Number(__mmSelectedWeapon()) === __mmMcGrabby
   );
 }
-function __mmRestoreWeapon(__mmWeapon) {
-  v && v.alive && v.weapons.includes(__mmWeapon) && je(__mmWeapon, !0);
+function __mmPreferredIdleWeapon() {
+  if (!v || !v.alive || !Array.isArray(v.weapons)) return null;
+  // Kitty's idle hand is a combat decision, never a snapshot of an earlier
+  // heal, placement, or temporary attack selection.
+  return v.weapons.includes(__mmGreatHammer)
+    ? __mmGreatHammer
+    : (v.weapons[0] != null ? Number(v.weapons[0]) : null);
+}
+function __mmRestoreWeapon(__mmIgnoredWeapon) {
+  const __mmIdleWeapon = __mmPreferredIdleWeapon();
+  __mmIdleWeapon != null && je(__mmIdleWeapon, !0);
+}
+function __mmUpdateIdleHeldWeapon() {
+  if (
+    !v ||
+    !v.alive ||
+    __mmActionOwner !== "idle" ||
+    __mmPrimaryHeld ||
+    __mmSecondaryHeld ||
+    __mmTrapAttackActive ||
+    __mmBuildSpamTimer ||
+    __mmFoodSpamTimer ||
+    __mmInsta.isActive() ||
+    __mmBoostInsta.isActive()
+  )
+    return;
+  const __mmIdleWeapon = __mmPreferredIdleWeapon();
+  if (
+    __mmIdleWeapon == null ||
+    (Number(v.buildIndex) < 0 && Number(v.weaponIndex) === __mmIdleWeapon)
+  )
+    return;
+  // A placeable selection is only an action input. Once no action owns it,
+  // return to the policy hand instead of retaining the previous item.
+  __mmClearManualHotbarTool();
+  je(__mmIdleWeapon, !0);
 }
 function __mmManualHotbarToolCurrent() {
   if (!v || !v.alive || !__mmManualHotbarTool) return null;
@@ -34575,11 +34631,10 @@ function __mmSelectedTool() {
   const __mmWeapon = __mmSelectedWeapon();
   return __mmWeapon == null ? null : { item: __mmWeapon, weapon: !0 };
 }
-function __mmRestoreTool(__mmTool) {
-  if (!v || !v.alive || !__mmTool) return;
-  __mmTool.weapon
-    ? __mmRestoreWeapon(__mmTool.item)
-    : v.items && v.items.includes(__mmTool.item) && je(__mmTool.item);
+function __mmRestoreTool(__mmIgnoredTool) {
+  // Every one-shot action exits through the same weapon policy instead of
+  // restoring a captured prior build, food, main, or secondary selection.
+  __mmRestoreWeapon();
 }
 const __mmCleanupRadius = 1000,
   __mmCleanupInputKeys = Object.freeze({
@@ -37479,8 +37534,18 @@ function __mmBuySnowHat() {
     return !1;
   return ((__mmSnowPurchaseAt = Date.now()), Xn(__mmSnowHat, !1), !0);
 }
+function __mmTrappedSpeedHatBlocked(__mmHat) {
+  return !!(
+    v &&
+    v.alive &&
+    __mmIsTrapped() &&
+    [__mmBoosterHat, __mmFlipperHat, __mmSnowHat].includes(Number(__mmHat))
+  );
+}
 function __mmSpeedHat() {
-  return __mmInWater()
+  return __mmTrappedSpeedHatBlocked(__mmBoosterHat)
+    ? null
+    : __mmInWater()
     ? __mmFlipperHat
     : __mmInSnowBiome()
       ? v && v.skins && v.skins[__mmSnowHat]
@@ -37860,6 +37925,25 @@ function __mmUpdateMovementGear() {
     __mmClearIdleMonkeyTail());
   if (!v || !v.alive)
     return void (__mmRestoreMovementGear(), __mmRestoreProximityTail());
+  if (__mmIsTrapped()) {
+    // Clear both ordinary movement leases and the default-tail lease before a
+    // delayed arbiter commit can restore a speed hat over Trap Escape.
+    (__mmGearArbiter.release("movement"),
+      __mmGearArbiter.release("ambient"),
+      (__mmMovementGearPreviousHat = null),
+      (__mmMovementGearPreviousTail = null));
+    if (!__mmTrapAttackActive && !__mmCombatHatLockActive())
+      __mmEquipGearPair(
+        v.skins && v.skins[6] ? 6 : 0,
+        null,
+        !0,
+        !1,
+        "trap:trapped-safety",
+        __mmGearIntentPriorities.trap,
+      );
+    return;
+  }
+  __mmGearArbiter.release("trap:trapped-safety");
   if (__mmCombatHatLockActive()) return;
   if (__mmBushModeEnabled) return;
   if (__mmPrimaryHeld || __mmSecondaryHeld) {
@@ -38166,7 +38250,7 @@ function __mmGlotusSafeWalkObjectAllowed(__mmObject) {
     !__mmFriendlyStructure(__mmObject)
   );
 }
-function __mmGlotusSafeWalkThreat(__mmDirection) {
+function __mmGlotusSafeWalkThreat(__mmDirection, __mmWalkOffset = null) {
   if (!v || !v.alive || !Number.isFinite(Number(__mmDirection))) return null;
   const __mmMotion = __mmPassiveSpikeVelocity(),
     // Glotus stores speed as the distance between its prior and current player
@@ -38189,7 +38273,13 @@ function __mmGlotusSafeWalkThreat(__mmDirection) {
       : __mmPlayerY - (Number(__mmMotion.y) || 0) * __mmServerTickMs(),
     __mmFutureX = __mmPlayerX + (Number(__mmMotion.x) || 0) * __mmServerTickMs(),
     __mmFutureY = __mmPlayerY + (Number(__mmMotion.y) || 0) * __mmServerTickMs(),
-    __mmProbeDistance = 45 + __mmSpeed * 1.25,
+    // Glotus SafeWalk calls willGetHit(angle, 45) before a movement packet,
+    // then willGetHit(angle, player.speed + 45) each postTick. willGetHit
+    // itself adds player.speed / 4, which is preserved here.
+    __mmGlotusWalkOffset = Number.isFinite(Number(__mmWalkOffset))
+      ? Math.max(0, Number(__mmWalkOffset))
+      : __mmSpeed + 45,
+    __mmProbeDistance = __mmGlotusWalkOffset + __mmSpeed / 4,
     __mmProbeX = __mmPlayerX + Math.cos(__mmDirection) * __mmProbeDistance,
     __mmProbeY = __mmPlayerY + Math.sin(__mmDirection) * __mmProbeDistance,
     __mmPlayerScale = Number(v.scale) || 35,
@@ -38251,130 +38341,19 @@ function __mmGlotusSafeWalkThreat(__mmDirection) {
   }
   return null;
 }
-function __mmAntiCollisionThreat(__mmDirection, __mmSkipKey) {
-  if (!v || !v.alive || !Number.isFinite(Number(__mmDirection))) return null;
-  // SafeWalk is evaluated before Kitty's wider collision forecast. Do not let
-  // the manual bypass skip this Glotus-compatible stop; Glotus re-evaluates
-  // the two nearest colliders on every movement tick.
-  const __mmGlotusThreat = __mmGlotusSafeWalkThreat(__mmDirection);
-  if (__mmGlotusThreat) return __mmGlotusThreat;
-  const __mmMotion = __mmPassiveSpikeVelocity(),
-    __mmDirectionX = Math.cos(__mmDirection),
-    __mmDirectionY = Math.sin(__mmDirection),
-    __mmMeasuredX = Number(__mmMotion && __mmMotion.x) || 0,
-    __mmMeasuredY = Number(__mmMotion && __mmMotion.y) || 0,
-    __mmMeasuredSpeed = Math.min(0.65, Math.hypot(__mmMeasuredX, __mmMeasuredY)),
-    __mmMeasuredForward = Math.max(
-      0,
-      __mmMeasuredX * __mmDirectionX + __mmMeasuredY * __mmDirectionY,
-    ),
-    // Include a just-pressed movement key even before the first position
-    // packet exposes velocity.
-    __mmInputSpeed = Math.max(0.19, __mmMeasuredSpeed, __mmMeasuredForward),
-    __mmMeasuredDecel = __mmAntiCollisionDecelDistance(__mmMeasuredForward),
-    __mmInputDecel = __mmAntiCollisionDecelDistance(__mmInputSpeed),
-    __mmPing = Number(window.pingTime),
-    __mmReactionMs = Math.max(
-      8,
-      Math.min(
-        38,
-        __mmFastCheckMs() +
-          (Number.isFinite(__mmPing) ? Math.max(0, __mmPing) * 0.1 : 0),
-      ),
-    ),
-    __mmReactionDistance = __mmInputSpeed * __mmReactionMs,
-    __mmBrakingDistance =
-      Math.max(__mmMeasuredDecel, __mmInputDecel) + __mmReactionDistance,
-    __mmEndX = Number(v.x) + __mmDirectionX * __mmBrakingDistance,
-    __mmEndY = Number(v.y) + __mmDirectionY * __mmBrakingDistance,
-    __mmRange = Math.max(120, Number(__mmAntiCollisionRange) || 260),
-    __mmCombatPaused = __mmAntiCollisionCombatPaused(),
-    __mmObjects = __mmActiveObjectSnapshot().all;
-  let __mmBest = null,
-    __mmBestDistance = Infinity;
-  for (let __mmIndex = 0; __mmIndex < __mmObjects.length; __mmIndex++) {
-    const __mmObject = __mmObjects[__mmIndex],
-      __mmKey = __mmAntiCollisionObjectKey(__mmObject),
-      __mmData = __mmObject && b && b.list && b.list[__mmObject.id],
-      __mmName = String((__mmData && __mmData.name) || "")
-        .trim()
-        .toLowerCase(),
-      __mmTeleporter = __mmName === "teleporter";
-    if (
-      !__mmAntiCollisionObjectAllowed(__mmObject) ||
-      // Teleporters are always guarded. Only hostile spikes participate in
-      // the combat auto-pause, matching the requested safe-gathering behavior.
-      (!__mmTeleporter && __mmCombatPaused) ||
-      (__mmSkipKey != null && __mmKey === __mmSkipKey)
-    )
-      continue;
-    const __mmDx = Number(__mmObject.x) - Number(v.x),
-      __mmDy = Number(__mmObject.y) - Number(v.y),
-      __mmCenterDistanceSquared = __mmDx * __mmDx + __mmDy * __mmDy,
-      __mmCenterDistance = Math.sqrt(__mmCenterDistanceSquared),
-      __mmRawScale = Math.max(
-        1,
-        Number(__mmObject.scale) ||
-          Number(__mmData && __mmData.scale) ||
-          __mmCleanupObjectScale(__mmObject),
-      ),
-      // Use a slightly smaller TP boundary so the player can approach closely,
-      // while hostile damaging spikes keep their full scale.
-      __mmObjectScale = __mmTeleporter
-        ? __mmRawScale * 0.75
-        : Math.max(__mmRawScale, __mmCleanupObjectScale(__mmObject)),
-      __mmCollisionRadius =
-        (Number(v.scale) || 35) + __mmObjectScale,
-      __mmCloseRadius = __mmRange + __mmCollisionRadius,
-      __mmToward = __mmDx * __mmDirectionX + __mmDy * __mmDirectionY,
-      __mmClosingSpeed = Math.max(0, __mmMeasuredForward, __mmInputSpeed),
-      __mmBaseGap = __mmTeleporter ? 1.5 : 3,
-      __mmStopGap = Math.max(
-        __mmBaseGap,
-        Math.min(
-          __mmRange,
-          __mmBaseGap + __mmBrakingDistance,
-        ),
-      ),
-      __mmCurrentGap = __mmCenterDistance - __mmCollisionRadius;
-    if (
-      __mmCenterDistanceSquared > __mmCloseRadius * __mmCloseRadius ||
-      __mmCurrentGap > __mmStopGap ||
-      __mmToward <= 0 ||
-      !__mmAntiCollisionInputPointsToward(__mmObject, __mmDirection)
-    )
-      continue;
-    const __mmPathDistanceSquared = __mmSegmentDistanceSquared(
-      Number(v.x),
-      Number(v.y),
-      __mmEndX,
-      __mmEndY,
-      Number(__mmObject.x),
-      Number(__mmObject.y),
-    ),
-      // Stop only when the actual predicted movement segment reaches the
-      // game's collision boundary. The previous endpoint cushion could halt
-      // a clean side-pass a few pixels early and leave "Stop!" stuck on it.
-      __mmPredictedIntersection =
-        __mmPathDistanceSquared <=
-        __mmCollisionRadius * __mmCollisionRadius;
-    if (
-      __mmPredictedIntersection &&
-      __mmCenterDistanceSquared < __mmBestDistance
-    )
-      ((__mmBest = {
-        object: __mmObject,
-        key: __mmKey,
-        scale: __mmObjectScale,
-        gap: __mmCurrentGap,
-        stopGap: __mmStopGap,
-        closingSpeed: __mmClosingSpeed,
-        brakingDistance: __mmBrakingDistance,
-        teleporter: __mmTeleporter,
-      }),
-        (__mmBestDistance = __mmCenterDistanceSquared));
-  }
-  return __mmBest;
+function __mmAntiCollisionThreat(
+  __mmDirection,
+  __mmIgnoredKey,
+  __mmStartingMove = !1,
+) {
+  // Keep the STOP decision identical to Glotus SafeWalk: only the two nearest
+  // enemy spike/cactus/boost-pad colliders participate. Kitty's former
+  // teleporter forecast, wide braking radius, and combat exception made it
+  // stop at times Glotus continues moving.
+  return __mmGlotusSafeWalkThreat(
+    __mmDirection,
+    __mmStartingMove ? 45 : null,
+  );
 }
 function __mmAntiCollisionBlockedPathStillThreatens(__mmDirection) {
   if (
@@ -38491,90 +38470,44 @@ function __mmAntiCollisionStop(__mmThreat) {
     (__mmAntiCollisionShowStop(__mmThreat),
     __mmAntiCollisionQuickRightClick(__mmThreat));
 }
-function __mmUpdateAntiCollision() {
+function __mmUpdateAntiCollision(__mmStartingMove = !1) {
   if (__mmInstaTestingModeEnabled) return;
   __mmUpdatePassiveSpikeMotion();
   if (!v || !v.alive) {
     __mmAntiCollisionBlocked && __mmAntiCollisionReleaseBlock(!1);
     return;
   }
-  const __mmDirection = typeof ul === "function" ? ul() : null,
-    __mmCanGuard = !!(
-      __mmAntiCollisionEnabled &&
-      !document.hidden
-    );
-  if (!__mmCanGuard) {
-    __mmAntiCollisionBlocked && __mmAntiCollisionReleaseBlock(__mmDirection != null);
+  if (!__mmAntiCollisionEnabled || document.hidden) {
+    __mmAntiCollisionBlocked && __mmAntiCollisionReleaseBlock(!1);
     return;
   }
-  const __mmNow = Date.now();
-  if (
-    __mmAntiCollisionBypassArmedKey != null &&
-    __mmNow >= __mmAntiCollisionBypassArmedUntil
-  )
-    ((__mmAntiCollisionBypassArmedKey = null),
-      (__mmAntiCollisionBypassArmedUntil = 0));
+  const __mmDirection = typeof ul === "function" ? ul() : null;
   if (!Number.isFinite(Number(__mmDirection))) return;
   if (__mmAntiCollisionBlocked) {
-    const __mmBlockedData =
-        __mmAntiCollisionBlockedObject &&
-        b &&
-        b.list &&
-        b.list[__mmAntiCollisionBlockedObject.id],
-      __mmBlockedIsTeleporter =
-        String((__mmBlockedData && __mmBlockedData.name) || "")
-          .trim()
-          .toLowerCase() === "teleporter",
-      __mmReleaseForCombat =
-        !__mmBlockedIsTeleporter && __mmAntiCollisionCombatPaused();
-    if (
-      __mmReleaseForCombat ||
-      !__mmAntiCollisionBlockedObject ||
-      !__mmAntiCollisionBlockedObject.active ||
-      !__mmAntiCollisionBlockedPathStillThreatens(__mmDirection)
-    )
+    if (!__mmAntiCollisionBlockedPathStillThreatens(__mmDirection))
       __mmAntiCollisionReleaseBlock(!0);
     else {
       Kt !== null && ((Kt = null), O.send("9", null));
       return;
     }
   }
-  let __mmThreat = __mmAntiCollisionThreat(
+  const __mmThreat = __mmAntiCollisionThreat(
     __mmDirection,
-    __mmAntiCollisionBypassActiveKey,
+    null,
+    __mmStartingMove,
   );
-  if (
-    __mmThreat &&
-    __mmAntiCollisionBypassArmedKey != null &&
-    __mmThreat.key === __mmAntiCollisionBypassArmedKey
-  ) {
-    ((__mmAntiCollisionBypassActiveKey = __mmThreat.key),
-      (__mmAntiCollisionBypassArmedKey = null),
-      (__mmAntiCollisionBypassArmedUntil = 0));
-    __mmThreat = __mmAntiCollisionThreat(
-      __mmDirection,
-      __mmAntiCollisionBypassActiveKey,
-    );
-  }
   __mmThreat && __mmAntiCollisionStop(__mmThreat);
 }
 function __mmAntiCollisionMovementPressed(__mmKey) {
   __mmSyncManualMovementPressed(__mmKey);
-  __mmUpdateAntiCollision();
+  __mmUpdateAntiCollision(!0);
   Tt();
 }
 function __mmAntiCollisionMovementReleased() {
   const __mmDirection = typeof ul === "function" ? ul() : null;
-  if (__mmDirection == null) {
-    if (__mmAntiCollisionBlocked && __mmAntiCollisionBlockedKey != null) {
-      ((__mmAntiCollisionBypassArmedKey = __mmAntiCollisionBlockedKey),
-        (__mmAntiCollisionBypassArmedUntil = Date.now() + 3000));
-    }
-    (__mmAntiCollisionReleaseBlock(!1),
-      (__mmAntiCollisionBypassActiveKey = null));
-  } else {
-    __mmUpdateAntiCollision();
-  }
+  __mmDirection == null
+    ? __mmAntiCollisionReleaseBlock(!1)
+    : __mmUpdateAntiCollision();
   Tt();
 }
 function __mmStartAntiCollision() {
@@ -38585,9 +38518,6 @@ function __mmStartAntiCollision() {
 function __mmStopAntiCollision() {
   (__mmAntiCollisionTimer && clearInterval(__mmAntiCollisionTimer),
     (__mmAntiCollisionTimer = 0),
-    (__mmAntiCollisionBypassArmedKey = null),
-    (__mmAntiCollisionBypassArmedUntil = 0),
-    (__mmAntiCollisionBypassActiveKey = null),
     (__mmAntiCollisionPopups.length = 0),
     __mmAntiCollisionReleaseBlock(!0));
 }
@@ -39950,7 +39880,7 @@ function __mmStartBoostForward(__mmAngle) {
     (Kt = __mmAngle));
 }
 function __mmFinishBoostBreakGear() {
-  if (!v || !v.alive) return;
+  if (!v || !v.alive || __mmIsTrapped()) return;
   const __mmEnemyNearby = __mmEnemyWithinCombatRange(),
     __mmTail =
       !__mmEnemyNearby && v.tails && v.tails[11] && v.tailIndex !== 11
@@ -51190,10 +51120,16 @@ function __mmTryPredictSmartTrapReplace(
         fallbackAt:
           __mmNow +
           Math.max(
-            140,
-            Math.min(450, __mmServerTickMs() * 2 + Number(window.pingTime || 0) / 2),
+            35,
+            Math.min(
+              220,
+              __mmServerTickMs() + Number(window.pingTime || 0) / 2,
+            ),
           ),
-        expiresAt: __mmNow + Math.max(700, __mmServerTickMs() * 6),
+        // A missed optimistic packet must not suppress the next verified
+        // break. Keep one compact acknowledgement window, then arm the exact
+        // replacement again instead of retaining the old six-tick cooldown.
+        expiresAt: __mmNow + Math.max(220, __mmServerTickMs() * 2),
       }),
       __mmAutoSpikeSpamReservations.push({
         item: __mmTrapItem,
@@ -51231,7 +51167,8 @@ function __mmTrySmartTrapReplace(__mmKnown, __mmEnemy, __mmNow) {
     !v ||
     !v.alive ||
     !__mmSmartTrapReplaceMayPlace() ||
-    __mmNow - __mmSmartTrapReplaceLastAt < __mmServerTickMs()
+    __mmNow - __mmSmartTrapReplaceLastAt <
+      Math.max(20, Math.min(55, __mmFastCheckMs()))
   )
     return !1;
   const __mmTrapItem = __mmSmartPitTrapItem(),
@@ -51323,7 +51260,14 @@ function __mmSmartObserveRemovedObjects(__mmNow) {
     __mmSmartKnownObjects.clear();
     return !1;
   }
-  if (__mmNow - __mmSmartObjectScanAt < 25) return !1;
+  // This path is called before optional Instas. Scan at the fast tactical
+  // cadence so a confirmed broken pit does not wait for the normal 25 ms
+  // placement sweep before reclaiming its exact slot.
+  if (
+    __mmNow - __mmSmartObjectScanAt <
+      Math.max(8, Math.min(14, __mmFastCheckMs()))
+  )
+    return !1;
   __mmSmartObjectScanAt = __mmNow;
   if (
     __mmSmartTrapReplacePrediction &&
@@ -51380,7 +51324,7 @@ function __mmSmartObserveRemovedObjects(__mmNow) {
     if (!__mmEnemy || Math.hypot(__mmEnemy.x - v.x, __mmEnemy.y - v.y) > 235)
       continue;
     ((__mmSmartReplacePoint = __mmKnown),
-      (__mmSmartReplaceUntil = __mmNow + Math.max(250, __mmServerTickMs() * 2)));
+      (__mmSmartReplaceUntil = __mmNow + Math.max(140, __mmServerTickMs())));
     // Generic replacement can choose a spike or wall. When our pit was just
     // broken while it still contains an enemy, restore that exact trap slot
     // first; the generic scorer remains the safe fallback when the player has
@@ -54600,6 +54544,8 @@ function __mmStopTrapAttack() {
     (__mmTrapAttackLastHoldAt = 0),
     (__mmTrapAttackHeldWeapon = null),
     (__mmTrapAttackTargetKey = null),
+    (__mmTrapFinalKnockbackTargetKey = null),
+    (__mmTrapFinalKnockbackUntil = 0),
     (__mmTrapManualReadyAt = 0),
     (__mmTrapWeaponSelectAt = 0),
     __mmTrapAttackActive &&
@@ -54632,7 +54578,7 @@ function __mmTrapWeaponRange(__mmWeapon, __mmTrap) {
     8
   );
 }
-function __mmTrapBreakPlan(__mmTrap) {
+function __mmTrapBreakPlan(__mmTrap, __mmAllowFinalKnockback = !1) {
   if (!v || !v.alive || !Array.isArray(v.weapons) || !__mmTrap) return null;
   const __mmPosition = __mmServerEntityPosition(v) || v,
     __mmDistance = Math.hypot(
@@ -54660,6 +54606,48 @@ function __mmTrapBreakPlan(__mmTrap) {
         ? __mmGreatHammer
         : Number(v.weapons[0]);
   if (__mmForcedWeapon == null) return null;
+  // The final escape swing can use a knockback main only when Soldier makes
+  // that exact loaded hit lethal to the pit. Great Hammer remains the breaker
+  // for every earlier hit, so this never trades an escape's damage throughput
+  // for a speculative bat/sword/polearm swing.
+  const __mmMainWeapon = Number(v.weapons[0]),
+    __mmMainData = b && b.weapons && b.weapons[__mmMainWeapon],
+    // Keep the IDs local: this planner is also reused by Kitty's small
+    // runtime extractors, which do not import the global weapon constants.
+    __mmKnockbackMain = [6, 3, 4, 5].includes(__mmMainWeapon),
+    __mmSoldierAvailable = !!(v.skins && v.skins[6]);
+  if (
+    __mmAllowFinalKnockback &&
+    __mmKnockbackMain &&
+    __mmSoldierAvailable &&
+    __mmMainData &&
+    __mmMainData.projectile == null &&
+    !__mmMainData.shield &&
+    __mmDistance <= __mmTrapWeaponRange(__mmMainWeapon, __mmTrap) &&
+    __mmWeaponReady(__mmMainWeapon)
+  ) {
+    const __mmSoldierDamage = __mmWeaponStructureDamage(
+      { weaponVariant: v.weaponVariant, skinIndex: 6 },
+      __mmMainWeapon,
+      __mmTrap,
+    );
+    if (
+      __mmSoldierDamage > 0 &&
+      Number.isFinite(__mmHealth) &&
+      __mmHealth > 0 &&
+      __mmSoldierDamage + 0.001 >= __mmHealth
+    )
+      return {
+        weapon: __mmMainWeapon,
+        damage: __mmSoldierDamage,
+        cooldown: __mmManualWeaponCooldown(__mmMainWeapon, 6),
+        hits: 1,
+        timeToBreak: 0,
+        dps: __mmSoldierDamage /
+          Math.max(1, __mmManualWeaponCooldown(__mmMainWeapon, 6)),
+        finalKnockback: !0,
+      };
+  }
   let __mmBest = null;
   for (const __mmWeapon of [__mmForcedWeapon]) {
     const __mmData = b && b.weapons && b.weapons[__mmWeapon];
@@ -55697,7 +55685,12 @@ function __mmBreakTrap() {
   // right-click by pulsing Tank only for each loaded breaking swing.
   const __mmPreviousTrapAim = __mmTrapAimAngle;
   __mmTrapAimAngle = __mmAngle;
-  const __mmPlan = __mmTrapBreakPlan(__mmBreakTarget);
+  // The Soldier knockback finish belongs to the locking pit itself. Contact
+  // spikes keep the normal Great Hammer auto-break path, even while trapped.
+  const __mmPlan = __mmTrapBreakPlan(
+    __mmBreakTarget,
+    __mmBreakTarget === __mmTrapTarget,
+  );
   if (!__mmPlan) return;
   // Do not chase the fastest currently-ready hand while trapped. That made
   // the escape path oscillate between main and secondary on every reload.
@@ -55705,9 +55698,18 @@ function __mmBreakTrap() {
   // inventory changes which slot is required (secondary Hammer or main).
   const __mmLockedWeapon = Number(__mmTrapAttackHeldWeapon),
     __mmLockedData = b && b.weapons && b.weapons[__mmLockedWeapon],
+    __mmNow = Date.now(),
+    // After the Soldier main hit is sent, retain that hand until the next
+    // authoritative trap update. This removes a Hammer reselect race against
+    // the one-frame stale object health that follows a destroying swing.
+    __mmAwaitingFinalKnockback =
+      __mmTrapAttackHeld &&
+      String(__mmTrapFinalKnockbackTargetKey) === String(__mmTargetKey) &&
+      __mmNow < __mmTrapFinalKnockbackUntil &&
+      __mmLockedWeapon === Number(v.weapons[0]),
     __mmKeepLockedWeapon =
       __mmTrapAttackHeldWeapon != null &&
-      __mmLockedWeapon === __mmPlan.weapon &&
+      ((__mmLockedWeapon === __mmPlan.weapon) || __mmAwaitingFinalKnockback) &&
       v.weapons.includes(__mmLockedWeapon) &&
       __mmLockedData &&
       __mmLockedData.projectile == null &&
@@ -55723,7 +55725,6 @@ function __mmBreakTrap() {
           v.skins && v.skins[40] ? 40 : null,
         )
       : __mmPlan.cooldown,
-    __mmNow = Date.now(),
     __mmChangedWeapon =
       __mmTrapAttackHeld &&
       Number(__mmTrapAttackHeldWeapon) !== Number(__mmWeapon),
@@ -55738,7 +55739,13 @@ function __mmBreakTrap() {
     __mmTrapManualReadyAt,
     __mmNow,
   );
-  if (
+  if (__mmSwingReady && __mmPlan.finalKnockback) {
+    // Soldier applies before this exact final main swing. Do not stack Tank on
+    // it: the knockback escape is chosen specifically for Soldier's lethal
+    // structure damage and the main weapon's push.
+    if (!__mmActivateCombatHat(6, null, 1)) return;
+    __mmGearArbiter.commit();
+  } else if (
     __mmSwingReady &&
     v.skins &&
     v.skins[40] &&
@@ -55768,7 +55775,11 @@ function __mmBreakTrap() {
     // repeatedly while the same weapon hit is still reloading.
     __mmSwingReady &&
       (__mmTrackPlayerToolCooldown(v.sid, __mmWeapon, "trap-escape-hold"),
-      (__mmTrapManualReadyAt = __mmNow + __mmCooldown));
+      (__mmTrapManualReadyAt = __mmNow + __mmCooldown),
+      __mmPlan.finalKnockback &&
+        ((__mmTrapFinalKnockbackTargetKey = __mmTargetKey),
+        (__mmTrapFinalKnockbackUntil =
+          __mmNow + Math.max(100, __mmServerTickMs() * 1.5))));
     ((__mmTrapAttackHeld = !0),
       (__mmTrapAttackHeldWeapon = __mmWeapon),
       (__mmTrapAttackTargetKey = __mmTargetKey),
