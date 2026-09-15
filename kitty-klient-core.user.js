@@ -2,7 +2,7 @@
 // @name         kitty klient
 // @author       Coder Guy
 // @credits       random4ik — bot script
-// @version      7.0.11
+// @version      7.0.12
 // @icon         https://cdn.discordapp.com/icons/1540876076224356437/ac27c0ce87c4c46b407ebca78e150aeb.webp?size=2048
 // @description  kitty klient — a MooMoo.io client with adaptive zoom, fast autoheal, gear automation, combat tools, predictive placement, visual markers, CC0 background music, manual quick builds, and a fully rebindable keyboard/mouse controls HUD.
 // @match        *://moomoo.io/*
@@ -267,7 +267,7 @@
     const AUTO_PUSH_FINISHER_MIGRATION_KEY = "kitty-klient-auto-push-finisher-v1";
     const ASSASSIN_RANGE_AUTO_MIGRATION_KEY = "kitty-klient-assassin-range-auto-v1";
     const TAB_SYNC_BRIDGE_KEY = "kitty-klient-tab-sync-bridge-v1";
-const KITTY_KLIENT_VERSION = "7.0.11";
+const KITTY_KLIENT_VERSION = "7.0.12";
     const KITTY_SHARED_STORAGE_APPLIED_EVENT = "KittyMooMooSharedStorageApplied";
     // FRVR's v1.8 client changed the game module and now owns its own Altcha
     // verification flow. The legacy runtime patch relies on exact bundle
@@ -4724,7 +4724,7 @@ const KITTY_KLIENT_VERSION = "7.0.11";
         addHudToggle(kittyInstas, "spikeSync", "Base Spike Sync", "Place every legal contact spike around an in-range enemy, then use Bull + primary and a next-tick Turret follow-up. Does not use Tank gear");
         addHudToggle(kittyInstas, "spikeSyncHammer", "Spike Sync Hammer", "Find one Great Hammer angle that hits both an enemy and a one-hit breakable, place a legal contact spike, then stack ready Turret and primary damage");
         addHudToggle(kittyInstas, "velTickInsta", "VelTick Insta", "T watches the predicted 220–245px window, leads with Turret, then sends Bull + Polearm on the next tick");
-        addHudToggle(kittyInstas, "tankPredictInsta", "Tank Vel Predict RevInsta", "Learns repeat Tank Gear pulses, next-hat signals, and fresh movement reversals. It fires only when the Turret can land inside the learned Tank window, then sends Bull + main and an optional Musket follow-up.");
+        addHudToggle(kittyInstas, "tankPredictInsta", "Tank Vel Predict RevInsta", "Prioritizes Turret → main against a nearby exposed target. It still learns repeat Tank Gear pulses, next-hat signals, and fresh movement reversals, then times the Turret for the predicted Tank tick before Bull + main and an optional Musket follow-up.");
         addHudToggle(kittyInstas, "polearmAids", "Polearm Aids", "Against a target in your or an ally's trap: Tank + Great Hammer, then Bull + Polearm and a legal contact spike");
         addHudToggle(kittyInstas, "autoPushInsta", "Auto Push", "Uses Glotus far-point alignment and close-point steering within 250 pixels; pauses while movement keys are held");
         addHudToggle(kittyInstas, "boostSpikeKill", "Boost + Spike", "G uses x-RedDragon's 80 ms pattern: two side spikes, two close diagonals within 150 units, then a forward Boost Pad. Kitty skips any illegal slot.");
@@ -13357,9 +13357,10 @@ const __mmLiveState = {
 };
 const __mmActionPriorities = Object.freeze({
   trapEscape: 100,
-  // Keep an enemy-holding pit above ordinary placement and strike work. Trap
-  // escape, Shield defense, healing, and immediate counterplay remain ahead.
-  trapReplace: 84,
+  // Keep an enemy-holding pit above optional Insta work and ordinary
+  // placement. The replacement gate still yields to the active lethal-defense
+  // owners below, so retaining a capture cannot interrupt survival.
+  trapReplace: 89,
   // Glotus Autobreak is a short, nearby maintenance action. It yields to
   // real input, placement and every combat/defense owner, but can cleanly
   // interrupt unattended cleanup work.
@@ -14548,6 +14549,9 @@ function __mmRunServerTacticalTick() {
     __mmOperationStage("tick-trap", function () {
       (__mmTrapEscapeEnabled || __mmTrapAttackActive) && __mmBreakTrap();
     });
+    __mmOperationStage("tick-trap-replace", function () {
+      __mmUpdatePriorityTrapReplacement();
+    });
     __mmOperationStage("tick-defense", function () {
       (__mmUpdateAntiSync(),
         __mmUpdateAntiInsta(),
@@ -14683,6 +14687,11 @@ function __mmRunOperationPipeline() {
     // A real lock owns the weapon/aim channels before every other module.
     __mmOperationStage("trap", function () {
       (__mmTrapEscapeEnabled || __mmTrapAttackActive) && __mmBreakTrap();
+    });
+    // Keep an enemy caught in our pit before optional Instas even while
+    // authoritative position updates are briefly delayed.
+    __mmOperationStage("trap-replace", function () {
+      __mmUpdatePriorityTrapReplacement();
     });
     // Lethal prevention is evaluated before optional damage combos, with one
     // latency-sensitive combat module owning a server tick at a time.
@@ -15955,6 +15964,7 @@ function __mmInstaPopupLabel(__mmProfile, __mmAutomatic, __mmBetrayal) {
     polearmAids: "Polearm Insta",
     velTick: "VelTick Insta",
     tankPredict: "Tank Window Insta",
+    turretMain: "Turret Main Sync",
     autoPush: "Auto-Push Insta",
   };
   return __mmLabels[String(__mmProfile || "normal")] || "Insta";
@@ -16582,7 +16592,7 @@ const __mmInsta = {
       return !1;
     if (!__mmIgnoreShield && !this.pathClear(__mmTarget)) return !1;
     const __mmPrimary = this.supportedPrimary(),
-      __mmPrimaryReady = (__mmProfile === "velTick" || __mmProfile === "tankPredict")
+      __mmPrimaryReady = (__mmProfile === "velTick" || __mmProfile === "tankPredict" || __mmProfile === "turretMain")
         ? __mmWeaponReadyWithin(__mmPrimary, this.tick())
         : __mmWeaponReady(__mmPrimary);
     if (
@@ -16591,7 +16601,7 @@ const __mmInsta = {
       !__mmPrimaryReady
     )
       return !1;
-    if (__mmProfile === "velTick" || __mmProfile === "tankPredict" || __mmProfile === "autoPush")
+    if (__mmProfile === "velTick" || __mmProfile === "tankPredict" || __mmProfile === "turretMain" || __mmProfile === "autoPush")
       return !!(
         v.skins[__mmTurretGear] &&
         this.turretReady()
@@ -16618,7 +16628,7 @@ const __mmInsta = {
     if (!v || !v.alive || !v.skins || !v.skins[7]) return !1;
     const __mmPrimary = this.supportedPrimary();
     if (__mmPrimary == null || !__mmWeaponReady(__mmPrimary)) return !1;
-    if (__mmProfile === "velTick" || __mmProfile === "tankPredict" || __mmProfile === "autoPush")
+    if (__mmProfile === "velTick" || __mmProfile === "tankPredict" || __mmProfile === "turretMain" || __mmProfile === "autoPush")
       return !!(v.skins[__mmTurretGear] && this.turretReady());
     const __mmSecondary = v.weapons && v.weapons[1],
       __mmSecondaryData = this.weaponData(__mmSecondary);
@@ -17248,7 +17258,7 @@ const __mmInsta = {
       );
     }
     this.preparePostSpike(__mmContext.target);
-    if (this.profile === "tankPredict") {
+    if (this.profile === "tankPredict" || this.profile === "turretMain") {
       const __mmPlan = this.tankPredictPlan;
       if (!__mmPlan || !this.turretReady())
         return void this.cleanup("tank-window-turret-unavailable");
@@ -17302,7 +17312,7 @@ const __mmInsta = {
           this.tankCoverTimer = 0;
           if (
             this.state === "executeBurst" &&
-            this.profile === "tankPredict" &&
+            (this.profile === "tankPredict" || this.profile === "turretMain") &&
             v && v.alive &&
             __mmCoverHat != null
           )
@@ -17484,12 +17494,24 @@ const __mmInsta = {
       this.schedule(() => this.finishNormalBurst(), this.tick());
       return;
     }
-    if (this.profile === "tankPredict") {
+    if (this.profile === "tankPredict" || this.profile === "turretMain") {
       const __mmPlan = this.tankPredictPlan,
         __mmNow = Date.now(),
         __mmPrimaryAt = Number(__mmPlan && __mmPlan.primaryAt) ||
           Number(__mmPlan && __mmPlan.expectedAt) || __mmNow,
+        __mmRequiresTank = !__mmPlan || __mmPlan.requiresTank !== !1,
         __mmTankVisible = !!(
+          __mmContext.target &&
+          (Number(__mmContext.target.skinIndex) === 40 ||
+            Number(__mmContext.target.skinIndex2) === 40)
+        ),
+        __mmDefensiveHat = !!(
+          !__mmRequiresTank &&
+          __mmContext.target &&
+          __mmSyncEnemyHatImpact(__mmContext.target, __mmPrimaryAt).defensive
+        ),
+        __mmUnexpectedTank = !!(
+          !__mmRequiresTank &&
           __mmContext.target &&
           (Number(__mmContext.target.skinIndex) === 40 ||
             Number(__mmContext.target.skinIndex2) === 40)
@@ -17504,7 +17526,9 @@ const __mmInsta = {
         );
       if (
         !__mmPlan ||
-        !__mmTankVisible ||
+        (__mmRequiresTank && !__mmTankVisible) ||
+        __mmDefensiveHat ||
+        __mmUnexpectedTank ||
         !__mmWeaponReady(__mmContext.primary) ||
         (__mmContext.target &&
           !this.inRange(__mmContext.primary, __mmContext.target))
@@ -36373,7 +36397,7 @@ function __mmAutoHealRecordFoodAttempt(__mmNow) {
     (__mmAutoHealLastDamageAt = 0),
     (__mmAutoHealLastDamageTick = -1));
 }
-function __mmAutoHealSafeAt(__mmEmergency, __mmFoodValue) {
+function __mmAutoHealSafeAt(__mmEmergency, __mmFoodValue, __mmSpikeSpam) {
   if (!__mmAutoHealLastDamageAt || __mmAutoHealShameCount <= 0)
     return 0;
   const __mmLowHealth =
@@ -36381,13 +36405,35 @@ function __mmAutoHealSafeAt(__mmEmergency, __mmFoodValue) {
   // Survival wins over Shame recovery.  Every non-critical damage/heal pair
   // waits past the server's Shame window so the next accepted food lowers the
   // local counter toward zero, rather than merely avoiding the old 5+ cap.
-  return __mmEmergency || __mmLowHealth
-    ? 0
-    : __mmAutoHealLastDamageAt +
-        Math.max(
-          Number(__mmCombatCalibration.healSafetyMs) || 125,
-          (Number(__mmCombatCalibration.shameWindowMs) || 120) + 5,
-        );
+  if (__mmEmergency || __mmLowHealth) return 0;
+  if (__mmSpikeSpam)
+    return __mmAutoHealLastDamageAt + __mmAutoHealSpikeSpamSpacingMs();
+  return __mmAutoHealLastDamageAt +
+    Math.max(
+      Number(__mmCombatCalibration.healSafetyMs) || 125,
+      (Number(__mmCombatCalibration.shameWindowMs) || 120) + 5,
+    );
+}
+function __mmAutoHealSpikeSpamActive(__mmThreat, __mmNow) {
+  if (!v || !v.alive || !__mmIsTrapped()) return !1;
+  const __mmSpikeDamage = Math.max(0, Number(__mmThreat && __mmThreat.spikeDamage) || 0),
+    __mmRecentWindow = Math.max(360, __mmServerTickMs() * 3.5),
+    __mmRecentHit =
+      __mmNow - Number(__mmAutoHealLastHitAt || 0) <= __mmRecentWindow &&
+      Number(__mmAutoHealLastHitDamage) >= Math.max(8, __mmSpikeDamage * 0.4);
+  // Require both a present hostile spike forecast and a recent real damage
+  // packet. This keeps ordinary trap pressure and single chip hits on the
+  // normal Shame-safe cadence.
+  return __mmSpikeDamage > 0 && __mmRecentHit;
+}
+function __mmAutoHealSpikeSpamSpacingMs() {
+  // Faster than ordinary refill, but still one bounded bite at a time. At the
+  // usual 111 ms server tick this is ~85 ms; it cannot become a local-loop
+  // food flood in high-update rooms.
+  return Math.max(
+    75,
+    Math.min(__mmAutoHealShameSpacingMs(), Math.round(__mmServerTickMs() * 0.78)),
+  );
 }
 function __mmAutoHealShameSpacingMs() {
   // Do not let a higher-update-rate room turn ordinary refill bites into a
@@ -36577,7 +36623,7 @@ function __mmAutoHealBurstDanger(__mmThreat, __mmFoodValue) {
     __mmIncomingDamage >= Math.max(__mmFood * 2, __mmHealth * 0.55)
   );
 }
-function __mmAutoHealCanSendBite(__mmEmergency, __mmNow) {
+function __mmAutoHealCanSendBite(__mmEmergency, __mmNow, __mmSpikeSpam) {
   if (__mmEmergency) return !0;
   // A local 10 ms fallback must not convert a delayed heal into a same-server-
   // tick heal.  Once an authoritative tick has advanced (or tick freshness is
@@ -36590,10 +36636,10 @@ function __mmAutoHealCanSendBite(__mmEmergency, __mmNow) {
   )
     return !1;
   if (!__mmAutoHealFoodAwaitingAckAt) return !0;
-  return (
-    __mmNow - __mmAutoHealFoodAwaitingAckAt >=
-    __mmAutoHealShameSpacingMs()
-  );
+  return __mmNow - __mmAutoHealFoodAwaitingAckAt >=
+    (__mmSpikeSpam
+      ? __mmAutoHealSpikeSpamSpacingMs()
+      : __mmAutoHealShameSpacingMs());
 }
 function __mmResetAutoHeal() {
   ((__mmAutoHealWasHealing = !1),
@@ -36617,14 +36663,44 @@ function __mmAutoHeal(__mmEmergency) {
   // create speculative food retries; an actual damage/health event still owns
   // the heal queue.
   const __mmIncomingThreat = __mmCombatThreatSnapshot(),
-    __mmFoodValue = __mmAutoHealFoodValue();
+    __mmSpikePushThreat = __mmTrappedSpikePushPreHealThreat(),
+    __mmPreHealThreat = __mmSpikePushThreat
+      ? {
+          ...__mmIncomingThreat,
+          damage: Math.max(
+            Number(__mmIncomingThreat.damage) || 0,
+            __mmSpikePushThreat.damage,
+          ),
+          potentialDamage: Math.max(
+            Number(__mmIncomingThreat.potentialDamage) || 0,
+            __mmSpikePushThreat.potentialDamage,
+          ),
+          spikeDamage: Math.max(
+            Number(__mmIncomingThreat.spikeDamage) || 0,
+            __mmSpikePushThreat.spikeDamage,
+          ),
+          firstImpactMs: Math.min(
+            Number.isFinite(Number(__mmIncomingThreat.firstImpactMs))
+              ? Number(__mmIncomingThreat.firstImpactMs)
+              : Infinity,
+            __mmSpikePushThreat.firstImpactMs,
+          ),
+          angle: __mmSpikePushThreat.angle,
+          trappedSpikePush: !0,
+        }
+      : __mmIncomingThreat,
+    __mmFoodValue = __mmAutoHealFoodValue(),
+    __mmNow = Date.now(),
+    __mmSpikeSpam = __mmAutoHealSpikeSpamActive(__mmPreHealThreat, __mmNow);
   __mmEmergency = !!(
-    __mmEmergency || __mmAutoHealBurstDanger(__mmIncomingThreat, __mmFoodValue)
+    __mmEmergency ||
+    __mmAutoHealBurstDanger(__mmPreHealThreat, __mmFoodValue) ||
+    (__mmSpikeSpam && Number(v.health) <= Math.max(45, __mmFoodValue * 2))
   );
   // Glotus pre-heals on a credible Insta setup rather than waiting for the
   // first health packet. Do this before ordinary post-hit healing so the
   // preemptive full refill has the entire current server window to arrive.
-  if (__mmTryAntiInstaPreHeal(__mmIncomingThreat)) return;
+  if (__mmTryAntiInstaPreHeal(__mmPreHealThreat)) return;
   // Shame! (hat 45) means the server is rejecting food for its 30-second
   // penalty. Do not burn resources or flood selection/attack packets during it.
   if (Number(v.skinIndex) === 45) {
@@ -36641,8 +36717,11 @@ function __mmAutoHeal(__mmEmergency) {
     // the server tick. This is optimistic (it never waits for a heal reply),
     // but avoids the current server dropping a pile of same-frame F packets.
     const __mmMissingHealth = Math.max(0, v.maxHealth - v.health),
-      __mmNow = Date.now(),
-      __mmSafeAt = __mmAutoHealSafeAt(__mmEmergency, __mmFoodValue);
+      __mmSafeAt = __mmAutoHealSafeAt(
+        __mmEmergency,
+        __mmFoodValue,
+        __mmSpikeSpam,
+      );
     ((__mmAutoHealBitesRemaining = Math.min(
       Math.ceil(__mmMissingHealth / __mmFoodValue),
       __mmFoodCharges(),
@@ -36650,10 +36729,9 @@ function __mmAutoHeal(__mmEmergency) {
       (__mmAutoHealPending = !1),
       (__mmAutoHealNextBiteAt = Math.max(__mmNow, __mmSafeAt || 0)));
   }
-  const __mmNow = Date.now();
   if (!__mmAutoHealBitesRemaining || __mmNow < __mmAutoHealNextBiteAt)
     return;
-  if (!__mmAutoHealCanSendBite(__mmEmergency, __mmNow))
+  if (!__mmAutoHealCanSendBite(__mmEmergency, __mmNow, __mmSpikeSpam))
     return;
   // A held mouse attack remains the action owner while food is pulsed between
   // swings. __mmUseFood restores the selected tool and resumes the live held
@@ -36684,7 +36762,9 @@ function __mmAutoHeal(__mmEmergency) {
       __mmFoodSentAt +
       (__mmEmergency
         ? Math.max(1, __mmServerTickMs())
-        : __mmAutoHealShameSpacingMs())),
+        : __mmSpikeSpam
+          ? __mmAutoHealSpikeSpamSpacingMs()
+          : __mmAutoHealShameSpacingMs())),
     __mmOwnsAction && __mmActionRelease("autoHeal", "food sent"));
 }
 function __mmToggleAutoHeal() {
@@ -37146,9 +37226,14 @@ const __mmBowUpgradeInsta = {
       __mmTurretWasReady = __mmInsta.turretReady(),
       __mmGap = this.stageGap();
     try {
-      (O.send("D", __mmAngle),
-        __mmEquipHatNow(__mmTurretGear, !0),
-        __mmTurretWasReady && __mmAssumeTurretGearShot());
+      O.send("D", __mmAngle);
+      // Bow upgrades can still proceed while Turret Gear reloads, but never
+      // select the gear without a live bullet. That avoids an exposed hat
+      // swap which cannot contribute damage to this sequence.
+      if (__mmTurretWasReady) {
+        __mmEquipHatNow(__mmTurretGear, !0);
+        __mmAssumeTurretGearShot();
+      }
     } catch (__mmBowUpgradeGearError) {
       return this.cancel("Turret Gear failed");
     }
@@ -40151,7 +40236,7 @@ function __mmKittyProfileReady(__mmEnemy, __mmProfile) {
   )
     return !1;
   const __mmPrimary = __mmInsta.supportedPrimary(),
-    __mmPrimaryReady = (__mmProfile === "velTick" || __mmProfile === "tankPredict")
+    __mmPrimaryReady = (__mmProfile === "velTick" || __mmProfile === "tankPredict" || __mmProfile === "turretMain")
       ? __mmWeaponReadyWithin(__mmPrimary, __mmServerTickMs())
       : __mmWeaponReady(__mmPrimary);
   if (
@@ -40160,7 +40245,7 @@ function __mmKittyProfileReady(__mmEnemy, __mmProfile) {
     !__mmInsta.inRange(__mmPrimary, __mmEnemy)
   )
     return !1;
-  if (__mmProfile === "velTick" || __mmProfile === "tankPredict" || __mmProfile === "autoPush")
+  if (__mmProfile === "velTick" || __mmProfile === "tankPredict" || __mmProfile === "turretMain" || __mmProfile === "autoPush")
     return !!(
       v.skins[__mmTurretGear] &&
       __mmInsta.turretReady()
@@ -42089,6 +42174,79 @@ const __mmTankPredictInsta = {
     return __mmStarted;
   },
 };
+// The Tank route above is intentionally narrow: it waits for a learned Tank
+// pulse. This companion route uses the exact same Turret -> Bull/main packet
+// order for a target that is presently exposed, so a ready close-range combo
+// is not delayed behind slower Hammer profiles. A current or announced Tank
+// is left to the learned timing route; firing blind into that defensive tick
+// would waste the Turret cooldown.
+const __mmTurretMainSync = {
+  plan(__mmEnemy, __mmNow = Date.now()) {
+    if (
+      !__mmEnemy ||
+      !__mmIsEnemyPlayer(__mmEnemy) ||
+      !v ||
+      !v.alive ||
+      !__mmInsta.turretReady() ||
+      !__mmInsta.turretInRange(__mmEnemy)
+    )
+      return null;
+    const __mmPrimary = __mmInsta.supportedPrimary();
+    if (
+      __mmPrimary == null ||
+      !__mmWeaponReadyWithin(__mmPrimary, __mmServerTickMs()) ||
+      !__mmInsta.inRange(__mmPrimary, __mmEnemy) ||
+      !__mmInsta.pathClear(__mmEnemy)
+    )
+      return null;
+    const __mmCurrentHat = Number(__mmEnemy.skinIndex),
+      __mmNextHat = Number(__mmEnemy.skinIndex2),
+      __mmTurretTravel = Math.max(1, __mmInsta.turretTravelMs(__mmEnemy)),
+      __mmPrimaryAt = __mmNow + Math.max(8, Math.min(__mmServerTickMs(), 42)),
+      __mmImpactAt = __mmNow + __mmTurretTravel,
+      __mmImpactHat = __mmSyncEnemyHatImpact(__mmEnemy, __mmImpactAt),
+      __mmRecord = __mmTankPredictInsta.records[String(__mmEnemy.sid)];
+    // Soldier/EMP are defensive hats. Tank is handled by the precision plan
+    // above, including next-hat Tank packets, rather than this exposed route.
+    if (
+      [6, 22, 40].includes(__mmCurrentHat) ||
+      [6, 22, 40].includes(__mmNextHat) ||
+      __mmImpactHat.defensive
+    )
+      return null;
+    const __mmSecondary = v.weapons && v.weapons[1],
+      __mmMusketDamage = __mmSecondary === __mmMusket && __mmWeaponReady(__mmSecondary)
+        ? __mmInsta.maxAutoWeaponDamage(__mmSecondary, !0)
+        : 0,
+      __mmDamage = __mmInsta.maxAutoWeaponDamage(__mmPrimary, !0) +
+        25 + __mmMusketDamage,
+      __mmHealth = Math.max(1, Number(__mmEnemy.health) || 100),
+      __mmArmor = __mmTargetIncomingDamageMultiplier(__mmEnemy);
+    // It is a first-choice *lethal* attempt. Nonlethal contact remains
+    // available for the specialized knockback and pressure routes.
+    if (__mmDamage * __mmArmor + 0.001 < __mmHealth) return null;
+    return {
+      expectedAt: __mmPrimaryAt,
+      primaryAt: __mmPrimaryAt,
+      turretImpactAt: __mmImpactAt,
+      pulseEndAt: __mmPrimaryAt + Math.max(32, __mmServerTickMs()),
+      source: "exposed target",
+      record: __mmRecord || null,
+      requiresTank: !1,
+    };
+  },
+  launch(__mmEnemy, __mmPlan) {
+    return !!(
+      __mmPlan &&
+      __mmStartKittyProfile(
+        "turretMain",
+        __mmEnemy,
+        "Turret → main " + __mmPlan.source,
+        { tankPredictPlan: __mmPlan },
+      )
+    );
+  },
+};
 function __mmUpdateKittyInstas() {
   if (
     !v ||
@@ -42138,15 +42296,20 @@ function __mmUpdateKittyInstas() {
     __mmPrediction = __mmPredictEnemyNextTick(__mmEnemy, __mmNow),
     __mmPolearmHammer = __mmKittyPolearmHammerLoadout(),
     __mmEnemyTrap = __mmAutoSpikeSpamTrapForEnemy(__mmEnemy);
+  // A learned Tank edge takes precedence, followed by the immediate
+  // exposed-target Turret → main route. Both run before Hammer-based profiles
+  // so a no-Soldier target receives the fast synchronized attempt first.
+  if (__mmTankPredictInstaEnabled) {
+    const __mmTankPlan = __mmTankPredictInsta.plan(__mmEnemy, __mmNow);
+    if (__mmTankPlan && __mmTankPredictInsta.launch(__mmEnemy, __mmTankPlan)) return;
+    const __mmExposedPlan = __mmTurretMainSync.plan(__mmEnemy, __mmNow);
+    if (__mmExposedPlan && __mmTurretMainSync.launch(__mmEnemy, __mmExposedPlan)) return;
+  }
   if (
     __mmHammerPolearmInstaEnabled &&
     __mmHammerPolearmInsta.start(__mmEnemy)
   )
     return;
-  if (__mmTankPredictInstaEnabled) {
-    const __mmTankPlan = __mmTankPredictInsta.plan(__mmEnemy, __mmNow);
-    if (__mmTankPlan && __mmTankPredictInsta.launch(__mmEnemy, __mmTankPlan)) return;
-  }
   if (
     __mmPolearmAidsEnabled &&
     __mmPolearmHammer &&
@@ -46469,6 +46632,99 @@ function __mmThreatMeleeEntries(__mmNow, __mmHorizonMs) {
   }
   return __mmEntries;
 }
+function __mmTrappedSpikePushPreHealThreat() {
+  // A common trap insta does not announce a swing until the same server edge
+  // that applies the knockback. Forecast the loaded *primary* while the player
+  // is locked in a pit, then account for the hostile spike on that push line.
+  // Secondary-only pressure is intentionally excluded: this is for the usual
+  // Bull/main push that otherwise leaves no time for the first food packet.
+  if (!v || !v.alive || !__mmIsTrapped() || !b || !b.weapons) return null;
+  const __mmEnemies = __mmLiveStateFresh() ? __mmLiveState.enemies : E,
+    __mmSelf = __mmServerEntityPosition(v) || v,
+    __mmTick = Math.max(1, __mmServerTickMs()),
+    __mmHealth = Math.max(0, Number(v.health) || 0),
+    __mmFood = Math.max(1, Number(__mmAutoHealFoodValue()) || 20);
+  if (!Array.isArray(__mmEnemies) || __mmHealth >= Number(v.maxHealth) || !__mmSelf)
+    return null;
+  let __mmBest = null;
+  for (let __mmIndex = 0; __mmIndex < __mmEnemies.length; __mmIndex++) {
+    const __mmEnemy = __mmEnemies[__mmIndex];
+    if (!__mmIsEnemyPlayer(__mmEnemy) || !Array.isArray(__mmEnemy.weapons))
+      continue;
+    const __mmPrimary = Number(__mmEnemy.weapons[0]),
+      __mmWeapon = b.weapons[__mmPrimary],
+      __mmReload = __mmEnemy.reloads && Number(__mmEnemy.reloads[__mmPrimary]);
+    if (
+      !__mmWeapon ||
+      __mmWeapon.projectile != null ||
+      __mmWeapon.shield ||
+      !Number.isFinite(__mmReload) ||
+      __mmReload > 0
+    )
+      continue;
+    // Normal primary pressure is a direct candidate. Bull ownership also
+    // permits the one-tick hat switch used by an insta even before weaponIndex
+    // has caught up in the state packet.
+    const __mmBullReady = !!(
+        (__mmEnemy.skins && __mmEnemy.skins[7]) ||
+        Number(__mmEnemy.skinIndex) === 7 ||
+        Number(__mmEnemy.skinIndex2) === 7
+      ),
+      __mmUsingPrimary = Number(__mmEnemy.weaponIndex) === __mmPrimary;
+    if (!__mmUsingPrimary && !__mmBullReady) continue;
+    const __mmEnemyPosition = __mmServerEntityPosition(__mmEnemy);
+    if (!__mmEnemyPosition) continue;
+    const __mmAngle = Math.atan2(
+        Number(__mmEnemyPosition.y) - Number(__mmSelf.y),
+        Number(__mmEnemyPosition.x) - Number(__mmSelf.x),
+      ),
+      __mmDistance = Math.hypot(
+        Number(__mmEnemyPosition.x) - Number(__mmSelf.x),
+        Number(__mmEnemyPosition.y) - Number(__mmSelf.y),
+      ),
+      __mmReach =
+        (Number(__mmWeapon.range) || 0) +
+        (Number(__mmEnemy.scale) || 35) +
+        (Number(v.scale) || 35) +
+        14,
+      __mmFacing = Number.isFinite(Number(__mmEnemy.dir))
+        ? Number(__mmEnemy.dir)
+        : Number(__mmEnemy.d2),
+      __mmFacingError = Number.isFinite(__mmFacing)
+        ? Math.abs(Math.atan2(Math.sin(__mmFacing - __mmAngle), Math.cos(__mmFacing - __mmAngle)))
+        : 0;
+    if (__mmDistance > __mmReach || __mmFacingError > 0.78) continue;
+    const __mmKnockDistance =
+        (0.3 + Math.max(0, Number(__mmWeapon.knock) || 0)) * __mmTick,
+      __mmSpike = __mmThreatHostileSpikeOnSegment(
+        Number(__mmSelf.x),
+        Number(__mmSelf.y),
+        Number(__mmSelf.x) + Math.cos(__mmAngle) * __mmKnockDistance,
+        Number(__mmSelf.y) + Math.sin(__mmAngle) * __mmKnockDistance,
+      );
+    if (!__mmSpike) continue;
+    const __mmDamage =
+        __mmThreatMeleeDamage(
+          __mmBullReady
+            ? { ...__mmEnemy, skinIndex: 7, skinIndex2: 7 }
+            : __mmEnemy,
+          __mmPrimary,
+        ) + Math.max(0, Number(__mmSpike.damage) || 0),
+      __mmMinimum = Math.max(__mmFood * 1.5, __mmHealth * 0.35);
+    if (__mmDamage + 0.001 < __mmMinimum) continue;
+    const __mmCandidate = {
+      trappedSpikePush: !0,
+      damage: __mmDamage,
+      potentialDamage: __mmDamage,
+      spikeDamage: Math.max(0, Number(__mmSpike.damage) || 0),
+      firstImpactMs: Math.max(16, Math.round(__mmTick * 0.28)),
+      angle: __mmAngle,
+    };
+    if (!__mmBest || __mmCandidate.damage > __mmBest.damage)
+      __mmBest = __mmCandidate;
+  }
+  return __mmBest;
+}
 function __mmCombatThreatSnapshot(__mmForce) {
   const __mmNow = Date.now(),
     __mmHasActiveProjectiles = __mmHasActiveProjectile(),
@@ -47255,6 +47511,7 @@ function __mmTryAntiInstaPreHeal(__mmThreat) {
     __mmCredibleInsta = !!(
       __mmThreat.turretBullMainSync ||
       __mmThreat.bullMainLethal ||
+      __mmThreat.trappedSpikePush ||
       __mmThreat.urgent ||
       (__mmImminentHit &&
         __mmPredictedDamage >= Math.max(__mmFood, __mmHealth * 0.3)) ||
@@ -50487,6 +50744,56 @@ function __mmSmartBestCombination(__mmCandidates, __mmLimit) {
   }
   return __mmSelected;
 }
+function __mmSmartMarkCloseCombatPreplace(__mmCandidates, __mmEnemy, __mmNow) {
+  if (
+    !__mmSmartPreplaceEnabled ||
+    !Array.isArray(__mmCandidates) ||
+    !__mmEnemy ||
+    !v ||
+    !v.alive
+  )
+    return __mmCandidates;
+  const __mmPrediction = __mmSmartEnemyPrediction(__mmEnemy, __mmNow),
+    __mmEnemyScale = Number(__mmEnemy.scale) || 35;
+  for (let __mmIndex = 0; __mmIndex < __mmCandidates.length; __mmIndex++) {
+    const __mmCandidate = __mmCandidates[__mmIndex],
+      __mmData = __mmCandidate && __mmCandidate.data,
+      __mmCombatItem = !!(
+        __mmData &&
+        (__mmData.trap ||
+          __mmData.dmg ||
+          /spike/i.test(String(__mmData.name || "")))
+      );
+    if (!__mmCandidate || !__mmCandidate.valid || !__mmCombatItem) continue;
+    const __mmTouch = __mmEnemyScale + Number(__mmCandidate.scale || 0) + 16,
+      __mmCurrentDistance = Math.hypot(
+        Number(__mmEnemy.x) - Number(__mmCandidate.x),
+        Number(__mmEnemy.y) - Number(__mmCandidate.y),
+      ),
+      __mmFutureDistance = Math.hypot(
+        Number(__mmPrediction.futureX) - Number(__mmCandidate.x),
+        Number(__mmPrediction.futureY) - Number(__mmCandidate.y),
+      ),
+      __mmTrapped = !!__mmAutoSpikeSpamTrapForEnemy(__mmEnemy);
+    if (!__mmTrapped && Math.min(__mmCurrentDistance, __mmFutureDistance) > __mmTouch)
+      continue;
+    // The candidate is legal at the current edge and will touch the opponent
+    // now or on its next predicted position. Tag it for the tick-minus-ping
+    // sender rather than waiting for a later generic placement pass.
+    ((__mmCandidate.preplace = !0),
+      (__mmCandidate.priority = !0),
+      (__mmCandidate.points = Math.max(
+        Number(__mmCandidate.points) || 0,
+        __mmTrapped ? 145 : 118,
+      )),
+      (Array.isArray(__mmCandidate.reasons)
+        ? __mmCandidate.reasons
+        : (__mmCandidate.reasons = [])
+      ).includes("close-combat predictive preplace") ||
+        __mmCandidate.reasons.push("close-combat predictive preplace"));
+  }
+  return __mmCandidates;
+}
 function __mmSmartPlaceBatch(__mmCandidates, __mmReason, __mmForcedLimit) {
   if (!__mmCandidates.length) {
     __mmSmartSetPlacementPreview([], [], __mmReason || "no legal slots");
@@ -50656,9 +50963,23 @@ function __mmSmartTrapReplaceTarget(__mmKnown) {
   return __mmClosest;
 }
 function __mmSmartTrapReplaceMayPlace() {
+  // Trap replacement may preempt optional Instas, but a live survival window
+  // must finish first. This explicit gate is safer than relying on numeric
+  // priority alone because Shield can be holding the exact incoming hit angle.
+  if (
+    [
+      "trapEscape",
+      "antiInsta",
+      "autoHeal",
+      "placementDefense",
+      "spikeSpam",
+      "antiTroll",
+      "shieldDefense",
+    ].includes(__mmActionOwner)
+  )
+    return !1;
   // A final manual break is the main reason to predict this feature. Borrow
-  // that held attack's placement moment, but never insert a trap over a
-  // higher-priority safety/combo action.
+  // that held attack's placement moment without cancelling it.
   return !!(
     __mmActionCanPreempt("trapReplace") ||
     (__mmActionOwner === "manualAttack" &&
@@ -50838,19 +51159,28 @@ function __mmTryPredictSmartTrapReplace(
       Math.hypot(
         __mmCandidate.x - Number(__mmTrap.x),
         __mmCandidate.y - Number(__mmTrap.y),
-      ) > 14 ||
-      !__mmReserveTacticalChannel("placement", "trapReplace") ||
-      !__mmTacticalPlacementKey("trapReplace", __mmCandidate)
+      ) > 14
     )
       continue;
+    if (!__mmActionClaim("trapReplace", "predicted enemy-holding trap replace"))
+      continue;
+    if (
+      !__mmReserveTacticalChannel("placement", "trapReplace") ||
+      !__mmTacticalPlacementKey("trapReplace", __mmCandidate)
+    ) {
+      __mmActionRelease("trapReplace", "pre-place slot unavailable");
+      continue;
+    }
     if (
       !__mmSendPredictedSmartTrapReplace(
         __mmTrapItem,
         __mmCandidate,
         { item: __mmWeapon, weapon: !0 },
       )
-    )
+    ) {
+      __mmActionRelease("trapReplace", "pre-place packet rejected");
       return !1;
+    }
     ((__mmSmartTrapReplacePrediction = {
         key: String(__mmTrap.sid),
         known: __mmKnown,
@@ -50885,7 +51215,8 @@ function __mmTryPredictSmartTrapReplace(
         legal: 1,
         scored: 1,
         itemSummary: "Pit Trap",
-      }));
+      }),
+      __mmActionRelease("trapReplace", "predicted replacement sent"));
     return !0;
   }
   return !1;
@@ -50937,11 +51268,15 @@ function __mmTrySmartTrapReplace(__mmKnown, __mmEnemy, __mmNow) {
   ((__mmCandidate.points = 100),
     (__mmCandidate.priority = !0),
     __mmCandidate.reasons.push("exact trap replace"));
+  if (!__mmActionClaim("trapReplace", "exact enemy-holding trap replace"))
+    return !1;
   if (
     !__mmReserveTacticalChannel("placement", "trapReplace") ||
     !__mmTacticalPlacementKey("trapReplace", __mmCandidate)
-  )
+  ) {
+    __mmActionRelease("trapReplace", "replacement slot unavailable");
     return !1;
+  }
   const __mmTool = __mmSelectedTool();
   if (
     !__mmSendAutomaticPlacement(
@@ -50951,8 +51286,10 @@ function __mmTrySmartTrapReplace(__mmKnown, __mmEnemy, __mmNow) {
       !1,
       __mmCandidate,
     )
-  )
+  ) {
+    __mmActionRelease("trapReplace", "replacement packet rejected");
     return !1;
+  }
   (__mmAutoSpikeSpamReservations.push({
     item: __mmTrapItem,
     x: __mmCandidate.x,
@@ -50976,7 +51313,8 @@ function __mmTrySmartTrapReplace(__mmKnown, __mmEnemy, __mmNow) {
       legal: 1,
       scored: 1,
       itemSummary: "Pit Trap",
-    }));
+    }),
+    __mmActionRelease("trapReplace", "exact replacement sent"));
   return !0;
 }
 function __mmSmartObserveRemovedObjects(__mmNow) {
@@ -51057,6 +51395,19 @@ function __mmSmartObserveRemovedObjects(__mmNow) {
     }
   }
   return !1;
+}
+function __mmUpdatePriorityTrapReplacement() {
+  if (
+    !__mmSmartAutoReplaceEnabled ||
+    !v ||
+    !v.alive ||
+    !__mmSmartTrapReplaceMayPlace()
+  )
+    return !1;
+  // This is intentionally only the exact captured-enemy replacement path.
+  // Generic placement stays in its normal stage, while a removed/predicted pit
+  // is checked before optional Instas on every authoritative combat tick.
+  return __mmSmartObserveRemovedObjects(Date.now());
 }
 function __mmSmartPlaceAutoMillRow(__mmCandidates, __mmMill) {
   if (
@@ -52442,6 +52793,7 @@ function __mmUpdateSmartPlacement() {
     if (__mmAntiBoost.length) break;
   }
   if (__mmAntiBoost.length) {
+    __mmSmartMarkCloseCombatPreplace(__mmAntiBoost, __mmEnemies[0], __mmNow);
     if (__mmCanSend)
       __mmSmartPlaceBatch(__mmAntiBoost, "anti-boost fallback");
     else {
@@ -52470,6 +52822,7 @@ function __mmUpdateSmartPlacement() {
     ? __mmSmartBoostPadSpikeRingCandidates(__mmEnemies[0])
     : [];
   if (__mmBoostPadRing.length) {
+    __mmSmartMarkCloseCombatPreplace(__mmBoostPadRing, __mmEnemies[0], __mmNow);
     const __mmRingLimit = Math.min(
       4,
       __mmMaxBuildCount(__mmBoostPadRing[0].item),
@@ -52650,6 +53003,11 @@ function __mmUpdateSmartPlacement() {
         ));
       return;
     }
+    __mmSmartMarkCloseCombatPreplace(
+      __mmKittyPressure,
+      __mmTrappedPlacementTarget,
+      __mmNow,
+    );
     const __mmKittyLimit = Math.max(
       1,
       Math.min(4, __mmMaxBuildCount(__mmSpike)),
@@ -52708,6 +53066,12 @@ function __mmUpdateSmartPlacement() {
     __mmSmartApplyCorePressureFallback(
       __mmCandidates,
       __mmEnemies,
+      __mmNow,
+    );
+  __mmEnemies.length &&
+    __mmSmartMarkCloseCombatPreplace(
+      __mmCandidates,
+      __mmEnemies[0],
       __mmNow,
     );
   const __mmQuadTrapCandidates = __mmTrappedPlacementTarget
@@ -54561,11 +54925,10 @@ function __mmTrySmartHammerRetrap(__mmLocalTrap) {
     !v.alive ||
     !__mmLocalTrap ||
     !Array.isArray(v.weapons) ||
-    (Number(v.weapons[0]) !== __mmPolearmWeapon &&
-      Number(v.weapons[0]) !== __mmKatana) ||
     !v.weapons.includes(__mmGreatHammer) ||
     !__mmWeaponReady(__mmGreatHammer) ||
-    Date.now() - __mmSmartHammerRetrapLastAt < __mmServerTickMs()
+    Date.now() - __mmSmartHammerRetrapLastAt <
+      Math.max(32, __mmServerTickMs() * 0.45)
   )
     return !1;
   const __mmEnemy = __mmNearestEnemy(),
@@ -55296,6 +55659,11 @@ function __mmBreakTrap() {
   const __mmTrap = __mmCurrentNearbyTrap();
   const __mmTrapTarget = __mmTrapEscapeBreakTarget(__mmTrap);
   if (__mmTrapTarget == null) return void __mmStopTrapAttack();
+  // If an enemy is held in a nearby trap we own, turn their predicted
+  // one-Hammer break edge into an immediate pre-placement transaction before
+  // returning to this local pit. The timer in this helper releases and invokes
+  // this same breaker on the next server phase, so it never abandons escape.
+  if (__mmTrySmartHammerRetrap(__mmTrapTarget)) return;
   // When an opponent replaces this locking pit in rapid succession, claim
   // the just-opened slot instead of continuing the rear-spike build loop.
   // The helper only proceeds for a reachable, one-hit Great Hammer break.
