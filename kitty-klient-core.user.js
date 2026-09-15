@@ -2,7 +2,7 @@
 // @name         kitty klient
 // @author       Coder Guy
 // @credits       random4ik — bot script
-// @version      7.0.15
+// @version      7.0.16
 // @icon         https://cdn.discordapp.com/icons/1540876076224356437/ac27c0ce87c4c46b407ebca78e150aeb.webp?size=2048
 // @description  kitty klient — a MooMoo.io client with adaptive zoom, fast autoheal, gear automation, combat tools, predictive placement, visual markers, CC0 background music, manual quick builds, and a fully rebindable keyboard/mouse controls HUD.
 // @match        *://moomoo.io/*
@@ -267,7 +267,7 @@
     const AUTO_PUSH_FINISHER_MIGRATION_KEY = "kitty-klient-auto-push-finisher-v1";
     const ASSASSIN_RANGE_AUTO_MIGRATION_KEY = "kitty-klient-assassin-range-auto-v1";
     const TAB_SYNC_BRIDGE_KEY = "kitty-klient-tab-sync-bridge-v1";
-const KITTY_KLIENT_VERSION = "7.0.15";
+const KITTY_KLIENT_VERSION = "7.0.16";
     const KITTY_SHARED_STORAGE_APPLIED_EVENT = "KittyMooMooSharedStorageApplied";
     // FRVR's v1.8 client changed the game module and now owns its own Altcha
     // verification flow. The legacy runtime patch relies on exact bundle
@@ -15033,6 +15033,7 @@ O.send = function () {
   __mmUpgradePacket && __mmPublishCompanionUpgrade(arguments[1]);
   ((__mmMetricPackets += 1),
     (__mmMetricPacketWindow += 1),
+    __mmObserveOutgoingMeleeAttack(arguments),
     __mmObserveOutgoingBreakableAttack(arguments),
     __mmObserveOutgoingProjectileAttack(arguments),
     __mmObserveOutgoingWeaponXpAttack(arguments),
@@ -25066,6 +25067,40 @@ function __mmObserveProjectileCooldowns() {
       __mmTrackPlayerToolCooldown(__mmPlayer.sid, __mmWeapon, "projectile");
   }
 }
+function __mmObserveOutgoingMeleeAttack(__mmArguments) {
+  if (
+    !__mmArguments ||
+    __mmArguments[0] !== "F" ||
+    Number(__mmArguments[1]) !== 1 ||
+    !v ||
+    !v.alive ||
+    !b ||
+    !b.weapons
+  )
+    return;
+  let __mmWeapon = null;
+  if (Date.now() - __mmLastSelectionAt <= 180) {
+    if (!__mmLastSelectionWasWeapon) return;
+    __mmWeapon = Number(__mmLastSelectionItem);
+  } else if (Number(v.buildIndex) < 0) __mmWeapon = Number(v.weaponIndex);
+  const __mmData = b.weapons[__mmWeapon],
+    __mmDamage = Number(__mmData && (__mmData.dmg ?? __mmData.damage));
+  if (
+    !Number.isInteger(__mmWeapon) ||
+    !v.weapons.includes(__mmWeapon) ||
+    !__mmData ||
+    __mmData.projectile != null ||
+    __mmData.shield ||
+    !Number.isFinite(__mmDamage) ||
+    __mmDamage <= 0 ||
+    __mmWeaponIsReloading(__mmWeapon)
+  )
+    return;
+  // Manual air swings do not emit an object hit or projectile, so they used
+  // to leave no local cooldown record. Register the packet immediately: the
+  // idle-hand policy can then keep primary selected until the swing reloads.
+  __mmTrackPlayerToolCooldown(v.sid, __mmWeapon, "outgoing-melee");
+}
 function __mmObserveOutgoingBreakableAttack(__mmArguments) {
   if (
     !__mmArguments ||
@@ -34526,8 +34561,26 @@ function __mmPreferredIdleWeapon() {
     ? __mmGreatHammer
     : (v.weapons[0] != null ? Number(v.weapons[0]) : null);
 }
+function __mmPrimaryReloadBlocksIdleHammer() {
+  if (!v || !v.alive || !Array.isArray(v.weapons)) return !1;
+  const __mmPrimary = Number(v.weapons[0]),
+    __mmIdleWeapon = __mmPreferredIdleWeapon();
+  // Great Hammer is Kitty's idle hand, but it must not interrupt a primary
+  // swing. Keeping the primary selected through its cooldown prevents the
+  // visible main -> Hammer mid-swing swap and preserves its reload phase.
+  return Number.isInteger(__mmPrimary) &&
+    __mmIdleWeapon != null &&
+    Number(__mmIdleWeapon) !== __mmPrimary &&
+    !__mmWeaponReady(__mmPrimary);
+}
+function __mmIdleWeaponNow() {
+  if (!v || !v.alive || !Array.isArray(v.weapons)) return null;
+  return __mmPrimaryReloadBlocksIdleHammer()
+    ? Number(v.weapons[0])
+    : __mmPreferredIdleWeapon();
+}
 function __mmRestoreWeapon(__mmIgnoredWeapon) {
-  const __mmIdleWeapon = __mmPreferredIdleWeapon();
+  const __mmIdleWeapon = __mmIdleWeaponNow();
   __mmIdleWeapon != null && je(__mmIdleWeapon, !0);
 }
 function __mmUpdateIdleHeldWeapon() {
@@ -34544,14 +34597,15 @@ function __mmUpdateIdleHeldWeapon() {
     __mmBoostInsta.isActive()
   )
     return;
-  const __mmIdleWeapon = __mmPreferredIdleWeapon();
+  const __mmIdleWeapon = __mmIdleWeaponNow();
   if (
     __mmIdleWeapon == null ||
     (Number(v.buildIndex) < 0 && Number(v.weaponIndex) === __mmIdleWeapon)
   )
     return;
   // A placeable selection is only an action input. Once no action owns it,
-  // return to the policy hand instead of retaining the previous item.
+  // return to the policy hand. If primary is still reloading, that policy
+  // intentionally keeps it selected until the cooldown completes.
   __mmClearManualHotbarTool();
   je(__mmIdleWeapon, !0);
 }
