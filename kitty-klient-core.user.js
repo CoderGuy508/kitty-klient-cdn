@@ -2,7 +2,7 @@
 // @name         kitty klient
 // @author       Coder Guy
 // @credits       random4ik — bot script
-// @version      7.0.14
+// @version      7.0.15
 // @icon         https://cdn.discordapp.com/icons/1540876076224356437/ac27c0ce87c4c46b407ebca78e150aeb.webp?size=2048
 // @description  kitty klient — a MooMoo.io client with adaptive zoom, fast autoheal, gear automation, combat tools, predictive placement, visual markers, CC0 background music, manual quick builds, and a fully rebindable keyboard/mouse controls HUD.
 // @match        *://moomoo.io/*
@@ -267,7 +267,7 @@
     const AUTO_PUSH_FINISHER_MIGRATION_KEY = "kitty-klient-auto-push-finisher-v1";
     const ASSASSIN_RANGE_AUTO_MIGRATION_KEY = "kitty-klient-assassin-range-auto-v1";
     const TAB_SYNC_BRIDGE_KEY = "kitty-klient-tab-sync-bridge-v1";
-const KITTY_KLIENT_VERSION = "7.0.14";
+const KITTY_KLIENT_VERSION = "7.0.15";
     const KITTY_SHARED_STORAGE_APPLIED_EVENT = "KittyMooMooSharedStorageApplied";
     // FRVR's v1.8 client changed the game module and now owns its own Altcha
     // verification flow. The legacy runtime patch relies on exact bundle
@@ -11902,6 +11902,10 @@ let __mmAntiCollisionTimer = 0,
   __mmAntiCollisionBlocked = !1,
   __mmAntiCollisionBlockedObject = null,
   __mmAntiCollisionBlockedKey = null,
+  // Native movement clears Kt as soon as SafeWalk sends its stop packet.
+  // Keep the physical held direction separately so post-tick safety can keep
+  // evaluating the same path until the player releases or turns.
+  __mmAntiCollisionHeldDirection = null,
   __mmAntiCollisionLastPopupKey = null,
   __mmAntiCollisionLastPopupAt = 0,
   __mmAntiCollisionRightClickTimer = 0;
@@ -38470,6 +38474,19 @@ function __mmAntiCollisionStop(__mmThreat) {
     (__mmAntiCollisionShowStop(__mmThreat),
     __mmAntiCollisionQuickRightClick(__mmThreat));
 }
+function __mmAntiCollisionHeldMovementDirection() {
+  // ul() is the current physical key direction on the key event; Kt is the
+  // native commanded direction for later movement frames. Glotus SafeWalk's
+  // postTick has both through ModuleHandler.move_dir, while Kitty needs this
+  // small bridge between the two game paths.
+  const __mmInputDirection = typeof ul === "function" ? ul() : null;
+  if (Number.isFinite(Number(__mmInputDirection)))
+    return ((__mmAntiCollisionHeldDirection = Number(__mmInputDirection)),
+    __mmAntiCollisionHeldDirection);
+  if (typeof Kt === "number" && Number.isFinite(Kt))
+    return ((__mmAntiCollisionHeldDirection = Kt), __mmAntiCollisionHeldDirection);
+  return __mmAntiCollisionHeldDirection;
+}
 function __mmUpdateAntiCollision(__mmStartingMove = !1) {
   if (__mmInstaTestingModeEnabled) return;
   __mmUpdatePassiveSpikeMotion();
@@ -38481,7 +38498,7 @@ function __mmUpdateAntiCollision(__mmStartingMove = !1) {
     __mmAntiCollisionBlocked && __mmAntiCollisionReleaseBlock(!1);
     return;
   }
-  const __mmDirection = typeof ul === "function" ? ul() : null;
+  const __mmDirection = __mmAntiCollisionHeldMovementDirection();
   if (!Number.isFinite(Number(__mmDirection))) return;
   if (__mmAntiCollisionBlocked) {
     if (!__mmAntiCollisionBlockedPathStillThreatens(__mmDirection))
@@ -38505,19 +38522,32 @@ function __mmAntiCollisionMovementPressed(__mmKey) {
 }
 function __mmAntiCollisionMovementReleased() {
   const __mmDirection = typeof ul === "function" ? ul() : null;
-  __mmDirection == null
-    ? __mmAntiCollisionReleaseBlock(!1)
-    : __mmUpdateAntiCollision();
+  if (Number.isFinite(Number(__mmDirection))) {
+    __mmAntiCollisionHeldDirection = Number(__mmDirection);
+    __mmUpdateAntiCollision();
+  } else {
+    __mmAntiCollisionHeldDirection = null;
+    __mmAntiCollisionReleaseBlock(!1);
+  }
   Tt();
 }
 function __mmStartAntiCollision() {
   (__mmUpdatePassiveSpikeMotion(),
     __mmEnsureOperationPipeline(),
     __mmUpdateAntiCollision());
+  // Glotus calls SafeWalk.postTick continuously. The earlier Kitty port only
+  // ran from the key event and pipeline, so a long held walk skipped every
+  // stop check after the initial 45-unit probe.
+  __mmAntiCollisionTimer ||
+    (__mmAntiCollisionTimer = setInterval(
+      __mmUpdateAntiCollision,
+      Math.max(8, Math.min(16, __mmFastCheckMs())),
+    ));
 }
 function __mmStopAntiCollision() {
   (__mmAntiCollisionTimer && clearInterval(__mmAntiCollisionTimer),
     (__mmAntiCollisionTimer = 0),
+    (__mmAntiCollisionHeldDirection = null),
     (__mmAntiCollisionPopups.length = 0),
     __mmAntiCollisionReleaseBlock(!0));
 }
