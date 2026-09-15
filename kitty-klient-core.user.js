@@ -2,7 +2,7 @@
 // @name         kitty klient
 // @author       Coder Guy
 // @credits       random4ik — bot script
-// @version      7.0.19
+// @version      7.0.20
 // @icon         https://cdn.discordapp.com/icons/1540876076224356437/ac27c0ce87c4c46b407ebca78e150aeb.webp?size=2048
 // @description  kitty klient — a MooMoo.io client with adaptive zoom, fast autoheal, gear automation, combat tools, predictive placement, visual markers, CC0 background music, manual quick builds, and a fully rebindable keyboard/mouse controls HUD.
 // @match        *://moomoo.io/*
@@ -267,7 +267,7 @@
     const AUTO_PUSH_FINISHER_MIGRATION_KEY = "kitty-klient-auto-push-finisher-v1";
     const ASSASSIN_RANGE_AUTO_MIGRATION_KEY = "kitty-klient-assassin-range-auto-v1";
     const TAB_SYNC_BRIDGE_KEY = "kitty-klient-tab-sync-bridge-v1";
-const KITTY_KLIENT_VERSION = "7.0.19";
+const KITTY_KLIENT_VERSION = "7.0.20";
     const KITTY_SHARED_STORAGE_APPLIED_EVENT = "KittyMooMooSharedStorageApplied";
     // FRVR's v1.8 client changed the game module and now owns its own Altcha
     // verification flow. The legacy runtime patch relies on exact bundle
@@ -47423,16 +47423,56 @@ function __mmEnemyLoadedBullMain(__mmEnemy) {
     __mmReload > 0
   )
     return null;
-  const __mmDistance = Math.hypot(
-      Number(__mmEnemy.x) - Number(v.x),
-      Number(__mmEnemy.y) - Number(v.y),
+  const __mmEnemyPosition = __mmServerEntityPosition(__mmEnemy) || __mmEnemy,
+    __mmSelfPosition = __mmServerEntityPosition(v) || v,
+    __mmEnemyVelocity = __mmThreatEntityVelocity(__mmEnemy),
+    __mmSelfVelocity = __mmThreatEntityVelocity(v),
+    __mmTick = Math.max(1, __mmServerTickMs()),
+    __mmPing = Number(window.pingTime),
+    // A Bull packet can land after the next game edge plus its one-way
+    // network transit. Cap the look-ahead so an old interpolation sample
+    // cannot claim a distant runner as a current melee threat.
+    __mmLeadMs = Math.min(
+      300,
+      Math.max(
+        __mmTick,
+        __mmTick + (Number.isFinite(__mmPing) ? Math.max(0, __mmPing / 2) : 0),
+      ),
     ),
+    __mmRelativeX = Number(__mmEnemyPosition.x) - Number(__mmSelfPosition.x),
+    __mmRelativeY = Number(__mmEnemyPosition.y) - Number(__mmSelfPosition.y),
+    __mmRelativeVelocityX = __mmEnemyVelocity.x - __mmSelfVelocity.x,
+    __mmRelativeVelocityY = __mmEnemyVelocity.y - __mmSelfVelocity.y,
+    __mmRelativeSpeedSquared =
+      __mmRelativeVelocityX * __mmRelativeVelocityX +
+      __mmRelativeVelocityY * __mmRelativeVelocityY,
+    __mmClosestAt = __mmRelativeSpeedSquared > 1e-6
+      ? Math.max(
+          0,
+          Math.min(
+            __mmLeadMs,
+            -(
+              __mmRelativeX * __mmRelativeVelocityX +
+              __mmRelativeY * __mmRelativeVelocityY
+            ) / __mmRelativeSpeedSquared,
+          ),
+        )
+      : 0,
+    __mmClosestX = __mmRelativeX + __mmRelativeVelocityX * __mmClosestAt,
+    __mmClosestY = __mmRelativeY + __mmRelativeVelocityY * __mmClosestAt,
+    __mmDistance = Math.hypot(__mmRelativeX, __mmRelativeY),
+    __mmPredictedDistance = Math.hypot(__mmClosestX, __mmClosestY),
     __mmReach =
       (Number(__mmWeapon.range) || 0) +
       (Number(v.scale) || 35) +
       (Number(__mmEnemy.scale) || 35) +
       12;
-  if (!Number.isFinite(__mmDistance) || __mmDistance > __mmReach) return null;
+  if (
+    !Number.isFinite(__mmDistance) ||
+    !Number.isFinite(__mmPredictedDistance) ||
+    Math.min(__mmDistance, __mmPredictedDistance) > __mmReach
+  )
+    return null;
   // Resolve the hit as Bull even when the opponent is currently in Soldier or
   // has Bull announced for the next packet edge.
   const __mmBullDamage = __mmThreatMeleeDamage(
@@ -47443,13 +47483,32 @@ function __mmEnemyLoadedBullMain(__mmEnemy) {
     enemy: __mmEnemy,
     weapon: __mmPrimary,
     distance: __mmDistance,
+    predictedDistance: __mmPredictedDistance,
     reach: __mmReach,
+    impactMs: __mmClosestAt,
     damage: Math.max(0, Number(__mmBullDamage) || 0),
     angle: Math.atan2(Number(__mmEnemy.y) - Number(v.y), Number(__mmEnemy.x) - Number(v.x)),
   };
 }
 function __mmKittyAntiBullInRange(__mmEnemy) {
   return !!__mmEnemyLoadedBullMain(__mmEnemy);
+}
+function __mmKittyAntiBullThreat() {
+  const __mmEnemies = __mmLiveStateFresh() ? __mmLiveState.enemies : E;
+  if (!Array.isArray(__mmEnemies)) return null;
+  let __mmBest = null;
+  for (let __mmIndex = 0; __mmIndex < __mmEnemies.length; __mmIndex++) {
+    const __mmCandidate = __mmEnemyLoadedBullMain(__mmEnemies[__mmIndex]);
+    if (!__mmCandidate) continue;
+    if (
+      !__mmBest ||
+      Number(__mmCandidate.impactMs) < Number(__mmBest.impactMs) ||
+      (Number(__mmCandidate.impactMs) === Number(__mmBest.impactMs) &&
+        Number(__mmCandidate.predictedDistance) < Number(__mmBest.predictedDistance))
+    )
+      __mmBest = __mmCandidate;
+  }
+  return __mmBest;
 }
 function __mmAutoBarbarianMeleeThreat() {
   if (
@@ -47531,8 +47590,9 @@ function __mmUpdateSpikeGearCounter() {
     __mmTrapAttackActive
   )
     return void __mmResetSpikeGearCounter(!0);
-  const __mmEnemy = __mmNearestEnemy();
-  if (!__mmEnemy || !__mmKittyAntiBullInRange(__mmEnemy))
+  const __mmBullThreat = __mmKittyAntiBullThreat(),
+    __mmEnemy = __mmBullThreat && __mmBullThreat.enemy;
+  if (!__mmEnemy)
     return void __mmResetSpikeGearCounter(!0);
   const __mmTail = __mmKittyAntiBullTail();
   if (
