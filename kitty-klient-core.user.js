@@ -2,7 +2,7 @@
 // @name         kitty klient
 // @author       Coder Guy
 // @credits       random4ik — bot script
-// @version      7.0.16
+// @version      7.0.17
 // @icon         https://cdn.discordapp.com/icons/1540876076224356437/ac27c0ce87c4c46b407ebca78e150aeb.webp?size=2048
 // @description  kitty klient — a MooMoo.io client with adaptive zoom, fast autoheal, gear automation, combat tools, predictive placement, visual markers, CC0 background music, manual quick builds, and a fully rebindable keyboard/mouse controls HUD.
 // @match        *://moomoo.io/*
@@ -267,7 +267,7 @@
     const AUTO_PUSH_FINISHER_MIGRATION_KEY = "kitty-klient-auto-push-finisher-v1";
     const ASSASSIN_RANGE_AUTO_MIGRATION_KEY = "kitty-klient-assassin-range-auto-v1";
     const TAB_SYNC_BRIDGE_KEY = "kitty-klient-tab-sync-bridge-v1";
-const KITTY_KLIENT_VERSION = "7.0.16";
+const KITTY_KLIENT_VERSION = "7.0.17";
     const KITTY_SHARED_STORAGE_APPLIED_EVENT = "KittyMooMooSharedStorageApplied";
     // FRVR's v1.8 client changed the game module and now owns its own Altcha
     // verification flow. The legacy runtime patch relies on exact bundle
@@ -756,13 +756,14 @@ const KITTY_KLIENT_VERSION = "7.0.16";
         antiRetrapPush: true,
         antiSpikePushCounter: true,
         teammateTrapRescue: true,
-        trapKnockbackStrike: true,
+        trapKnockbackStrike: false,
         turretSteal: true,
         spikeGearCounter: true,
         sevenShameInsta: true,
         dashMovement: true,
         musketRecharge: true,
         autoPurchase: false,
+        autoBarbarian: false,
         matThief: false,
         multiTargetBreak: true,
         weaponGrind: false,
@@ -4465,6 +4466,7 @@ const KITTY_KLIENT_VERSION = "7.0.16";
         addHudToggle(automationSurvival, "movementGear", "Movement gear", "Use speed gear and an adaptive tail while moving");
         addHudToggle(automationSurvival, "musketRecharge", "Glotus weapon reload", "Match Glotus UseFastest: select the faster hand while it reloads, then the other hand, and return to the faster hand when both are ready. Native 1/2 choices are temporary while this is on");
         addHudToggle(automationSurvival, "autoPurchase", "Auto purchase", "Buy the configured progression when the required resources are available, then Halo as the final purchase");
+        addHudToggle(automationSurvival, "autoBarbarian", "Auto Barbarian", "On a confirmed nonlethal enemy main swing, use Barbarian Armor for the retaliation tick. It yields to projectile, sync, Musket, trap, and lethal threats.");
 
         const automationDefense = addHudSection(automationPage, "Defense & escape");
         addHudToggle(automationDefense, "trapEscape", "Trap escape", "Break the locking trap and build a safe exit behind you. During a rapid re-trap loop, a reachable one-hit pit is Hammer-broken and replaced with your own Pit Trap instead of adding more rear spikes.");
@@ -11319,13 +11321,14 @@ let __mmSoldierRange = 400,
   __mmAntiRetrapPushEnabled = !0,
   __mmAntiSpikePushCounterEnabled = !0,
   __mmTeammateTrapRescueEnabled = !0,
-  __mmTrapKnockbackStrikeEnabled = !0,
+  __mmTrapKnockbackStrikeEnabled = !1,
   __mmTurretStealEnabled = !0,
   __mmSpikeGearCounterEnabled = !0,
   __mmSevenShameInstaEnabled = !0,
   __mmDashMovementEnabled = !0,
   __mmMusketRechargeEnabled = !0,
   __mmAutoPurchaseEnabled = !1,
+  __mmAutoBarbarianEnabled = !1,
   __mmMatThiefEnabled = !1,
   __mmMultiTargetBreakEnabled = !0,
   __mmMobStealEnabled = !1,
@@ -11567,6 +11570,7 @@ const __mmShieldWeapon = 11,
   __mmFlipperHat = 31,
   __mmFlipperHatPrice = 2500,
   __mmGreatHammer = 10,
+  __mmBarbarianArmor = 26,
   __mmBow = 9,
   __mmKatana = 4,
   __mmCrossbow = 12,
@@ -11629,6 +11633,7 @@ const __mmAutoPurchaseEntries = Object.freeze({
   emp: Object.freeze({ id: 22, tail: !1, price: 6e3 }),
   turret: Object.freeze({ id: 53, tail: !1, price: 1e4 }),
   tank: Object.freeze({ id: 40, tail: !1, price: 15e3 }),
+  barbarian: Object.freeze({ id: 26, tail: !1, price: 8e3 }),
   spikeGear: Object.freeze({ id: 11, tail: !1, price: 1e4 }),
   shadow: Object.freeze({ id: 19, tail: !0, price: 15e3 }),
   angel: Object.freeze({ id: 13, tail: !0, price: 15e3 }),
@@ -14586,6 +14591,7 @@ function __mmRunServerTacticalTick() {
         __mmUpdateAutoTrapInsta(),
         __mmUpdateAntiBoostInsta(),
         __mmUpdateSevenShameInsta(),
+        __mmUpdateAutoBarbarian(),
         __mmUpdateSpikeGearCounter(),
         __mmUpdateBushMode(),
         __mmUpdateAutoInsta());
@@ -16189,11 +16195,14 @@ const __mmInsta = {
     this.redDragonMusketRestoreTimer = 0;
   },
   reverseTurretPolearm(__mmPrimary, __mmSecondary, __mmTarget) {
+    const __mmPrimaryData = this.weaponData(__mmPrimary);
     return !!(
       this.profile === "reverse" &&
       __mmTarget &&
-      Number(__mmPrimary) === Number(__mmPolearmWeapon) &&
-      Number(__mmSecondary) === Number(__mmGreatHammer)
+      Number(__mmSecondary) === Number(__mmGreatHammer) &&
+      __mmPrimaryData &&
+      __mmPrimaryData.projectile == null &&
+      !__mmPrimaryData.shield
     );
   },
   profileStep(__mmTarget, __mmWeapon) {
@@ -31191,6 +31200,7 @@ function __mmAutoPurchaseQueue() {
     __mmEntries.shadow,
     __mmEntries.angel,
     __mmEntries.blood,
+    __mmEntries.barbarian,
     __mmEntries.halo,
   ];
 }
@@ -31567,6 +31577,7 @@ function __mmHudState() {
     dashMovement: __mmDashMovementEnabled,
     musketRecharge: __mmMusketRechargeEnabled,
     autoPurchase: __mmAutoPurchaseEnabled,
+    autoBarbarian: __mmAutoBarbarianEnabled,
     matThief: __mmMatThiefEnabled,
     multiTargetBreak: __mmMultiTargetBreakEnabled,
     weaponGrind: __mmWeaponGrindEnabled,
@@ -31728,7 +31739,8 @@ function __mmHudState() {
     }),
   };
 }
-let __mmHudSettingsApplyDepth = 0;
+let __mmHudSettingsApplyDepth = 0,
+  __mmTrapKnockbackDefaultMigrated = !1;
 function __mmPublishHudState() {
   if (__mmHudSettingsApplyDepth > 0) { __mmHudPublishPending = !0; return; }
   __mmHudPublishPending = !0;
@@ -32055,6 +32067,7 @@ function __mmSetHudToggle(__mmKey, __mmValue) {
   else if (__mmKey === "autoPurchase")
     ((__mmAutoPurchaseEnabled = __mmEnabled),
       __mmEnabled ? (__mmStartAutoPurchase(), __mmUpdateAutoPurchase()) : __mmStopAutoPurchase());
+  else if (__mmKey === "autoBarbarian") __mmAutoBarbarianEnabled = __mmEnabled;
   else if (__mmKey === "matThief")
     ((__mmMatThiefEnabled = __mmEnabled),
       __mmEnabled ? (__mmStartMatThief(), __mmUpdateMatThief()) : __mmStopMatThief());
@@ -32604,6 +32617,16 @@ function __mmSetHudValue(__mmKey, __mmValue) {
 }
 function __mmApplyHudSettings(__mmSettings) {
   if (!__mmSettings || typeof __mmSettings !== "object") return;
+  // v7.0.17 changes this optional attack from opt-out to opt-in. Convert an
+  // existing saved ON value once, then publish the OFF state back to the HUD;
+  // users can still deliberately enable it afterward.
+  if (!__mmTrapKnockbackDefaultMigrated) {
+    (__mmTrapKnockbackDefaultMigrated = !0,
+      (__mmSettings = {
+        ...__mmSettings,
+        trapKnockbackStrike: !1,
+      }));
+  }
   const __mmKeys = [
     "autoHeal",
     "soldierAuto",
@@ -32632,6 +32655,7 @@ function __mmApplyHudSettings(__mmSettings) {
     "dashMovement",
     "musketRecharge",
     "autoPurchase",
+    "autoBarbarian",
     "matThief",
     "multiTargetBreak",
     "weaponGrind",
@@ -42094,12 +42118,18 @@ const __mmTankPredictInsta = {
           hat: __mmHat, lastTankAt: 0, lastSeenAt: __mmNow,
           intervals: [], tankDurations: [], nextTankAt: 0,
           firedForAt: 0, retryAfter: 0, position: null, velocity: null,
-          velocityAt: 0, reversalAt: 0,
+          velocityAt: 0, reversalAt: 0, nextHat: Number(__mmEnemy.skinIndex2),
+          announcedTankAt: Number(__mmEnemy.skinIndex2) === 40 ? __mmNow : 0,
         };
         this.observeMotion(__mmRecord, __mmEnemy, __mmNow);
         continue;
       }
       this.observeMotion(__mmRecord, __mmEnemy, __mmNow);
+      const __mmNextHat = Number(__mmEnemy.skinIndex2);
+      if (__mmNextHat !== Number(__mmRecord.nextHat)) {
+        (__mmRecord.nextHat = __mmNextHat,
+          (__mmRecord.announcedTankAt = __mmNextHat === 40 ? __mmNow : 0));
+      }
       if (__mmRecord.hat !== 40 && __mmHat === 40) {
         __mmRecord.lastTankAt && this.push(__mmRecord.intervals, __mmNow - __mmRecord.lastTankAt);
         __mmRecord.lastTankAt = __mmNow;
@@ -42126,8 +42156,14 @@ const __mmTankPredictInsta = {
       __mmTankBreakContext = !!(__mmTrap && Number(__mmEnemy.weaponIndex) === __mmGreatHammer),
       __mmCadenceAt = this.stable(__mmRecord) ? Number(__mmRecord.nextTankAt) : 0,
       __mmPacketLead = this.packetLeadMs(),
+      // skinIndex2 is an announced server edge. Anchor it once, rather than
+      // moving the predicted Tank window forward on every render update.
       __mmExpectedAt = __mmNextHatTank
-        ? __mmNow + Math.max(4, __mmServerTickMs() - __mmPacketLead)
+        ? Math.max(
+            __mmNow + 4,
+            Number(__mmRecord.announcedTankAt || __mmNow) +
+              Math.max(4, __mmServerTickMs() - __mmPacketLead),
+          )
         : __mmTankBreakContext && __mmCadenceAt > __mmNow
           ? __mmCadenceAt - __mmPacketLead
           : 0;
@@ -45210,8 +45246,12 @@ function __mmAutoSpikeSpamTrapForEnemy(
       __mmPosition.x - __mmTrap.x,
       __mmPosition.y - __mmTrap.y,
     );
+    // The render/server trap event often arrives with the player one edge
+    // frame outside the old 47px center test. Use the same three-point
+    // collision proof as Auto Push so a confirmed catch immediately changes
+    // the placement branch from more pits to pressure spikes.
     if (
-      __mmServerTrapContact(__mmEnemy, __mmTrap) &&
+      __mmAutoPushTrapContact(__mmEnemy, __mmTrap) &&
       __mmDistance < __mmClosestDistance
     ) {
       ((__mmClosest = __mmTrap), (__mmClosestDistance = __mmDistance));
@@ -47391,6 +47431,72 @@ function __mmEnemyLoadedBullMain(__mmEnemy) {
 }
 function __mmKittyAntiBullInRange(__mmEnemy) {
   return !!__mmEnemyLoadedBullMain(__mmEnemy);
+}
+function __mmAutoBarbarianMeleeThreat() {
+  if (
+    !__mmAutoBarbarianEnabled ||
+    !v ||
+    !v.alive ||
+    !v.skins ||
+    !v.skins[__mmBarbarianArmor] ||
+    __mmIsTrapped() ||
+    __mmInsta.isActive() ||
+    __mmBoostInsta.isActive() ||
+    __mmTrapAttackActive ||
+    __mmInstaSyncPending ||
+    __mmInstaSyncFiring ||
+    __mmCombatHatLockActive()
+  )
+    return null;
+  const __mmThreat = __mmCombatThreatSnapshot(!0);
+  // Barbarian's retaliation is useful against one clean main swing. Never
+  // trade Soldier or Shield for a projectile, a synced burst, or a lethal
+  // packet stack that needs the survival path instead.
+  if (
+    __mmThreat.lethal ||
+    __mmThreat.urgent ||
+    Number(__mmThreat.projectileDamage) > 0 ||
+    (Array.isArray(__mmThreat.entries) &&
+      __mmThreat.entries.some(function (__mmEntry) {
+        return __mmEntry && __mmEntry.type !== "melee";
+      }))
+  )
+    return null;
+  const __mmEntries = Array.isArray(__mmThreat.entries)
+    ? __mmThreat.entries
+    : [];
+  for (let __mmIndex = 0; __mmIndex < __mmEntries.length; __mmIndex++) {
+    const __mmEntry = __mmEntries[__mmIndex],
+      __mmEnemy = __mmEntry && __mmEntry.source;
+    if (!__mmEntry || __mmEntry.type !== "melee" || !__mmEnemy) continue;
+    const __mmPrimary = Array.isArray(__mmEnemy.weapons)
+        ? Number(__mmEnemy.weapons[0])
+        : NaN,
+      __mmSecondary = Array.isArray(__mmEnemy.weapons)
+        ? Number(__mmEnemy.weapons[1])
+        : NaN;
+    if (
+      Number(__mmEntry.weapon) !== __mmPrimary ||
+      __mmSecondary === Number(__mmMusket) ||
+      Number(__mmEntry.damage) <= 0
+    )
+      continue;
+    return __mmEntry;
+  }
+  return null;
+}
+function __mmUpdateAutoBarbarian() {
+  const __mmMelee = __mmAutoBarbarianMeleeThreat();
+  if (!__mmMelee) return;
+  // Use the same one-server-tick combat lock as Tank/Bull. That lets the
+  // retaliation land on the observed main-swing phase and stops default gear
+  // from replacing Barbarian before the server resolves it.
+  if (!__mmActivateCombatHat(__mmBarbarianArmor, null, 1)) return;
+  __mmGearArbiter.request(
+    "autoBarbarian",
+    { hat: __mmBarbarianArmor },
+    { priority: __mmGearIntentPriorities.insta },
+  );
 }
 function __mmUpdateSpikeGearCounter() {
   if (
