@@ -2,7 +2,7 @@
 // @name         kitty klient
 // @author       Coder Guy
 // @credits       random4ik — bot script
-// @version      7.0.21
+// @version      7.0.22
 // @icon         https://cdn.discordapp.com/icons/1540876076224356437/ac27c0ce87c4c46b407ebca78e150aeb.webp?size=2048
 // @description  kitty klient — a MooMoo.io client with adaptive zoom, fast autoheal, gear automation, combat tools, predictive placement, visual markers, CC0 background music, manual quick builds, and a fully rebindable keyboard/mouse controls HUD.
 // @match        *://moomoo.io/*
@@ -267,7 +267,7 @@
     const AUTO_PUSH_FINISHER_MIGRATION_KEY = "kitty-klient-auto-push-finisher-v1";
     const ASSASSIN_RANGE_AUTO_MIGRATION_KEY = "kitty-klient-assassin-range-auto-v1";
     const TAB_SYNC_BRIDGE_KEY = "kitty-klient-tab-sync-bridge-v1";
-const KITTY_KLIENT_VERSION = "7.0.21";
+const KITTY_KLIENT_VERSION = "7.0.22";
     const KITTY_SHARED_STORAGE_APPLIED_EVENT = "KittyMooMooSharedStorageApplied";
     // FRVR's v1.8 client changed the game module and now owns its own Altcha
     // verification flow. The legacy runtime patch relies on exact bundle
@@ -771,6 +771,9 @@ const KITTY_KLIENT_VERSION = "7.0.21";
         autoSteal: false,
         assassinAutomation: false,
         spinningWindmills: false,
+        // This outward-facing rotation is opt-in. The local aim remains the mouse.
+        autoSpin: false,
+        autoSpinSpeed: 720,
         forceFullServers: true,
         bushMode: false,
         fpsBoost: true,
@@ -1049,6 +1052,7 @@ const KITTY_KLIENT_VERSION = "7.0.21";
         "autoSteal",
         "assassinAutomation",
         "spinningWindmills",
+        "autoSpin",
         "forceFullServers",
         "bushMode",
         "fpsBoost",
@@ -1251,6 +1255,7 @@ const KITTY_KLIENT_VERSION = "7.0.21";
         assassinSafeMs: Object.freeze({ min: 500, max: 5000, step: 100 }),
         assassinMinHealth: Object.freeze({ min: 20, max: 100, step: 5 }),
         assassinDangerRange: Object.freeze({ min: 0, max: 1200, step: 10 }),
+        autoSpinSpeed: Object.freeze({ min: 90, max: 1440, step: 30 }),
         syncFollowGap: Object.freeze({ min: 2, max: 120, step: 1 }),
         syncStopTolerance: Object.freeze({ min: 10, max: 30, step: 1 }),
         syncResumeTolerance: Object.freeze({ min: 42, max: 90, step: 1 }),
@@ -4705,6 +4710,8 @@ const KITTY_KLIENT_VERSION = "7.0.21";
         addHudToggle(actions, "instaKill", "R insta", "Uses the same qualified Bull/Turret combo planner as Auto Insta; without a target, it fires the manual mouse-aim burst");
         addHudToggle(actions, "autoInsta", "Auto Insta", "Continuously watches the nearest enemy and fires at the first lethal tick: shield-safe contact, ready primary/secondary/Turret, and enough full-health damage. Left-click and Shift+click remain available");
         addHudToggle(actions, "autoAim", "Kitty target aim", "While left click is held, aim at the nearer hostile player or active animal without changing out of the main weapon. Accessories follow fixed Kitty's close-target and danger rules.");
+        addHudToggle(actions, "autoSpin", "Auto Spin", "Other players see a continuous rotation while your local player stays aimed at the mouse. Attacks and placements use their exact required angle for one tick, then resume spinning.");
+        addHudSlider(actions, "autoSpinSpeed", "Auto Spin speed", "Degrees per second sent to other players");
         addHudToggle(actions, "soldierPredictInsta", "Soldier Predict Insta", "Account-only: learns each trapped enemy's observed Soldier-off timing and starts a ready Insta on the confirmed predicted release tick");
         addHudToggle(actions, "autoTrapInsta", "Owned-trap insta", "Full-insta a nearby caught enemy; every Great Hammer Insta attempts a legal spike after the combo, preferring target contact");
         addHudToggle(actions, "trapKnockbackStrike", "Trap knockback strike", "Swing a ready melee primary when its predicted knockback line lands an enemy in your or an ally's trap; adds a ready Turret shot when possible");
@@ -11334,6 +11341,8 @@ let __mmSoldierRange = 400,
   __mmMobStealEnabled = !1,
   __mmAssassinAutomationEnabled = !1,
   __mmSpinningWindmillsEnabled = !1,
+  __mmAutoSpinEnabled = !1,
+  __mmAutoSpinSpeed = 720,
   __mmForceFullServersEnabled = !0,
   __mmWeaponGrindEnabled = !1,
   __mmBushModeEnabled = !1,
@@ -13308,6 +13317,10 @@ let __mmMouseAimReturnTimer = 0,
   __mmSendingMouseAimReturn = !1,
   __mmSendingAutoAim = !1,
   __mmSendingResponsiveBreakAim = !1,
+  __mmSendingAutoSpin = !1,
+  __mmAutoSpinStartedAt = 0,
+  __mmAutoSpinBaseAngle = 0,
+  __mmAutoSpinLastPacketAt = 0,
   __mmLastForcedDirectionAt = 0,
   __mmResponsiveBreakAimAngle = null,
   __mmResponsiveBreakAimAt = 0,
@@ -14598,6 +14611,12 @@ function __mmRunServerTacticalTick() {
     __mmOperationStage("tick-manual", function () {
       __mmRunManualCombatGearTick();
     });
+    // Defense owns the first combat decision. Once it has declined the tick,
+    // Polearm + Great Hammer reverse claims an open target before every other
+    // optional Insta path, including projectile/turret synchronization.
+    __mmOperationStage("tick-priority-reverse", function () {
+      __mmUpdatePriorityReversePolearmInsta();
+    });
     __mmOperationStage("tick-combat-sync", function () {
       (__mmUpdateInstaSync(), __mmUpdateAutoSpikeInsta());
     });
@@ -14746,8 +14765,19 @@ function __mmRunOperationPipeline() {
           __mmUpdateTeammateTrapRescue(),
           __mmUpdateAntiCollision());
       });
-    // Resolve allied projectile/turret sync and spike timing before
-    // self-started Insta variants.
+    // Defense has declined this tick. Give a legal no-Musket Polearm reverse
+    // the first offensive claim, then allow allied synchronization and every
+    // remaining specialized Insta route to evaluate.
+    __mmOperationStageDue(
+      "priority-reverse",
+      __mmActiveCombat ? (__mmPressure >= 2 ? 18 : 12) : 32,
+      __mmNow,
+    ) &&
+      __mmOperationStage("priority-reverse", function () {
+        __mmUpdatePriorityReversePolearmInsta();
+      });
+    // Resolve allied projectile/turret sync and spike timing after the
+    // priority reverse window.
     __mmOperationStageDue(
       "combat-sync",
       __mmActiveCombat ? (__mmPressure >= 2 ? 18 : 12) : 36,
@@ -15046,6 +15076,10 @@ O.send = function () {
   __mmBuildLimitAttempt != null &&
     __mmNotifyBuildLimitAttempt(__mmBuildLimitAttempt);
   const __mmResult = __mmOriginalSocketSend.apply(this, arguments);
+  // F=1 is the common action boundary for melee, ranged shots, structure
+  // placement, food, and native manual clicks.  Send a spin direction only
+  // after that action packet so its target-facing angle survives this tick.
+  arguments[0] === "F" && Number(arguments[1]) === 1 && __mmResumeAutoSpinAfterAction();
   __mmHeldWeaponSelect != null && __mmCopyHeldWeaponToBots(__mmHeldWeaponSelect);
   // The outgoing packet is the one stable point shared by every supported
   // MooMoo chat renderer. Dispatch owner commands here in addition to the
@@ -15080,7 +15114,11 @@ const __mmOriginalAimDirection = Ci;
 const __mmOriginalRender = Cl;
 const __mmOriginalMinimapRender = nl;
 Ci = function () {
-  return __mmRenderingSmoothAim &&
+  // Auto Spin is server-facing only. The local renderer and all native input
+  // keep the true pointer direction, including during automation.
+  return __mmAutoSpinEnabled
+    ? __mmRawMouseAimDirection()
+    : __mmRenderingSmoothAim &&
       __mmClientVisualRotationLocked &&
       Number.isFinite(__mmClientVisualRotationAngle)
     ? __mmClientVisualRotationAngle
@@ -15316,6 +15354,70 @@ window.addEventListener("mousedown", __mmRememberMousePosition, !0);
 function __mmNormalizeVisualAim(__mmAngle) {
   return Math.atan2(Math.sin(__mmAngle), Math.cos(__mmAngle));
 }
+function __mmAutoSpinAngle(__mmNow = Date.now()) {
+  if (!__mmAutoSpinEnabled) return NaN;
+  const __mmStarted = Number(__mmAutoSpinStartedAt) || __mmNow,
+    __mmSpeed = Math.max(90, Math.min(1440, Number(__mmAutoSpinSpeed) || 720)),
+    __mmRadians = ((__mmNow - __mmStarted) * __mmSpeed * Math.PI) / 180000;
+  return __mmNormalizeVisualAim(Number(__mmAutoSpinBaseAngle || 0) + __mmRadians);
+}
+function __mmRestAimAngle(__mmNow = Date.now()) {
+  const __mmSpin = __mmAutoSpinAngle(__mmNow);
+  return Number.isFinite(__mmSpin) ? __mmSpin : __mmRawMouseAimDirection();
+}
+function __mmSendAutoSpinAim(__mmForce = !1, __mmNow = Date.now()) {
+  if (!__mmAutoSpinEnabled || !v || !v.alive || !O || typeof O.send !== "function")
+    return !1;
+  const __mmCadence = Math.max(24, Math.min(50, Number(__mmServerTickMs()) || 40));
+  if (!__mmForce && __mmNow - Number(__mmAutoSpinLastPacketAt || 0) < __mmCadence)
+    return !1;
+  const __mmAngle = __mmAutoSpinAngle(__mmNow);
+  if (!Number.isFinite(__mmAngle)) return !1;
+  try {
+    // Do not assign It here.  Native local attacks continue to read the real
+    // cursor direction while this only changes the server-facing rotation.
+    ((__mmSendingAutoSpin = !0), O.send("D", __mmAngle), (__mmAutoSpinLastPacketAt = __mmNow));
+  } catch (__mmAutoSpinSendError) {
+    return !1;
+  } finally {
+    __mmSendingAutoSpin = !1;
+  }
+  return !0;
+}
+function __mmResumeAutoSpinAfterAction() {
+  return __mmAutoSpinEnabled && __mmSendAutoSpinAim(!0);
+}
+function __mmSetAutoSpinSpeed(__mmSpeed) {
+  const __mmNow = Date.now(),
+    __mmCurrent = __mmAutoSpinAngle(__mmNow);
+  __mmAutoSpinSpeed = Math.max(90, Math.min(1440, Math.round(Number(__mmSpeed) || 720)));
+  if (__mmAutoSpinEnabled) {
+    ((__mmAutoSpinBaseAngle = Number.isFinite(__mmCurrent) ? __mmCurrent : __mmRawMouseAimDirection()),
+      (__mmAutoSpinStartedAt = __mmNow),
+      __mmSendAutoSpinAim(!0, __mmNow));
+  }
+}
+function __mmSetAutoSpin(__mmEnabled) {
+  const __mmNow = Date.now();
+  if (!!__mmEnabled === __mmAutoSpinEnabled) return;
+  if (__mmEnabled) {
+    let __mmInitial = Number(__mmLastServerFacingAim);
+    if (!Number.isFinite(__mmInitial)) __mmInitial = __mmRawMouseAimDirection();
+    ((__mmAutoSpinEnabled = !0),
+      (__mmAutoSpinBaseAngle = __mmNormalizeVisualAim(__mmInitial)),
+      (__mmAutoSpinStartedAt = __mmNow),
+      (__mmAutoSpinLastPacketAt = 0),
+      __mmSendAutoSpinAim(!0, __mmNow));
+  } else {
+    __mmAutoSpinEnabled = !1;
+    __mmAutoSpinLastPacketAt = 0;
+    // Turning it off immediately restores the real pointer to other clients.
+    __mmReturnDirectionToMouse();
+  }
+}
+function __mmUpdateAutoSpin(__mmNow = Date.now()) {
+  __mmAutoSpinEnabled && __mmSendAutoSpinAim(!1, __mmNow);
+}
 function __mmSetClientVisualRotationLock(__mmLocked) {
   __mmClientVisualRotationLocked = !!__mmLocked;
   if (!__mmClientVisualRotationLocked) {
@@ -15487,6 +15589,13 @@ function __mmUpdateLocalVisualAim() {
       typeof performance === "object" && typeof performance.now === "function"
         ? performance.now()
         : Date.now();
+  if (__mmAutoSpinEnabled) {
+    const __mmMouse = __mmRawMouseAimDirection();
+    ((__mmLocalVisualAimTarget = __mmMouse),
+      (__mmLocalVisualAimAngle = __mmMouse),
+      (__mmLocalVisualAimFrameAt = __mmNow));
+    return;
+  }
   if (
     __mmClientVisualRotationLocked &&
     Number.isFinite(__mmClientVisualRotationAngle)
@@ -15844,12 +15953,12 @@ function __mmReturnDirectionToMouse() {
     );
     return;
   }
-  const __mmAngle = __mmRawMouseAimDirection();
+  const __mmAngle = __mmRestAimAngle();
   let __mmReturned = !1;
   try {
-    // Update the game's cached aim as well as the server. When X is active,
-    // Ci returns this cache instead of sampling the cursor on the next frame.
-    ((It = __mmAngle),
+    // Auto Spin deliberately leaves It on the real pointer.  Native attacks
+    // can therefore use mouse aim while the outbound D packet resumes spin.
+    ((__mmAutoSpinEnabled || (It = __mmAngle)),
       (__mmSendingMouseAimReturn = !0),
       O.send("D", __mmAngle),
       (__mmReturned = !0));
@@ -15875,13 +15984,13 @@ function __mmScheduleMouseAimReturn() {
   );
 }
 function __mmReturnTrapBreakAimToMouse() {
-  const __mmMouseAngle = __mmRawMouseAimDirection();
+  const __mmMouseAngle = __mmRestAimAngle();
   if (!Number.isFinite(__mmMouseAngle) || !v || !v.alive) return;
   try {
     // Trap Escape sends this directly after the target-facing F=1 packet.
     // Keep it out of the normal delayed return queue: a live pit breaker must
     // face only for its one break tick, never through the reload interval.
-    ((It = __mmMouseAngle),
+    ((__mmAutoSpinEnabled || (It = __mmMouseAngle)),
       (__mmSendingMouseAimReturn = !0),
       O.send("D", __mmMouseAngle),
       (__mmLastForcedDirectionAt = 0));
@@ -15908,7 +16017,7 @@ function __mmObserveForcedDirectionPacket(__mmArgs) {
       (__mmLastServerFacingAimAt = Date.now()),
       __mmNoteLocalVisualAim(__mmServerAngle));
   }
-  if (__mmSendingMouseAimReturn || __mmSendingAutoAim) return;
+  if (__mmSendingMouseAimReturn || __mmSendingAutoAim || __mmSendingAutoSpin) return;
   if (
     __mmPacket === "F" &&
     __mmArgs[2] != null &&
@@ -30191,6 +30300,7 @@ function __mmDrawKittyPets() {
 }
 Cl = function () {
   __mmBeginVisualFrame();
+  __mmUpdateAutoSpin();
   __mmUpdateMeleeRangeFadeVisuals();
   __mmUpdateLocalVisualAim();
   const __mmVisualMenuOpen = __mmHudMenuOpen || __mmNativeMenuOpen,
@@ -31617,6 +31727,8 @@ function __mmHudState() {
     autoSteal: __mmAutoStealEnabled,
     assassinAutomation: __mmAssassinAutomationEnabled,
     spinningWindmills: __mmSpinningWindmillsEnabled,
+    autoSpin: __mmAutoSpinEnabled,
+    autoSpinSpeed: __mmAutoSpinSpeed,
     forceFullServers: __mmForceFullServersEnabled,
     bushMode: __mmBushModeRequested,
     fpsBoost: __mmFpsBoostEnabled,
@@ -31941,6 +32053,8 @@ function __mmSetHudNumber(__mmKey, __mmValue) {
     __mmAssassinMinHealth = Math.max(20, Math.min(100, Math.round(__mmNumber)));
   else if (__mmKey === "assassinDangerRange")
     __mmAssassinDangerRange = Math.max(0, Math.min(1200, Math.round(__mmNumber)));
+  else if (__mmKey === "autoSpinSpeed")
+    __mmSetAutoSpinSpeed(__mmNumber);
   else if (__mmKey === "syncFollowGap")
     __mmSyncFollowGap = Math.max(2, Math.min(120, Math.round(__mmNumber)));
   else if (__mmKey === "syncStopTolerance")
@@ -32136,6 +32250,8 @@ function __mmSetHudToggle(__mmKey, __mmValue) {
           __mmEnabled ? "1" : "0",
         ),
       __mmApplyWindmillRotationState());
+  else if (__mmKey === "autoSpin")
+    __mmSetAutoSpin(__mmEnabled);
   else if (__mmKey === "forceFullServers")
     ((__mmForceFullServersEnabled = __mmEnabled),
       (window.__KittyForceFullServers = __mmEnabled),
@@ -32637,6 +32753,7 @@ function __mmSetHudValue(__mmKey, __mmValue) {
   __mmKey === "assassinSafeMs" ||
   __mmKey === "assassinMinHealth" ||
   __mmKey === "assassinDangerRange" ||
+  __mmKey === "autoSpinSpeed" ||
   __mmKey === "syncFollowGap" ||
   __mmKey === "syncStopTolerance" ||
   __mmKey === "syncResumeTolerance" ||
@@ -32695,6 +32812,7 @@ function __mmApplyHudSettings(__mmSettings) {
     "autoSteal",
     "assassinAutomation",
     "spinningWindmills",
+    "autoSpin",
     "forceFullServers",
     "bushMode",
     "fpsBoost",
@@ -32843,6 +32961,7 @@ function __mmApplyHudSettings(__mmSettings) {
     "assassinSafeMs",
     "assassinMinHealth",
     "assassinDangerRange",
+    "autoSpinSpeed",
     // Apply the master pause last so feature-specific hydration cannot restart
     // an automatic worker after testing mode has already cancelled it.
     "instaTestingMode",
@@ -40246,6 +40365,96 @@ function __mmUpdateAutoInsta() {
       syncScheduled: !0,
     })
   );
+}
+// The Polearm + Great Hammer reverse is the preferred close-combat opening
+// whenever Musket is unavailable. Keep its qualification separate from the
+// generic Auto Insta planner so specialized damage modules cannot spend the
+// first opening after a player walks into legal melee range.
+function __mmPriorityReversePolearmLoadout() {
+  return !!(
+    __mmAutoInstaEnabled &&
+    __mmReverseInstaEnabled &&
+    v &&
+    v.alive &&
+    Array.isArray(v.weapons) &&
+    Number(v.weapons[0]) === Number(__mmPolearmWeapon) &&
+    Number(v.weapons[1]) === Number(__mmGreatHammer) &&
+    !v.weapons.includes(__mmMusket)
+  );
+}
+function __mmPriorityReverseSoldierWindow(__mmTarget, __mmNow = Date.now()) {
+  if (!__mmTarget) return null;
+  // A live non-Soldier hat is an immediate, authoritative opening.
+  if (Number(__mmTarget.skinIndex) !== 6)
+    return { predicted: !1, observedAt: __mmNow };
+  const __mmRecord =
+      __mmTarget.sid != null &&
+      typeof __mmSoldierPredictInsta === "object" &&
+      __mmSoldierPredictInsta
+        ? __mmSoldierPredictInsta.records[String(__mmTarget.sid)]
+        : null,
+    __mmExpected = Number(__mmRecord && __mmRecord.expectedOffAt),
+    __mmArmedUntil = Number(__mmRecord && __mmRecord.armedUntil),
+    __mmTick = Math.max(1, __mmServerTickMs()),
+    // Start only in the final one-way-latency part of a stable cycle. This
+    // sends the first reverse packet for the predicted Soldier-off tick while
+    // avoiding a premature Hammer into a still-armored target.
+    __mmLead = Math.min(
+      __mmTick * 0.48,
+      Math.max(8, Math.min(70, Number(window.pingTime) || 0) * 0.5),
+    );
+  if (
+    !__mmRecord ||
+    !__mmSoldierPredictInsta.stable(__mmRecord) ||
+    !Number.isFinite(__mmExpected) ||
+    !Number.isFinite(__mmArmedUntil) ||
+    __mmNow < __mmExpected - __mmLead ||
+    __mmNow > __mmArmedUntil
+  )
+    return null;
+  return { predicted: !0, expectedOffAt: __mmExpected };
+}
+function __mmPriorityReverseCanKill(__mmTarget, __mmPredictedSoldierOff) {
+  if (!__mmTarget) return !1;
+  // Current Tank and every other reported armor state stay authoritative.
+  // Only a mature Soldier-off edge is allowed to evaluate the next open state.
+  if (!__mmPredictedSoldierOff)
+    return __mmInsta.autoBurstCanKill(__mmTarget, "reverse");
+  const __mmPrimary = __mmInsta.supportedPrimary(),
+    __mmRawDamage =
+      __mmInsta.maxAutoWeaponDamage(__mmPrimary, !0) +
+      __mmInsta.maxAutoWeaponDamage(__mmGreatHammer, !1) +
+      25,
+    __mmHealth = Math.max(1, Number(__mmTarget.health) || 100);
+  return Number.isFinite(__mmRawDamage) && __mmRawDamage + 0.001 >= __mmHealth;
+}
+function __mmPriorityReversePolearmPlan() {
+  if (!__mmPriorityReversePolearmLoadout() || __mmInstaTestingModeEnabled)
+    return null;
+  const __mmTarget = __mmInsta.nearestEnemy(),
+    __mmWindow = __mmPriorityReverseSoldierWindow(__mmTarget);
+  if (
+    !__mmTarget ||
+    !__mmWindow ||
+    !__mmInsta.fullBurstReady(__mmTarget, "reverse", !1) ||
+    !__mmInsta.inRange(__mmGreatHammer, __mmTarget) ||
+    !__mmPriorityReverseCanKill(__mmTarget, __mmWindow.predicted)
+  )
+    return null;
+  return { target: __mmTarget, predictedSoldierOff: __mmWindow.predicted };
+}
+function __mmUpdatePriorityReversePolearmInsta() {
+  const __mmPlan = __mmPriorityReversePolearmPlan();
+  if (!__mmPlan) return !1;
+  return __mmInsta.start({
+    automatic: !0,
+    targetSid: __mmPlan.target.sid,
+    profile: "reverse",
+    profileSource: __mmPlan.predictedSoldierOff
+      ? "Priority Reverse · Soldier edge"
+      : "Priority Reverse",
+    syncScheduled: !0,
+  });
 }
 function __mmEnemyAtSevenShame(__mmEnemy) {
   const __mmShame = Number(__mmEnemy && __mmEnemy.shameCount);
