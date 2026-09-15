@@ -2,7 +2,7 @@
 // @name         kitty klient
 // @author       Coder Guy
 // @credits       random4ik — bot script
-// @version      7.0.17
+// @version      7.0.18
 // @icon         https://cdn.discordapp.com/icons/1540876076224356437/ac27c0ce87c4c46b407ebca78e150aeb.webp?size=2048
 // @description  kitty klient — a MooMoo.io client with adaptive zoom, fast autoheal, gear automation, combat tools, predictive placement, visual markers, CC0 background music, manual quick builds, and a fully rebindable keyboard/mouse controls HUD.
 // @match        *://moomoo.io/*
@@ -267,7 +267,7 @@
     const AUTO_PUSH_FINISHER_MIGRATION_KEY = "kitty-klient-auto-push-finisher-v1";
     const ASSASSIN_RANGE_AUTO_MIGRATION_KEY = "kitty-klient-assassin-range-auto-v1";
     const TAB_SYNC_BRIDGE_KEY = "kitty-klient-tab-sync-bridge-v1";
-const KITTY_KLIENT_VERSION = "7.0.17";
+const KITTY_KLIENT_VERSION = "7.0.18";
     const KITTY_SHARED_STORAGE_APPLIED_EVENT = "KittyMooMooSharedStorageApplied";
     // FRVR's v1.8 client changed the game module and now owns its own Altcha
     // verification flow. The legacy runtime patch relies on exact bundle
@@ -13742,11 +13742,30 @@ function __mmBindingActionHeld(__mmAction) {
   return __mmActiveBindingActions.has(__mmAction);
 }
 function __mmBindingTypingTarget(__mmTarget) {
-  return !!(
-    __mmTarget &&
-    __mmTarget.closest &&
-    __mmTarget.closest("input,textarea,[contenteditable='true']")
-  );
+  // MooMoo can retarget a trusted keyboard event to its canvas while its chat
+  // field remains focused.  Checking only event.target let Kitty consume S as
+  // movement in that state, which made a lowercase "s" disappear while
+  // typing.  The focused element is authoritative for text entry; include it
+  // and plaintext-only editors so every editable Kitty/native surface wins.
+  const __mmCandidates = [__mmTarget, document.activeElement];
+  for (let __mmIndex = 0; __mmIndex < __mmCandidates.length; __mmIndex++) {
+    let __mmElement = __mmCandidates[__mmIndex];
+    if (__mmElement && __mmElement.nodeType !== 1)
+      __mmElement = __mmElement.parentElement;
+    if (
+      __mmElement &&
+      ((__mmElement.matches &&
+        __mmElement.matches(
+          "input,textarea,[contenteditable='true'],[contenteditable='plaintext-only']",
+        )) ||
+        (__mmElement.closest &&
+          __mmElement.closest(
+            "input,textarea,[contenteditable='true'],[contenteditable='plaintext-only']",
+          )))
+    )
+      return !0;
+  }
+  return !1;
 }
 function __mmBindingGameSubmenuOpen() {
   const __mmIds = ["allianceMenu", "storeMenu", "chatHolder"];
