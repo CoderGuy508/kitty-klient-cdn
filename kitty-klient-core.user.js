@@ -2,7 +2,7 @@
 // @name         kitty klient
 // @author       Coder Guy
 // @credits       random4ik — bot script
-// @version      7.0.10
+// @version      7.0.11
 // @icon         https://cdn.discordapp.com/icons/1540876076224356437/ac27c0ce87c4c46b407ebca78e150aeb.webp?size=2048
 // @description  kitty klient — a MooMoo.io client with adaptive zoom, fast autoheal, gear automation, combat tools, predictive placement, visual markers, CC0 background music, manual quick builds, and a fully rebindable keyboard/mouse controls HUD.
 // @match        *://moomoo.io/*
@@ -267,7 +267,7 @@
     const AUTO_PUSH_FINISHER_MIGRATION_KEY = "kitty-klient-auto-push-finisher-v1";
     const ASSASSIN_RANGE_AUTO_MIGRATION_KEY = "kitty-klient-assassin-range-auto-v1";
     const TAB_SYNC_BRIDGE_KEY = "kitty-klient-tab-sync-bridge-v1";
-const KITTY_KLIENT_VERSION = "7.0.10";
+const KITTY_KLIENT_VERSION = "7.0.11";
     const KITTY_SHARED_STORAGE_APPLIED_EVENT = "KittyMooMooSharedStorageApplied";
     // FRVR's v1.8 client changed the game module and now owns its own Altcha
     // verification flow. The legacy runtime patch relies on exact bundle
@@ -11580,6 +11580,22 @@ const __mmShieldWeapon = 11,
 // The actual ownership edge of an upgrade tree is upgradeOf. Preserve the
 // former for the optional unlocked-card view, but never use it to reject a
 // normal server upgrade packet.
+// Daggers are deliberately a left-click-only hand. Automatic structure
+// actions may use Great Hammer, then fall back only to a non-Daggers main.
+function __mmIsDaggersWeapon(__mmWeapon) {
+  const __mmData = b && b.weapons && b.weapons[Number(__mmWeapon)];
+  return String(__mmData && __mmData.name || "").trim().toLowerCase() === "daggers";
+}
+function __mmAutomaticBreakWeapon() {
+  if (!v || !v.alive || !Array.isArray(v.weapons)) return null;
+  if (v.weapons.some(function (__mmWeapon) {
+    return Number(__mmWeapon) === Number(__mmGreatHammer);
+  })) return Number(__mmGreatHammer);
+  const __mmPrimary = Number(v.weapons[0]);
+  return Number.isInteger(__mmPrimary) && !__mmIsDaggersWeapon(__mmPrimary)
+    ? __mmPrimary
+    : null;
+}
 function __mmUpgradeParentId(__mmEntry) {
   if (!__mmEntry || __mmEntry.upgradeOf == null) return null;
   const __mmParent = Number(__mmEntry.upgradeOf);
@@ -14569,8 +14585,8 @@ function __mmRunServerTacticalTick() {
       __mmAutoHeal();
     });
     __mmOperationStage("tick-placement", function () {
-      (__mmUpdateSmartPlacement(),
-        __mmUpdateAutoEnemySpikeBreakReplacement(),
+      (__mmUpdateAutoEnemySpikeBreakReplacement(),
+        __mmUpdateSmartPlacement(),
         __mmUpdateAutoSpikeSpam(),
         __mmPlaceThreatTrap(),
         __mmSmartMovingMillsEnabled &&
@@ -14726,8 +14742,8 @@ function __mmRunOperationPipeline() {
       __mmNow,
     ) &&
       __mmOperationStage("placement", function () {
-        (__mmUpdateSmartPlacement(),
-          __mmUpdateAutoEnemySpikeBreakReplacement(),
+        (__mmUpdateAutoEnemySpikeBreakReplacement(),
+          __mmUpdateSmartPlacement(),
           __mmUpdateAutoSpikeSpam(),
           __mmPlaceThreatTrap(),
           __mmSmartMovingMillsEnabled &&
@@ -16050,6 +16066,7 @@ const __mmInsta = {
   automaticRetryUntil: 0,
   shieldWaitStartedAt: 0,
   tankPredictPlan: null,
+  tankCoverTimer: 0,
   // Absolute arrival time for the Turret shot in the Polearm + Great Hammer
   // reverse combo. The Bull/Polearm phase is held until this exact window.
   reverseTurretImpactAt: 0,
@@ -16925,6 +16942,8 @@ const __mmInsta = {
       return !1;
     this.stopRedDragonAim();
     this.clearRedDragonMusketRestore();
+    this.tankCoverTimer && clearTimeout(this.tankCoverTimer);
+    this.tankCoverTimer = 0;
     const __mmRequestedProfile = String(__mmOptions.profile || "normal"),
       __mmAutomatic = !!__mmOptions.automatic,
       __mmManualHotkey = !!__mmOptions.manualHotkey,
@@ -17043,6 +17062,15 @@ const __mmInsta = {
             __mmNoteLocalVisualAim(__mmMouseAngle),
             O.send("D", __mmMouseAngle));
         } catch (__mmTargetlessInstaAimError) {}
+    } else {
+      // Every targetted Insta starts with a real target bearing before any hat
+      // change. This prevents a transient engine cursor reset from sending D=0
+      // between the target scan and the first Bull/Turret packet.
+      const __mmTargetAim = this.aim(__mmTarget);
+      if (Number.isFinite(__mmTargetAim))
+        try {
+          (__mmNoteLocalVisualAim(__mmTargetAim), O.send("D", __mmTargetAim));
+        } catch (__mmTargetInstaAimError) {}
     }
     this.postSpikeEnabled = !1;
     this.postSpikeCandidate = null;
@@ -17253,14 +17281,39 @@ const __mmInsta = {
         return void this.cleanup("tank-window-turret-reloading");
       __mmGearArbiter.commit();
       try {
-        (O.send("D", __mmAngle), __mmAssumeTurretGearShot());
+        (O.send("D", __mmAngle),
+          __mmNoteLocalVisualAim(__mmAngle),
+          __mmAssumeTurretGearShot());
       } catch (__mmTankPredictTurretError) {
         return void this.cleanup("tank-window-turret-send-failed");
       }
-      this.schedule(
-        () => this.executeFollowup(),
-        Math.max(1, Math.min(this.tick() * 2, __mmPrimaryAt - Date.now())),
+      const __mmFollowupDelay = Math.max(
+        1,
+        Math.min(this.tick() * 2, __mmPrimaryAt - Date.now()),
       );
+      // Turret Gear is a one-shot packet phase. Do not stand exposed in it
+      // while its bullet travels toward the predicted Tank window; return to
+      // Soldier for the wait, then Bull is selected again at the main swing.
+      if (__mmFollowupDelay > 18) {
+        const __mmCoverHat = v.skins && v.skins[6]
+          ? 6
+          : this.snapshot && this.snapshot.hat;
+        this.tankCoverTimer = setTimeout(() => {
+          this.tankCoverTimer = 0;
+          if (
+            this.state === "executeBurst" &&
+            this.profile === "tankPredict" &&
+            v && v.alive &&
+            __mmCoverHat != null
+          )
+            __mmEquipGearPair(
+              __mmCoverHat,
+              this.snapshot && this.snapshot.tail,
+              !0,
+            );
+        }, Math.max(10, Math.min(18, __mmFollowupDelay - 2)));
+      }
+      this.schedule(() => this.executeFollowup(), __mmFollowupDelay);
       return;
     }
     if (this.profile === "velTick") {
@@ -17761,6 +17814,8 @@ const __mmInsta = {
     this.releaseAttack();
     this.stopRedDragonAim();
     this.clearRedDragonMusketRestore();
+    this.tankCoverTimer && clearTimeout(this.tankCoverTimer);
+    this.tankCoverTimer = 0;
     // A Tank window can expire while a Turret phase is pending. Drop that
     // exact intent before restoring so it cannot keep winning the gear
     // arbiter after this Insta has stopped.
@@ -26833,23 +26888,17 @@ function __mmMatThiefStructureAllowed(__mmObject) {
   );
 }
 function __mmMatThiefWeaponCandidates() {
-  if (!v || !v.alive || !Array.isArray(v.weapons)) return [];
-  const __mmWeapons = [],
-    __mmSeen = new Set();
-  for (let __mmIndex = 0; __mmIndex < v.weapons.length; __mmIndex++) {
-    const __mmWeapon = v.weapons[__mmIndex],
-      __mmData = b && b.weapons && b.weapons[__mmWeapon];
-    if (
-      __mmWeapon == null ||
-      __mmSeen.has(__mmWeapon) ||
-      !__mmData ||
-      __mmData.projectile != null ||
-      !__mmWeaponReady(__mmWeapon)
-    )
-      continue;
-    (__mmSeen.add(__mmWeapon), __mmWeapons.push(__mmWeapon));
-  }
-  return __mmWeapons;
+  const __mmWeapon = __mmAutomaticBreakWeapon(),
+    __mmData = b && b.weapons && b.weapons[__mmWeapon];
+  // Mat Thief automatically breaks player structures, so it shares the same
+  // Great Hammer priority and never borrows Daggers from left-click.
+  return __mmWeapon != null &&
+    __mmData &&
+    __mmData.projectile == null &&
+    !__mmData.shield &&
+    __mmWeaponReady(__mmWeapon)
+    ? [__mmWeapon]
+    : [];
 }
 function __mmMatThiefTargetsForWeapon(__mmWeapon, __mmNow) {
   if (!v || !v.alive) return [];
@@ -28208,14 +28257,7 @@ function __mmAutoEnemySpikeBreakable(__mmSpike) {
   return __mmName.includes("spikes") && !__mmFriendlyStructure(__mmSpike);
 }
 function __mmAutoEnemySpikeBreakPreferredWeapon() {
-  if (!v || !v.alive || !Array.isArray(v.weapons)) return null;
-  // Great Hammer is a fixed AutoBreak preference whenever it is owned. Only
-  // fall back to main when Hammer is not equipped at all.
-  if (v.weapons.some(function (__mmWeapon) {
-    return Number(__mmWeapon) === Number(__mmGreatHammer);
-  })) return Number(__mmGreatHammer);
-  const __mmPrimary = Number(v.weapons[0]);
-  return Number.isInteger(__mmPrimary) ? __mmPrimary : null;
+  return __mmAutomaticBreakWeapon();
 }
 function __mmAutoEnemySpikeBreakPlan() {
   if (!v || !v.alive || !Array.isArray(v.weapons)) return null;
@@ -28229,18 +28271,40 @@ function __mmAutoEnemySpikeBreakPlan() {
   let __mmNearest = null,
     __mmNearestDistance = Infinity,
     __mmLocked = null;
+  // MooMoo applies this packet on the next server phase. Lead our own observed
+  // movement by that phase, but never invent range while standing still: the
+  // projected contact must be caused by real movement toward the spike.
+  const __mmLeadMs = Math.min(180, Math.max(60, __mmServerTickMs())),
+    __mmVelocity = __mmSyncPlayerVelocity(v),
+    __mmProjectedX = Number(v.x) + __mmVelocity.x * __mmLeadMs,
+    __mmProjectedY = Number(v.y) + __mmVelocity.y * __mmLeadMs;
   for (let __mmIndex = 0; __mmIndex < __mmSpikes.length; __mmIndex++) {
     const __mmSpike = __mmSpikes[__mmIndex];
     if (!__mmAutoEnemySpikeBreakable(__mmSpike)) continue;
-    const __mmDistance = Math.hypot(
-        Number(__mmSpike.x) - Number(v.x),
-        Number(__mmSpike.y) - Number(v.y),
+    const __mmDeltaX = Number(__mmSpike.x) - Number(v.x),
+      __mmDeltaY = Number(__mmSpike.y) - Number(v.y),
+      __mmDistance = Math.hypot(__mmDeltaX, __mmDeltaY),
+      __mmProjectedDistance = Math.hypot(
+        Number(__mmSpike.x) - __mmProjectedX,
+        Number(__mmSpike.y) - __mmProjectedY,
       ),
-      __mmRange = __mmAutoEnemySpikeBreakWeaponRange(__mmWeapon, __mmSpike);
-    // Range is the one required mechanical check: sending an attack beyond a
-    // weapon's hitbox cannot break the spike and only spends its reload.
-    if (!Number.isFinite(__mmDistance) || __mmRange <= 0 || __mmDistance > __mmRange)
-      continue;
+      __mmRange = __mmAutoEnemySpikeBreakWeaponRange(__mmWeapon, __mmSpike),
+      __mmApproach = __mmDistance > 0
+        ? (__mmDeltaX * __mmVelocity.x + __mmDeltaY * __mmVelocity.y) / __mmDistance
+        : 0,
+      __mmPreBreak =
+        __mmDistance > __mmRange &&
+        __mmProjectedDistance <= __mmRange &&
+        __mmApproach > 0.04;
+    // The direct hitbox remains authoritative. A slightly early swing is only
+    // legal when the next server tick projects the moving player into that
+    // hitbox, which removes the old close-range reaction delay without wasting
+    // reload on unreachable spikes.
+    if (
+      !Number.isFinite(__mmDistance) ||
+      __mmRange <= 0 ||
+      (__mmDistance > __mmRange && !__mmPreBreak)
+    ) continue;
     const __mmState = __mmBreakableState(__mmSpike),
       __mmData = b && b.list && b.list[__mmSpike.id],
       __mmHealth = Number(
@@ -28252,8 +28316,13 @@ function __mmAutoEnemySpikeBreakPlan() {
         weapon: __mmWeapon,
         health: Number.isFinite(__mmHealth) ? __mmHealth : 0,
         damage: __mmWeaponStructureDamage(v, __mmWeapon, __mmSpike),
-        angle: Math.atan2(Number(__mmSpike.y) - Number(v.y), Number(__mmSpike.x) - Number(v.x)),
+        angle: Math.atan2(
+          Number(__mmSpike.y) - (__mmPreBreak ? __mmProjectedY : Number(v.y)),
+          Number(__mmSpike.x) - (__mmPreBreak ? __mmProjectedX : Number(v.x)),
+        ),
         distance: __mmDistance,
+        projectedDistance: __mmProjectedDistance,
+        preBreak: __mmPreBreak,
       };
     if (__mmPlan.key === __mmAutoEnemySpikeBreakLockedTargetKey) {
       __mmLocked = __mmPlan;
@@ -28298,7 +28367,6 @@ function __mmAutoEnemySpikeBreakMaximumDamage(__mmPlan) {
 }
 function __mmArmAutoEnemySpikeBreakReplacement(__mmPlan, __mmDamage) {
   if (
-    !__mmSmartAutoPlaceEnabled ||
     !__mmPlan ||
     !__mmPlan.spike ||
     Number(__mmDamage) + 0.001 < Number(__mmPlan.health)
@@ -28317,9 +28385,12 @@ function __mmArmAutoEnemySpikeBreakReplacement(__mmPlan, __mmDamage) {
     x: Number(__mmPlan.spike.x),
     y: Number(__mmPlan.spike.y),
     scale: Number(__mmPlan.spike.scale) || 49,
+    object: __mmPlan.spike,
+    preBreak: !!__mmPlan.preBreak,
     enemySid: __mmEnemy.sid == null ? null : __mmEnemy.sid,
-    // Glotus AutoPlacer follows AutoBreak in the same post-tick. A later
-    // retry remains armed if the old spike initially blocks every good slot.
+    // Glotus AutoPlacer follows AutoBreak in the same post-tick. Keep the
+    // broken object as an expected-removal candidate so a clear slot can be
+    // pre-placed in packet order instead of waiting for the visual deletion.
     readyAt: __mmNow,
     expiresAt: __mmNow + Math.max(500, __mmServerTickMs() * 6),
   };
@@ -28355,6 +28426,42 @@ function __mmAutoEnemySpikeBreakReplacementEnemy(__mmReplacement) {
   }
   return __mmNearest;
 }
+function __mmAutoEnemySpikeBreakVacatedSlotCandidate(__mmReplacement, __mmSpike) {
+  if (!v || !__mmReplacement || __mmSpike == null) return null;
+  const __mmAngle = Math.atan2(
+      Number(__mmReplacement.y) - Number(v.y),
+      Number(__mmReplacement.x) - Number(v.x),
+    ),
+    __mmExpectedRemoval = __mmReplacement.object || null,
+    __mmCandidate = __mmExpectedRemoval
+      ? __mmSmartCandidateForExpectedRemoval(
+          __mmSpike,
+          __mmAngle,
+          __mmExpectedRemoval,
+        )
+      : __mmSmartCandidateForAngle(__mmSpike, __mmAngle);
+  if (!__mmCandidate || !__mmCandidate.valid) return null;
+  // A structure can only be rebuilt at our legal radial placement offset.
+  // Prefer the actual cleared slot when it lies on that ring; otherwise the
+  // Glotus-style combat candidate below selects the next useful spike angle.
+  const __mmSlotSlack = Math.max(
+    18,
+    Math.min(
+      54,
+      Math.max(Number(__mmReplacement.scale) || 0, Number(__mmCandidate.scale) || 0) * 0.7,
+    ),
+  );
+  if (Math.hypot(
+    __mmCandidate.x - Number(__mmReplacement.x),
+    __mmCandidate.y - Number(__mmReplacement.y),
+  ) > __mmSlotSlack) return null;
+  ((__mmCandidate.points = 185),
+    (__mmCandidate.priority = !0),
+    (__mmCandidate.expectedRemoval = __mmExpectedRemoval),
+    (__mmCandidate.preplace = !!__mmExpectedRemoval),
+    __mmCandidate.reasons.push("AutoBreak vacated spike slot"));
+  return __mmCandidate;
+}
 function __mmAutoEnemySpikeBreakReplacementCandidate(__mmReplacement, __mmNow) {
   if (!v || !v.alive || !__mmReplacement) return null;
   const __mmSpike = __mmSpikeItem(),
@@ -28362,7 +28469,15 @@ function __mmAutoEnemySpikeBreakReplacementCandidate(__mmReplacement, __mmNow) {
   if (__mmSpike == null || !__mmCanUseBuildItem(__mmSpike) ||
       __mmMaxBuildCount(__mmSpike) < 1 || !__mmEnemy) return null;
   const __mmDistance = Math.hypot(Number(__mmEnemy.x) - Number(v.x), Number(__mmEnemy.y) - Number(v.y));
+  // This is Glotus AutoPlacer's combat gate. The replacement follows the
+  // enemy spike break even when Smart Auto Place is disabled, but only while a
+  // real opponent is inside its normal 325-unit configurable radius.
   if (!Number.isFinite(__mmDistance) || __mmDistance > __mmAutoPlaceAcquireRadius()) return null;
+  const __mmVacatedSlot = __mmAutoEnemySpikeBreakVacatedSlotCandidate(
+    __mmReplacement,
+    __mmSpike,
+  );
+  if (__mmVacatedSlot) return __mmVacatedSlot;
   const __mmPrediction = __mmSmartEnemyPrediction(__mmEnemy, __mmNow),
     __mmEnemyScale = Number(__mmEnemy.scale) || 35,
     __mmTrapped = !!__mmAutoSpikeSpamTrapForEnemy(__mmEnemy),
@@ -28370,10 +28485,17 @@ function __mmAutoEnemySpikeBreakReplacementCandidate(__mmReplacement, __mmNow) {
     __mmAngles = __mmReferenceBestPlacementAngles(
       __mmSpike, __mmToward, !0, !0, __mmActiveObjectSnapshot(!0).all,
     ),
-    __mmHazards = __mmSmartFriendlyHazards();
+    __mmHazards = __mmSmartFriendlyHazards(),
+    __mmExpectedRemoval = __mmReplacement.object || null;
   let __mmBest = null, __mmBestScore = -Infinity;
   for (let __mmIndex = 0; __mmIndex < __mmAngles.length; __mmIndex++) {
-    const __mmCandidate = __mmSmartCandidateForAngle(__mmSpike, __mmAngles[__mmIndex]);
+    const __mmCandidate = __mmExpectedRemoval
+      ? __mmSmartCandidateForExpectedRemoval(
+          __mmSpike,
+          __mmAngles[__mmIndex],
+          __mmExpectedRemoval,
+        )
+      : __mmSmartCandidateForAngle(__mmSpike, __mmAngles[__mmIndex]);
     if (!__mmCandidate || !__mmCandidate.valid) continue;
     const __mmTouch = __mmEnemyScale + __mmCandidate.scale + 8,
       __mmCurrentDistance = Math.hypot(Number(__mmEnemy.x) - __mmCandidate.x, Number(__mmEnemy.y) - __mmCandidate.y),
@@ -28391,6 +28513,8 @@ function __mmAutoEnemySpikeBreakReplacementCandidate(__mmReplacement, __mmNow) {
     ((__mmBestScore = __mmScore),
       (__mmCandidate.points = 75 + __mmScore),
       (__mmCandidate.priority = !0),
+      (__mmCandidate.expectedRemoval = __mmExpectedRemoval),
+      (__mmCandidate.preplace = !!__mmExpectedRemoval),
       __mmCandidate.reasons.push("AutoBreak combat spike handoff"),
       (__mmBest = __mmCandidate));
   }
@@ -28398,7 +28522,7 @@ function __mmAutoEnemySpikeBreakReplacementCandidate(__mmReplacement, __mmNow) {
 }
 function __mmUpdateAutoEnemySpikeBreakReplacement() {
   const __mmReplacement = __mmAutoEnemySpikeBreakReplacement;
-  if (!__mmReplacement || !v || !v.alive || !__mmSmartAutoPlaceEnabled) {
+  if (!__mmReplacement || !v || !v.alive || !__mmAutoEnemySpikeBreakEnabled) {
     __mmAutoEnemySpikeBreakReplacement = null;
     return 0;
   }
@@ -28408,13 +28532,10 @@ function __mmUpdateAutoEnemySpikeBreakReplacement() {
     return 0;
   }
   if (__mmNow < Number(__mmReplacement.readyAt)) return 0;
-  // Smart placement ran first. If it already used this tick's build phase,
-  // Glotus's AutoPlacer would also yield through placedOnce; do not add a
-  // second unrelated spike on the following tick.
-  if (__mmTacticalChannels.placement) {
-    __mmAutoEnemySpikeBreakReplacement = null;
-    return 0;
-  }
+  // Another placement owner may have consumed this server phase. Keep this
+  // one-hit handoff armed through its short window instead of discarding the
+  // cleared spike slot before the next legal placement phase.
+  if (__mmTacticalChannels.placement) return 0;
   const __mmCandidate = __mmAutoEnemySpikeBreakReplacementCandidate(__mmReplacement, __mmNow);
   if (!__mmCandidate ||
       !__mmReserveTacticalChannel("placement", "smartAutoPlace", 64)) return 0;
@@ -34506,11 +34627,12 @@ function __mmCleanupSafeDistance(__mmObject) {
 function __mmCleanupWeaponPlan(__mmObject) {
   if (!v || !v.alive || !Array.isArray(v.weapons)) return null;
   const __mmSafe = __mmCleanupSafeDistance(__mmObject),
-    __mmScale = __mmCleanupObjectScale(__mmObject);
+    __mmScale = __mmCleanupObjectScale(__mmObject),
+    __mmForcedWeapon = __mmAutomaticBreakWeapon();
+  if (__mmForcedWeapon == null) return null;
   let __mmBest = null;
-  for (let __mmIndex = 0; __mmIndex < v.weapons.length; __mmIndex++) {
-    const __mmWeapon = v.weapons[__mmIndex],
-      __mmData = b && b.weapons && b.weapons[__mmWeapon];
+  for (const __mmWeapon of [__mmForcedWeapon]) {
+    const __mmData = b && b.weapons && b.weapons[__mmWeapon];
     if (!__mmData || __mmData.projectile != null) continue;
     const __mmDamage = __mmWeaponStructureDamage(v, __mmWeapon, __mmObject),
       __mmRange = Number(__mmData.range) || 0,
@@ -35081,7 +35203,8 @@ function __mmWeaponGrindWeaponAllowed(__mmWeapon) {
     v.weapons.includes(__mmId) &&
     __mmData &&
     __mmData.projectile == null &&
-    !__mmData.shield
+    !__mmData.shield &&
+    !__mmIsDaggersWeapon(__mmId)
   );
 }
 function __mmWeaponGrindFallbackWeapon() {
@@ -35789,6 +35912,59 @@ function __mmWeaponRechargeOverridden() {
     __mmManualHotbarToolCurrent() != null ||
     !__mmActionAvailable("weaponRecharge")
   );
+}
+function __mmWASDMovementHeld() {
+  return __mmMenuMovementKeys.size > 0 || __mmConfiguredMovementActions.size > 0;
+}
+function __mmFastestMovementWeapon() {
+  if (!v || !v.alive || !Array.isArray(v.weapons)) return null;
+  const __mmCurrent = Number(__mmSelectedWeapon());
+  let __mmBest = null, __mmBestSpeed = -Infinity;
+  for (let __mmIndex = 0; __mmIndex < v.weapons.length; __mmIndex++) {
+    const __mmWeapon = Number(v.weapons[__mmIndex]),
+      __mmData = b && b.weapons && b.weapons[__mmWeapon];
+    if (!Number.isInteger(__mmWeapon) || !__mmData || __mmIsDaggersWeapon(__mmWeapon))
+      continue;
+    const __mmSpeed = Number(__mmData.spdMult);
+    // Weapons without a movement modifier are normal speed. Prefer the hand
+    // already visible on an exact tie so holding movement does not spam swaps.
+    const __mmResolvedSpeed = Number.isFinite(__mmSpeed) ? __mmSpeed : 1;
+    if (
+      __mmBest == null ||
+      __mmResolvedSpeed > __mmBestSpeed + 0.0001 ||
+      (__mmResolvedSpeed >= __mmBestSpeed - 0.0001 &&
+        __mmWeapon === __mmCurrent)
+    ) {
+      ((__mmBest = __mmWeapon), (__mmBestSpeed = __mmResolvedSpeed));
+    }
+  }
+  return __mmBest;
+}
+function __mmUpdateMovementHeldWeapon() {
+  if (
+    !__mmWASDMovementHeld() ||
+    !v ||
+    !v.alive ||
+    __mmManualHotbarToolCurrent() ||
+    __mmPrimaryHeld ||
+    __mmSecondaryHeld ||
+    __mmTrapAttackActive ||
+    __mmInsta.isActive() ||
+    __mmBoostInsta.isActive() ||
+    __mmInstaSyncPending ||
+    __mmInstaSyncFiring ||
+    __mmBushModeEnabled ||
+    __mmEnemyWithinCombatRange() ||
+    __mmDangerAnimalNearby() ||
+    !["idle", "movementGear", "soldierGear", "weaponRecharge"].includes(__mmActionOwner)
+  )
+    return !1;
+  const __mmWeapon = __mmFastestMovementWeapon();
+  if (Number.isInteger(__mmWeapon) && Number(__mmSelectedWeapon()) !== __mmWeapon) {
+    je(__mmWeapon, !0);
+    return !0;
+  }
+  return !1;
 }
 function __mmKittyFastestReloadWeapon() {
   if (!v || !v.alive || !Array.isArray(v.weapons)) return null;
@@ -37592,6 +37768,7 @@ function __mmUpdateMovementGear() {
   if (__mmInstaTestingModeEnabled) return;
   if (__mmAssassinConcealed) return;
   if (v && v.alive && __mmRecoverStrayCombatHat()) return;
+  __mmUpdateMovementHeldWeapon();
   if (!__mmMovementGearEnabled)
     return void (__mmRestoreMovementGear(),
     __mmRestoreProximityTail(),
@@ -37890,8 +38067,112 @@ function __mmAntiCollisionDecelDistance(__mmSpeed) {
   }
   return Math.max(0, __mmDistance);
 }
+function __mmGlotusSafeWalkObjectAllowed(__mmObject) {
+  if (!__mmObject || !__mmObject.active) return !1;
+  const __mmData = b && b.list && b.list[__mmObject.id],
+    __mmName = String((__mmData && __mmData.name) || "").toLowerCase(),
+    // Glotus SafeWalk accepts enemy spikes, world cactuses, and boost pads.
+    // Cactuses do not always have an item definition in the local object list.
+    __mmSpike = __mmName.includes("spikes") || !!(__mmData && __mmData.dmg),
+    __mmCactus = !!__mmObject.isCactus || __mmName.includes("cactus"),
+    __mmBoostPad = !!(__mmData && __mmData.boostSpeed);
+  return (
+    (__mmSpike || __mmCactus || __mmBoostPad) &&
+    !__mmFriendlyStructure(__mmObject)
+  );
+}
+function __mmGlotusSafeWalkThreat(__mmDirection) {
+  if (!v || !v.alive || !Number.isFinite(Number(__mmDirection))) return null;
+  const __mmMotion = __mmPassiveSpikeVelocity(),
+    // Glotus stores speed as the distance between its prior and current player
+    // positions. Rebuild that same per-server-tick distance from Kitty's
+    // observed velocity, clamped only to reject stale position packets.
+    __mmSpeed = Math.min(
+      80,
+      Math.max(0, Math.hypot(
+        Number(__mmMotion.x) || 0,
+        Number(__mmMotion.y) || 0,
+      ) * __mmServerTickMs()),
+    ),
+    __mmPlayerX = Number(v.x),
+    __mmPlayerY = Number(v.y),
+    __mmPreviousX = Number.isFinite(Number(v.x1))
+      ? Number(v.x1)
+      : __mmPlayerX - (Number(__mmMotion.x) || 0) * __mmServerTickMs(),
+    __mmPreviousY = Number.isFinite(Number(v.y1))
+      ? Number(v.y1)
+      : __mmPlayerY - (Number(__mmMotion.y) || 0) * __mmServerTickMs(),
+    __mmFutureX = __mmPlayerX + (Number(__mmMotion.x) || 0) * __mmServerTickMs(),
+    __mmFutureY = __mmPlayerY + (Number(__mmMotion.y) || 0) * __mmServerTickMs(),
+    __mmProbeDistance = 45 + __mmSpeed * 1.25,
+    __mmProbeX = __mmPlayerX + Math.cos(__mmDirection) * __mmProbeDistance,
+    __mmProbeY = __mmPlayerY + Math.sin(__mmDirection) * __mmProbeDistance,
+    __mmPlayerScale = Number(v.scale) || 35,
+    __mmCandidates = [];
+  const __mmObjects = __mmActiveObjectSnapshot().all;
+  for (let __mmIndex = 0; __mmIndex < __mmObjects.length; __mmIndex++) {
+    const __mmObject = __mmObjects[__mmIndex];
+    if (!__mmGlotusSafeWalkObjectAllowed(__mmObject)) continue;
+    const __mmScale = Math.max(1, __mmReferenceObjectScale(__mmObject)),
+      __mmAcquireRadius = __mmPlayerScale + __mmScale + 150,
+      __mmCurrentDistance = Math.hypot(
+        Number(__mmObject.x) - __mmPlayerX,
+        Number(__mmObject.y) - __mmPlayerY,
+      ),
+      __mmPreviousDistance = Math.hypot(
+        Number(__mmObject.x) - __mmPreviousX,
+        Number(__mmObject.y) - __mmPreviousY,
+      ),
+      __mmFutureDistance = Math.hypot(
+        Number(__mmObject.x) - __mmFutureX,
+        Number(__mmObject.y) - __mmFutureY,
+      );
+    // This reproduces Glotus EnemyManager.collidingObject(object, 150): any
+    // of previous/current/future positions may acquire a candidate, then only
+    // the nearest two are checked by SafeWalk.
+    if (
+      Math.min(__mmCurrentDistance, __mmPreviousDistance, __mmFutureDistance) >
+      __mmAcquireRadius
+    ) continue;
+    __mmCandidates.push({
+      object: __mmObject,
+      key: __mmAntiCollisionObjectKey(__mmObject),
+      scale: __mmScale,
+      distance: __mmCurrentDistance,
+    });
+  }
+  __mmCandidates.sort(function (__mmLeft, __mmRight) {
+    return __mmLeft.distance - __mmRight.distance;
+  });
+  for (let __mmIndex = 0; __mmIndex < Math.min(2, __mmCandidates.length); __mmIndex++) {
+    const __mmCandidate = __mmCandidates[__mmIndex],
+      __mmCollisionRadius = __mmPlayerScale + __mmCandidate.scale,
+      __mmProbeGap = Math.hypot(
+        Number(__mmCandidate.object.x) - __mmProbeX,
+        Number(__mmCandidate.object.y) - __mmProbeY,
+      ) - __mmCollisionRadius;
+    if (__mmProbeGap > 0) continue;
+    return {
+      object: __mmCandidate.object,
+      key: __mmCandidate.key,
+      scale: __mmCandidate.scale,
+      gap: __mmProbeGap,
+      stopGap: 0,
+      closingSpeed: __mmSpeed,
+      brakingDistance: __mmProbeDistance,
+      teleporter: !1,
+      glotusSafeWalk: !0,
+    };
+  }
+  return null;
+}
 function __mmAntiCollisionThreat(__mmDirection, __mmSkipKey) {
   if (!v || !v.alive || !Number.isFinite(Number(__mmDirection))) return null;
+  // SafeWalk is evaluated before Kitty's wider collision forecast. Do not let
+  // the manual bypass skip this Glotus-compatible stop; Glotus re-evaluates
+  // the two nearest colliders on every movement tick.
+  const __mmGlotusThreat = __mmGlotusSafeWalkThreat(__mmDirection);
+  if (__mmGlotusThreat) return __mmGlotusThreat;
   const __mmMotion = __mmPassiveSpikeVelocity(),
     __mmDirectionX = Math.cos(__mmDirection),
     __mmDirectionY = Math.sin(__mmDirection),
@@ -40977,8 +41258,8 @@ function __mmAutoPushOneSwingPlan(object) {
   if (!v || !v.alive || !object || !object.active || !object.isItem ||
       __mmFriendlyStructure(object) || !Number.isFinite(object.health) || object.health <= 0 ||
       Number(v.buildIndex) >= 0) return null;
-  const weapon = Number(__mmSelectedWeapon()), data = b && b.weapons && b.weapons[weapon];
-  if (!data || data.projectile != null || data.shield ||
+  const weapon = __mmAutomaticBreakWeapon(), data = b && b.weapons && b.weapons[weapon];
+  if (weapon == null || !data || data.projectile != null || data.shield ||
       __mmKittyManualBreakReloadRemaining(weapon) > 0 ||
       __mmWeaponStructureDamage(v, weapon, object) + 0.001 < object.health) return null;
   const scale = __mmThreatObjectScale(object), reach = Number(data.range) + scale - 5;
@@ -40998,6 +41279,7 @@ function __mmAutoPushClearRoute(waypoint, trap) {
     if (plan && distance <= plan.reach) {
       const angle = Math.atan2(object.y-self.y,object.x-self.x);
       O.send("D", angle);
+      je(plan.weapon, !0);
       O.send("F", 1, angle);
       O.send("F", 0, angle);
       __mmTrackPlayerToolCooldown(v.sid, plan.weapon, "auto-push-clear");
@@ -47581,6 +47863,23 @@ function __mmStableCombatAim(__mmTargetX, __mmTargetY, __mmFallback = null) {
       return __mmAngle;
     }
   }
+  // If an individual target's server interpolation is stale while render
+  // coordinates are live, use the concrete render-to-render bearing before
+  // falling back to any old aim. This prevents one bad entity frame from
+  // overwriting a freshly acquired Insta target with the default angle.
+  const __mmRenderDx = __mmX - Number(v && v.x),
+    __mmRenderDy = __mmY - Number(v && v.y);
+  if (
+    Number.isFinite(__mmRenderDx) &&
+    Number.isFinite(__mmRenderDy) &&
+    Math.hypot(__mmRenderDx, __mmRenderDy) > 0.5
+  ) {
+    const __mmRenderAngle = Math.atan2(__mmRenderDy, __mmRenderDx);
+    if (Number.isFinite(__mmRenderAngle)) {
+      __mmLastStableCombatAim = __mmRenderAngle;
+      return __mmRenderAngle;
+    }
+  }
   const __mmPrevious = Number(__mmLastStableCombatAim);
   if (Number.isFinite(__mmPrevious)) return __mmPrevious;
   const __mmFallbackAngle = Number(__mmFallback);
@@ -49985,10 +50284,16 @@ function __mmSmartPlaceNow(
     (!__mmReservedSlot && __mmMaxBuildCount(__mmCandidate.item) < 1)
   )
     return !1;
-  const __mmFresh = __mmSmartCandidateForAngle(
-    __mmCandidate.item,
-    __mmCandidate.angle,
-  );
+  const __mmFresh = __mmCandidate.expectedRemoval
+    ? __mmSmartCandidateForExpectedRemoval(
+        __mmCandidate.item,
+        __mmCandidate.angle,
+        __mmCandidate.expectedRemoval,
+      )
+    : __mmSmartCandidateForAngle(
+        __mmCandidate.item,
+        __mmCandidate.angle,
+      );
   if (!__mmFresh) return !1;
   try {
     if (
@@ -53057,17 +53362,25 @@ function __mmServerEntityPosition(__mmEntity) {
   const __mmServerX = Number(__mmEntity.x2),
     __mmServerY = Number(__mmEntity.y2),
     __mmRenderX = Number(__mmEntity.x),
-    __mmRenderY = Number(__mmEntity.y);
+    __mmRenderY = Number(__mmEntity.y),
+    __mmServerValid =
+      __mmEntity.x2 != null &&
+      __mmEntity.y2 != null &&
+      Number.isFinite(__mmServerX) &&
+      Number.isFinite(__mmServerY),
+    __mmRenderValid =
+      Number.isFinite(__mmRenderX) && Number.isFinite(__mmRenderY);
+  // x2/y2 are initialised to zero by some MooMoo packet paths before their
+  // first authoritative coordinate update. They are finite but not real world
+  // positions; accepting them makes every target aim point east at angle 0.
+  // A legitimate server/render interpolation gap is only a few movement ticks.
   if (
-    __mmEntity.x2 != null &&
-    __mmEntity.y2 != null &&
-    Number.isFinite(__mmServerX) &&
-    Number.isFinite(__mmServerY)
+    __mmServerValid &&
+    (!__mmRenderValid ||
+      Math.hypot(__mmServerX - __mmRenderX, __mmServerY - __mmRenderY) <= 360)
   )
     return { x: __mmServerX, y: __mmServerY };
-  return Number.isFinite(__mmRenderX) && Number.isFinite(__mmRenderY)
-    ? { x: __mmRenderX, y: __mmRenderY }
-    : null;
+  return __mmRenderValid ? { x: __mmRenderX, y: __mmRenderY } : null;
 }
 let __mmActiveTrapSnapshotAt = 0,
   __mmActiveTrapSnapshotSource = null,
@@ -53974,22 +54287,26 @@ function __mmTrapBreakPlan(__mmTrap) {
       weaponVariant: v.weaponVariant,
       skinIndex: v.skins && v.skins[40] ? 40 : v.skinIndex,
     },
-    __mmSeen = new Set();
+    // Keep this fallback self-contained because the trap solver is also used
+    // by the lightweight runtime extractor. The live client always takes the
+    // shared helper, including its Daggers exclusion.
+    __mmForcedWeapon = typeof __mmAutomaticBreakWeapon === "function"
+      ? __mmAutomaticBreakWeapon()
+      : v.weapons.includes(__mmGreatHammer)
+        ? __mmGreatHammer
+        : Number(v.weapons[0]);
+  if (__mmForcedWeapon == null) return null;
   let __mmBest = null;
-  const __mmPreferredSlot = Number(v.weapons[1]) === __mmGreatHammer ? 1 : 0;
-  for (const __mmIndex of [__mmPreferredSlot]) {
-    const __mmWeapon = Number(v.weapons[__mmIndex]),
-      __mmData = b && b.weapons && b.weapons[__mmWeapon];
+  for (const __mmWeapon of [__mmForcedWeapon]) {
+    const __mmData = b && b.weapons && b.weapons[__mmWeapon];
     if (
       !Number.isInteger(__mmWeapon) ||
-      __mmSeen.has(__mmWeapon) ||
       !__mmData ||
       __mmData.projectile != null ||
       __mmData.shield ||
       __mmDistance > __mmTrapWeaponRange(__mmWeapon, __mmTrap)
     )
       continue;
-    __mmSeen.add(__mmWeapon);
     const __mmDamage = __mmWeaponStructureDamage(
         __mmDamagePlayer,
         __mmWeapon,
@@ -54065,7 +54382,7 @@ function __mmTryTrapEscapeOwnReplace(__mmTrap) {
     !v ||
     !v.alive ||
     !Array.isArray(v.weapons) ||
-    Number(v.weapons[1]) !== __mmGreatHammer ||
+    !v.weapons.includes(__mmGreatHammer) ||
     !__mmWeaponReady(__mmGreatHammer) ||
     Date.now() - __mmTrapEscapeOwnReplaceLastAt < __mmServerTickMs()
   )
@@ -57169,11 +57486,7 @@ function __mmKittyDestroyingWeapon() {
   // The held break path follows AutoBreak exactly: Great Hammer wins whenever
   // it is equipped, regardless of which slot carries it or whether a main
   // swing could finish the current object. Without it, stay on the main hand.
-  if (v.weapons.some(function (__mmWeapon) {
-    return Number(__mmWeapon) === Number(__mmGreatHammer);
-  })) return __mmGreatHammer;
-  const __mmPrimary = Number(v.weapons[0]);
-  return Number.isInteger(__mmPrimary) ? __mmPrimary : null;
+  return __mmAutomaticBreakWeapon();
 }
 function __mmRightClickWeapon(__mmShieldPlan) {
   if (
