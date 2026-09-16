@@ -2,7 +2,7 @@
 // @name         kitty klient
 // @author       Coder Guy
 // @credits       random4ik — bot script
-// @version      7.0.28
+// @version      7.0.29
 // @icon         https://cdn.discordapp.com/icons/1540876076224356437/ac27c0ce87c4c46b407ebca78e150aeb.webp?size=2048
 // @description  kitty klient — a MooMoo.io client with adaptive zoom, fast autoheal, gear automation, combat tools, predictive placement, visual markers, CC0 background music, manual quick builds, and a fully rebindable keyboard/mouse controls HUD.
 // @match        *://moomoo.io/*
@@ -267,7 +267,7 @@
     const AUTO_PUSH_FINISHER_MIGRATION_KEY = "kitty-klient-auto-push-finisher-v1";
     const ASSASSIN_RANGE_AUTO_MIGRATION_KEY = "kitty-klient-assassin-range-auto-v1";
     const TAB_SYNC_BRIDGE_KEY = "kitty-klient-tab-sync-bridge-v1";
-const KITTY_KLIENT_VERSION = "7.0.28";
+const KITTY_KLIENT_VERSION = "7.0.29";
     const KITTY_SHARED_STORAGE_APPLIED_EVENT = "KittyMooMooSharedStorageApplied";
     // FRVR's v1.8 client changed the game module and now owns its own Altcha
     // verification flow. The legacy runtime patch relies on exact bundle
@@ -17563,9 +17563,9 @@ const __mmInsta = {
           Math.max(8, __mmFastCheckMs()),
         );
       try {
-        (__mmVelTickSetMovement(__mmPredictedAngle),
-          O.send("D", __mmPredictedAngle),
-          je(__mmContext.primary, !0));
+        if (!__mmVelTickSetMovement(__mmPredictedAngle))
+          return void this.cleanup("veltick-enemy-spike-path");
+        (O.send("D", __mmPredictedAngle), je(__mmContext.primary, !0));
       } catch (__mmVelTickOpeningError) {
         return void this.cleanup("veltick-opening-failed");
       }
@@ -17812,7 +17812,8 @@ const __mmInsta = {
           () => this.executeFollowup(),
           Math.max(8, __mmFastCheckMs()),
         );
-      __mmVelTickSetMovement(__mmPredictedAngle);
+      if (!__mmVelTickSetMovement(__mmPredictedAngle))
+        return void this.cleanup("veltick-enemy-spike-path");
       if (
         !this.sendAttack(
           __mmContext.primary,
@@ -40681,8 +40682,60 @@ function __mmKittyKnockbackContact(__mmEnemy, __mmPrediction) {
   }
   return __mmBest;
 }
+function __mmVelTickEnemySpikeThreat(__mmAngle) {
+  if (!v || !v.alive || !Number.isFinite(Number(__mmAngle))) return null;
+  // VelTick holds a commanded direction across its Turret lead and primary
+  // tick. Look through that full short lane before committing, rather than
+  // only checking whether the player is colliding at this instant.
+  const __mmTick = Math.max(75, Math.min(140, __mmServerTickMs())),
+    __mmMotion = __mmPassiveSpikeVelocity(),
+    __mmObservedStep = Math.min(
+      80,
+      Math.max(
+        0,
+        Math.hypot(Number(__mmMotion.x) || 0, Number(__mmMotion.y) || 0) *
+          __mmTick,
+      ),
+    ),
+    __mmLaneDistance = Math.max(52, Math.min(145, 52 + __mmObservedStep * 2)),
+    __mmStartX = Number(v.x),
+    __mmStartY = Number(v.y),
+    __mmEndX = __mmStartX + Math.cos(__mmAngle) * __mmLaneDistance,
+    __mmEndY = __mmStartY + Math.sin(__mmAngle) * __mmLaneDistance,
+    __mmPlayerScale = Math.max(1, Number(v.scale) || 35),
+    __mmSpikes = __mmActiveObjectSnapshot().spikes;
+  for (let __mmIndex = 0; __mmIndex < __mmSpikes.length; __mmIndex++) {
+    const __mmSpike = __mmSpikes[__mmIndex];
+    if (!__mmAutoEnemySpikeBreakable(__mmSpike)) continue;
+    const __mmSpikeX = Number(__mmSpike.x),
+      __mmSpikeY = Number(__mmSpike.y),
+      __mmToward =
+        (__mmSpikeX - __mmStartX) * Math.cos(__mmAngle) +
+        (__mmSpikeY - __mmStartY) * Math.sin(__mmAngle),
+      __mmRadius =
+        __mmPlayerScale + Math.max(1, Number(__mmSpike.scale) || 45) + 8;
+    // A spike already touching us must still permit a movement command away.
+    if (__mmToward <= 0) continue;
+    if (
+      __mmSegmentDistanceSquared(
+        __mmStartX,
+        __mmStartY,
+        __mmEndX,
+        __mmEndY,
+        __mmSpikeX,
+        __mmSpikeY,
+      ) <= __mmRadius * __mmRadius
+    )
+      return __mmSpike;
+  }
+  return null;
+}
 function __mmVelTickSetMovement(__mmAngle) {
-  if (!v || !v.alive || !Number.isFinite(__mmAngle)) return;
+  if (!v || !v.alive || !Number.isFinite(__mmAngle)) return !1;
+  if (__mmVelTickEnemySpikeThreat(__mmAngle)) {
+    __mmStopVelTickInsta("enemy spike in movement lane");
+    return !1;
+  }
   const __mmDifference =
     __mmVelTickMoveAngle == null
       ? Infinity
@@ -40692,10 +40745,11 @@ function __mmVelTickSetMovement(__mmAngle) {
             Math.cos(__mmAngle - __mmVelTickMoveAngle),
           ),
         );
-  if (__mmDifference < 0.035) return;
+  if (__mmDifference < 0.035) return !0;
   ((__mmVelTickMoveAngle = __mmAngle),
     (Kt = __mmAngle),
     O.send("9", __mmAngle));
+  return !0;
 }
 function __mmStopVelTickInsta(__mmReason) {
   if (__mmVelTickMoveAngle != null && O && typeof O.send === "function") {
