@@ -2,7 +2,7 @@
 // @name         kitty klient
 // @author       Coder Guy
 // @credits       random4ik — bot script
-// @version      7.0.25
+// @version      7.0.26
 // @icon         https://cdn.discordapp.com/icons/1540876076224356437/ac27c0ce87c4c46b407ebca78e150aeb.webp?size=2048
 // @description  kitty klient — a MooMoo.io client with adaptive zoom, fast autoheal, gear automation, combat tools, predictive placement, visual markers, CC0 background music, manual quick builds, and a fully rebindable keyboard/mouse controls HUD.
 // @match        *://moomoo.io/*
@@ -267,7 +267,7 @@
     const AUTO_PUSH_FINISHER_MIGRATION_KEY = "kitty-klient-auto-push-finisher-v1";
     const ASSASSIN_RANGE_AUTO_MIGRATION_KEY = "kitty-klient-assassin-range-auto-v1";
     const TAB_SYNC_BRIDGE_KEY = "kitty-klient-tab-sync-bridge-v1";
-const KITTY_KLIENT_VERSION = "7.0.25";
+const KITTY_KLIENT_VERSION = "7.0.26";
     const KITTY_SHARED_STORAGE_APPLIED_EVENT = "KittyMooMooSharedStorageApplied";
     // FRVR's v1.8 client changed the game module and now owns its own Altcha
     // verification flow. The legacy runtime patch relies on exact bundle
@@ -29055,18 +29055,9 @@ function __mmBreakableOverlayInfo(__mmObject) {
         ? "#c4b5fd"
         : __mmStructureRelationshipColor(__mmRelation);
   return {
-    health: __mmHealth,
     hits: __mmHits,
     color: __mmColor,
   };
-}
-function __mmFormatBreakableHealth(__mmHealth) {
-  const __mmValue = Math.max(0, Number(__mmHealth) || 0);
-  // Health is normally integral, but retain meaningful fractional damage
-  // without exposing floating-point noise from damage multipliers.
-  return Math.abs(__mmValue - Math.round(__mmValue)) < 0.005
-    ? String(Math.round(__mmValue))
-    : __mmValue.toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
 }
 function __mmBreakableIntersectsViewport(__mmX, __mmY, __mmScale) {
   const __mmWidth = Number(_),
@@ -29114,12 +29105,11 @@ function __mmDrawBreakableHitCounts() {
     if (!__mmBreakableIntersectsViewport(__mmX, __mmY, __mmScale)) continue;
     const __mmInfo = __mmBreakableOverlayInfo(__mmObject);
     if (!__mmInfo || __mmInfo.hits == null) continue;
-    // Show current health first, then the exact number of swings required.
-    // This makes small values such as 22 visible instead of showing only 1.
+    // Keep the count inside the structure rather than moving it into a card.
     // A compact dark outline retains readability on every official texture
     // without adding a label background or obscuring nearby structures.
     const __mmFontSize = Math.max(15, Math.min(21, Math.round(__mmScale * 0.36))),
-      __mmText = __mmFormatBreakableHealth(__mmInfo.health) + " · " + String(__mmInfo.hits);
+      __mmText = String(__mmInfo.hits);
     ((k.globalAlpha = 0.98),
       (k.font = "900 " + String(__mmFontSize) + "px Hammersmith One, Arial, sans-serif"),
       (k.textAlign = "center"),
