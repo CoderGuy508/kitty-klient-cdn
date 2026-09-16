@@ -2,7 +2,7 @@
 // @name         kitty klient
 // @author       Coder Guy
 // @credits       random4ik — bot script
-// @version      7.0.30
+// @version      7.0.31
 // @icon         https://cdn.discordapp.com/icons/1540876076224356437/ac27c0ce87c4c46b407ebca78e150aeb.webp?size=2048
 // @description  kitty klient — a MooMoo.io client with adaptive zoom, fast autoheal, gear automation, combat tools, predictive placement, visual markers, CC0 background music, manual quick builds, and a fully rebindable keyboard/mouse controls HUD.
 // @match        *://moomoo.io/*
@@ -267,7 +267,7 @@
     const AUTO_PUSH_FINISHER_MIGRATION_KEY = "kitty-klient-auto-push-finisher-v1";
     const ASSASSIN_RANGE_AUTO_MIGRATION_KEY = "kitty-klient-assassin-range-auto-v1";
     const TAB_SYNC_BRIDGE_KEY = "kitty-klient-tab-sync-bridge-v1";
-const KITTY_KLIENT_VERSION = "7.0.30";
+const KITTY_KLIENT_VERSION = "7.0.31";
     const KITTY_SHARED_STORAGE_APPLIED_EVENT = "KittyMooMooSharedStorageApplied";
     // FRVR's v1.8 client changed the game module and now owns its own Altcha
     // verification flow. The legacy runtime patch relies on exact bundle
@@ -38558,10 +38558,20 @@ function __mmAntiCollisionThreat(
 function __mmAntiCollisionBlockedPathStillThreatens(__mmDirection) {
   if (
     !__mmAntiCollisionBlockedObject ||
-    !__mmAntiCollisionBlockedObject.active ||
     __mmAntiCollisionBlockedKey == null
   )
     return !1;
+  // A destroyed item can survive for a frame in the old object instance. Use
+  // the current world snapshot before keeping STOP latched, so holding the
+  // same movement key resumes as soon as that blocker is actually gone.
+  const __mmLiveObject = __mmActiveObjectSnapshot(!0).all.find(
+    (__mmObject) =>
+      __mmObject &&
+      __mmObject.active &&
+      __mmAntiCollisionObjectKey(__mmObject) === __mmAntiCollisionBlockedKey,
+  );
+  if (!__mmLiveObject) return !1;
+  __mmAntiCollisionBlockedObject = __mmLiveObject;
   const __mmThreat = __mmAntiCollisionThreat(__mmDirection, null);
   return !!(__mmThreat && __mmThreat.key === __mmAntiCollisionBlockedKey);
 }
