@@ -2,7 +2,7 @@
 // @name         kitty klient
 // @author       Coder Guy
 // @credits       random4ik — bot script
-// @version      7.0.29
+// @version      7.0.30
 // @icon         https://cdn.discordapp.com/icons/1540876076224356437/ac27c0ce87c4c46b407ebca78e150aeb.webp?size=2048
 // @description  kitty klient — a MooMoo.io client with adaptive zoom, fast autoheal, gear automation, combat tools, predictive placement, visual markers, CC0 background music, manual quick builds, and a fully rebindable keyboard/mouse controls HUD.
 // @match        *://moomoo.io/*
@@ -267,7 +267,7 @@
     const AUTO_PUSH_FINISHER_MIGRATION_KEY = "kitty-klient-auto-push-finisher-v1";
     const ASSASSIN_RANGE_AUTO_MIGRATION_KEY = "kitty-klient-assassin-range-auto-v1";
     const TAB_SYNC_BRIDGE_KEY = "kitty-klient-tab-sync-bridge-v1";
-const KITTY_KLIENT_VERSION = "7.0.29";
+const KITTY_KLIENT_VERSION = "7.0.30";
     const KITTY_SHARED_STORAGE_APPLIED_EVENT = "KittyMooMooSharedStorageApplied";
     // FRVR's v1.8 client changed the game module and now owns its own Altcha
     // verification flow. The legacy runtime patch relies on exact bundle
@@ -4758,7 +4758,7 @@ const KITTY_KLIENT_VERSION = "7.0.29";
 
         const kittyInstas = addHudSection(combatPage, "Kitty Insta library");
         addHudToggle(kittyInstas, "autoBowUpgradeInsta", "Bow Upgrade Insta", "R prefers a ready close-range normal Insta and chains the upgrade shots only when compatible; otherwise a fully ready Bow → Crossbow → Musket run is the ranged fallback. Friendly and personal-turret shots can trigger it too");
-        addHudToggle(kittyInstas, "reverseInsta", "Reverse R order", "R uses Turret + secondary first, then Bull + primary. Polearm + Great Hammer waits for the predicted Turret hit before the Bull/Polearm phase; Shift+R remains Kitty's Crossbow/Musket boost Insta");
+        addHudToggle(kittyInstas, "reverseInsta", "Reverse R order", "R uses Turret + secondary first, then Bull + primary. Polearm + Great Hammer sends Turret/Hammer, then Bull/Polearm on the next tick; Shift+R remains Kitty's Crossbow/Musket boost Insta");
         addHudToggle(kittyInstas, "oneTickInsta", "One-Tick Insta", "Shift+P toggles the secondary-first one-server-tick combo; projectile timing is prediction-adjusted");
         addHudToggle(kittyInstas, "sevenShameInsta", "7-Shame Insta", "When the nearest enemy's server-reported Shame count is exactly 7, fire a fully ready lethal Insta. It stays off when that count is unavailable.");
         addHudToggle(kittyInstas, "appleInsta", "Apple Insta", "Automatically uses Turret + Great Hammer, then Bull + Polearm against a nearby Soldier-helmet target only when the Hammer landing lane has open space");
@@ -11800,6 +11800,7 @@ let __mmKittyInstaTimer = 0,
   __mmVelTickStartedAt = 0,
   __mmVelTickManualUntil = 0,
   __mmAutoPushMoveAngle = null,
+  __mmAutoPushMoveSentAt = 0,
   __mmAutoPushTargetSid = null,
   __mmAutoPushRoute = [],
   __mmAutoPushRouteAt = 0,
@@ -16064,7 +16065,7 @@ function __mmObserveForcedDirectionPacket(__mmArgs) {
         : __mmPacket === "F"
           ? __mmArgs[2]
           : null;
-  if (Number.isFinite(Number(__mmVisualAngle))) {
+  if (__mmVisualAngle != null && Number.isFinite(Number(__mmVisualAngle))) {
     const __mmServerAngle = __mmNormalizeVisualAim(Number(__mmVisualAngle));
     // This is captured at the packet boundary, so the projectile helper shows
     // the angle the game most recently gave the server rather than a merely
@@ -16293,9 +16294,8 @@ const __mmInsta = {
   shieldWaitStartedAt: 0,
   tankPredictPlan: null,
   tankCoverTimer: 0,
-  // Absolute arrival time for the Turret shot in the Polearm + Great Hammer
-  // reverse combo. The Bull/Polearm phase is held until this exact window.
-  reverseTurretImpactAt: 0,
+  // Glotus reverse sends Turret/Hammer now and Bull/Polearm next tick.
+  reversePrimaryAt: 0,
   isActive() {
     return this.state !== "idle" && this.state !== "cleanup";
   },
@@ -16403,20 +16403,19 @@ const __mmInsta = {
     );
   },
   profileStep(__mmTarget, __mmWeapon) {
-    // This is the Glotus-style reverse order, but use the Turret's estimated
-    // arrival instead of assuming that its projectile lands one server tick
-    // after the Great Hammer packet.
+    // Match Glotus: the main swing belongs to the next server phase, without
+    // adding projectile flight time to the melee follow-up.
     if (
       this.reverseTurretPolearm(
         this.primaryWeapon,
         __mmWeapon,
         __mmTarget,
       ) &&
-      Number(this.reverseTurretImpactAt) > 0
+      Number(this.reversePrimaryAt) > 0
     )
       return Math.max(
         1,
-        Math.min(700, Number(this.reverseTurretImpactAt) - Date.now()),
+        Math.min(700, Number(this.reversePrimaryAt) - Date.now()),
       );
     if (this.profile !== "oneTick") return this.tick();
     const __mmData = this.weaponData(__mmWeapon),
@@ -16811,7 +16810,7 @@ const __mmInsta = {
       return !1;
     if (!__mmIgnoreShield && !this.pathClear(__mmTarget)) return !1;
     const __mmPrimary = this.supportedPrimary(),
-      __mmPrimaryReady = (__mmProfile === "velTick" || __mmProfile === "tankPredict" || __mmProfile === "turretMain")
+      __mmPrimaryReady = (__mmProfile === "velTick" || __mmProfile === "tankPredict")
         ? __mmWeaponReadyWithin(__mmPrimary, this.tick())
         : __mmWeaponReady(__mmPrimary);
     if (
@@ -17124,6 +17123,19 @@ const __mmInsta = {
       __mmTurretCooldownRemaining(v, Date.now()) <= 0
     );
   },
+  turretTravelMs(__mmTarget) {
+    if (!__mmTarget || !v) return this.tick();
+    return this.tick() + Math.max(
+      0,
+      Math.hypot(__mmTarget.x - v.x, __mmTarget.y - v.y) -
+        (Number(__mmTarget.scale) || 35),
+    ) / Math.max(1, __mmTurretProjectileSpeed);
+  },
+  turretAim(__mmTarget) {
+    return this.mouseAimOnly || !__mmTarget
+      ? this.aim(null)
+      : __mmSyncAimAngle(__mmTarget, this.turretTravelMs(__mmTarget));
+  },
   turretInRange(__mmTarget) {
     if (!v || !__mmTarget) return !1;
     const __mmReach =
@@ -17257,7 +17269,7 @@ const __mmInsta = {
     this.profile = __mmRequestedProfile;
     this.profileSource = String(__mmOptions.profileSource || this.profile);
     this.tankPredictPlan = __mmOptions.tankPredictPlan || null;
-    this.reverseTurretImpactAt = 0;
+    this.reversePrimaryAt = 0;
     this.popupShown = !1;
     if (!this.runtimeReady()) return (this.cleanup("runtime-unavailable"), !1);
     this.capture();
@@ -17481,6 +17493,10 @@ const __mmInsta = {
       const __mmPlan = this.tankPredictPlan;
       if (!__mmPlan || !this.turretReady())
         return void this.cleanup("tank-window-turret-unavailable");
+      if (this.profile === "turretMain" &&
+        (!__mmWeaponReady(__mmContext.primary) ||
+          __mmSyncEnemyHatImpact(__mmContext.target, __mmPlan.primaryAt).defensive))
+        return void this.cleanup("turret-main-opening-lost");
       const __mmNow = Date.now();
       if (__mmNow > Number(__mmPlan.pulseEndAt || Infinity) - 4)
         return void this.cleanup("tank-window-expired-before-turret");
@@ -17603,17 +17619,19 @@ const __mmInsta = {
           __mmContext.target,
         ),
         __mmGearHat = this.selectSecondaryDamageGear();
+      if (__mmGearHat == null)
+        return void this.cleanup("reverse-turret-unavailable");
       if (__mmReverseTurretPolearm) {
-        // The Turret fires from this gear phase. Do not wait for its cosmetic
-        // acknowledgement: record the actual arrival window and send Hammer
-        // behind the same packet phase, matching Glotus's immediate reverse.
-        const __mmTurretTravel = this.turretTravelMs(__mmContext.target);
-        this.reverseTurretImpactAt = Date.now() + __mmTurretTravel;
+        // Aim before committing the hat; launch Hammer in this same phase.
+        // Do not wait for a cosmetic echo or reserve reload before the equip.
         try {
-          (O.send("D", this.turretAim(__mmContext.target)),
-            __mmAssumeTurretGearShot());
-        } catch (__mmReverseTurretAimError) {}
-        __mmGearArbiter.commit();
+          O.send("D", this.aim(__mmContext.target));
+          __mmGearArbiter.commit();
+          __mmAssumeTurretGearShot();
+        } catch (__mmReverseTurretError) {
+          return void this.cleanup("reverse-turret-send-failed");
+        }
+        this.reversePrimaryAt = Date.now() + this.tick();
       } else if (!__mmGearArbiter.acknowledged(__mmGearHat))
         return void this.schedule(
           () => this.executeBurst(),
@@ -17674,18 +17692,16 @@ const __mmInsta = {
   },
   executeFollowup() {
     if (this.state !== "executeBurst") return;
-    // The Polearm + Great Hammer reverse must not spend Bull/Polearm before
-    // the Turret projectile's predicted impact. Timers may wake up early, so
-    // re-check the absolute deadline instead of trusting one local callback.
-    const __mmReverseImpactAt = Number(this.reverseTurretImpactAt) || 0,
+    // Timers may wake early; keep Bull/Polearm on the next reverse phase.
+    const __mmReversePrimaryAt = Number(this.reversePrimaryAt) || 0,
       __mmNow = Date.now();
     if (
       this.profile === "reverse" &&
-      __mmReverseImpactAt > __mmNow + 2
+      __mmReversePrimaryAt > __mmNow + 2
     )
       return void this.schedule(
         () => this.executeFollowup(),
-        Math.max(1, __mmReverseImpactAt - __mmNow),
+        Math.max(1, __mmReversePrimaryAt - __mmNow),
       );
     // Combo stage two: release the primary, then switch Turret gear and
     // the secondary in the same phase before firing its 25 ms tap.
@@ -17842,9 +17858,8 @@ const __mmInsta = {
           __mmContext.target,
         ),
         __mmGearHat = this.selectDamageGear();
-      // Bull's packet and the Polearm swing have to share the Turret impact
-      // phase. Waiting for the skin echo here consistently puts the swing
-      // behind the projectile, so commit this verified reverse pair directly.
+      // Send Bull and Polearm together on the next tick, like Glotus.
+      // A delayed cosmetic echo must not postpone the weapon packet.
       if (__mmReverseTurretPolearm) __mmGearArbiter.commit();
       else if (!__mmGearArbiter.acknowledged(__mmGearHat))
         return void this.schedule(
@@ -17854,7 +17869,7 @@ const __mmInsta = {
       const __mmImpactAim = __mmReverseTurretPolearm && __mmContext.target
         ? __mmSyncAimAngle(
             __mmContext.target,
-            Math.max(0, __mmReverseImpactAt - Date.now()),
+            Math.max(0, __mmReversePrimaryAt - Date.now()),
           )
         : null;
       if (
@@ -18129,7 +18144,7 @@ const __mmInsta = {
     this.postSpikeCalculatedAt = 0;
     this.postSpikeTarget = null;
     this.tankPredictPlan = null;
-    this.reverseTurretImpactAt = 0;
+    this.reversePrimaryAt = 0;
     this.profile = "normal";
     this.profileSource = "R";
     this.popupShown = !1;
@@ -33949,7 +33964,9 @@ const __mmGearArbiter = {
     if (!v || !v.alive) return !1;
     const __mmNow = Date.now(),
       __mmExisting = this.intents.get(__mmSource),
-      __mmRequestedPriority = Number(__mmOptions.priority),
+      __mmRequestedPriority = __mmOptions.priority == null
+        ? NaN
+        : Number(__mmOptions.priority),
       __mmPriority = Number.isFinite(__mmRequestedPriority)
         ? __mmRequestedPriority
         : Math.max(
@@ -34068,7 +34085,8 @@ const __mmGearArbiter = {
       ),
       __mmSendHat = !!(
         __mmHat != null &&
-        Number(v.skinIndex) !== Number(__mmHat) &&
+        (Number(v.skinIndex) !== Number(__mmHat) ||
+          (__mmPendingHat != null && Number(__mmPendingHat) !== Number(__mmHat))) &&
         !(
           Number(__mmPendingHat) === Number(__mmHat) &&
           __mmNow - __mmPendingHatAt < __mmHatRetryAfter
@@ -40469,7 +40487,7 @@ function __mmKittyProfileReady(__mmEnemy, __mmProfile) {
   )
     return !1;
   const __mmPrimary = __mmInsta.supportedPrimary(),
-    __mmPrimaryReady = (__mmProfile === "velTick" || __mmProfile === "tankPredict" || __mmProfile === "turretMain")
+    __mmPrimaryReady = (__mmProfile === "velTick" || __mmProfile === "tankPredict")
       ? __mmWeaponReadyWithin(__mmPrimary, __mmServerTickMs())
       : __mmWeaponReady(__mmPrimary);
   if (
@@ -40763,9 +40781,21 @@ function __mmStopVelTickInsta(__mmReason) {
     __mmActionRelease("velTickSetup", __mmReason || "stopped"));
 }
 function __mmAutoPushSetMovement(__mmAngle) {
-  if (!v || !v.alive || !Number.isFinite(__mmAngle)) return;
-  const __mmDifference =
-    __mmAutoPushMoveAngle == null
+  if (!v || !v.alive || !Number.isFinite(__mmAngle)) return !1;
+  const __mmNow = Date.now(),
+    __mmRefreshMs = Math.max(80, Math.min(140, __mmServerTickMs())),
+    __mmCurrentDifference = Kt != null && Number.isFinite(Number(Kt))
+      ? Math.abs(
+          Math.atan2(
+            Math.sin(__mmAngle - Number(Kt)),
+            Math.cos(__mmAngle - Number(Kt)),
+          ),
+        )
+      : Infinity,
+    __mmRecentlySent =
+      __mmAutoPushMoveSentAt > 0 &&
+      __mmNow - __mmAutoPushMoveSentAt < __mmRefreshMs,
+    __mmDifference = __mmAutoPushMoveAngle == null
       ? Infinity
       : Math.abs(
           Math.atan2(
@@ -40773,10 +40803,20 @@ function __mmAutoPushSetMovement(__mmAngle) {
             Math.cos(__mmAngle - __mmAutoPushMoveAngle),
           ),
         );
-  if (__mmDifference < 0.035) return;
+  // The action arbiter permits defensive movement to clear Kt while Auto Push
+  // remains the route owner. Re-send in that case (and once per tick) instead
+  // of treating our cached angle as evidence that the server is still moving.
+  if (
+    __mmDifference < 0.035 &&
+    __mmCurrentDifference < 0.035 &&
+    __mmRecentlySent
+  )
+    return !0;
   ((__mmAutoPushMoveAngle = __mmAngle),
     (Kt = __mmAngle),
-    O.send("9", __mmAngle));
+    O.send("9", __mmAngle),
+    (__mmAutoPushMoveSentAt = __mmNow));
+  return !0;
 }
 function __mmStopAutoPushSetup(__mmReason) {
   __mmAutoPushShieldAngle = null;
@@ -40788,6 +40828,7 @@ function __mmStopAutoPushSetup(__mmReason) {
     } catch (__mmAutoPushStopError) {}
   }
   ((__mmAutoPushMoveAngle = null),
+    (__mmAutoPushMoveSentAt = 0),
     (__mmAutoPushTargetSid = null),
     (__mmAutoPushRoute = []),
     (__mmAutoPushRouteAt = 0),
@@ -42492,7 +42533,7 @@ const __mmTurretMainSync = {
     const __mmPrimary = __mmInsta.supportedPrimary();
     if (
       __mmPrimary == null ||
-      !__mmWeaponReadyWithin(__mmPrimary, __mmServerTickMs()) ||
+      !__mmWeaponReady(__mmPrimary) ||
       !__mmInsta.inRange(__mmPrimary, __mmEnemy) ||
       !__mmInsta.pathClear(__mmEnemy)
     )
@@ -42500,7 +42541,7 @@ const __mmTurretMainSync = {
     const __mmCurrentHat = Number(__mmEnemy.skinIndex),
       __mmNextHat = Number(__mmEnemy.skinIndex2),
       __mmTurretTravel = Math.max(1, __mmInsta.turretTravelMs(__mmEnemy)),
-      __mmPrimaryAt = __mmNow + Math.max(8, Math.min(__mmServerTickMs(), 42)),
+      __mmPrimaryAt = __mmNow + __mmServerTickMs(),
       __mmImpactAt = __mmNow + __mmTurretTravel,
       __mmImpactHat = __mmSyncEnemyHatImpact(__mmEnemy, __mmImpactAt),
       __mmRecord = __mmTankPredictInsta.records[String(__mmEnemy.sid)];
