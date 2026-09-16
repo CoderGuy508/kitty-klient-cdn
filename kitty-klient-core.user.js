@@ -2,7 +2,7 @@
 // @name         kitty klient
 // @author       Coder Guy
 // @credits       random4ik — bot script
-// @version      7.0.27
+// @version      7.0.28
 // @icon         https://cdn.discordapp.com/icons/1540876076224356437/ac27c0ce87c4c46b407ebca78e150aeb.webp?size=2048
 // @description  kitty klient — a MooMoo.io client with adaptive zoom, fast autoheal, gear automation, combat tools, predictive placement, visual markers, CC0 background music, manual quick builds, and a fully rebindable keyboard/mouse controls HUD.
 // @match        *://moomoo.io/*
@@ -267,7 +267,7 @@
     const AUTO_PUSH_FINISHER_MIGRATION_KEY = "kitty-klient-auto-push-finisher-v1";
     const ASSASSIN_RANGE_AUTO_MIGRATION_KEY = "kitty-klient-assassin-range-auto-v1";
     const TAB_SYNC_BRIDGE_KEY = "kitty-klient-tab-sync-bridge-v1";
-const KITTY_KLIENT_VERSION = "7.0.27";
+const KITTY_KLIENT_VERSION = "7.0.28";
     const KITTY_SHARED_STORAGE_APPLIED_EVENT = "KittyMooMooSharedStorageApplied";
     // FRVR's v1.8 client changed the game module and now owns its own Altcha
     // verification flow. The legacy runtime patch relies on exact bundle
@@ -27158,7 +27158,7 @@ function __mmMatThiefWeaponCandidates() {
     __mmData &&
     __mmData.projectile == null &&
     !__mmData.shield &&
-    __mmWeaponReady(__mmWeapon)
+    __mmAutomaticBreakReady(__mmWeapon)
     ? [__mmWeapon]
     : [];
 }
@@ -27526,10 +27526,11 @@ function __mmUpdateMatThief() {
   ((__mmMatThiefReturnAngle = __mmReturnAngle),
     (__mmMatThiefRestoreTool = __mmSelectedTool()),
     (__mmMatThiefAimAngle = __mmPlan.angle),
-    O.send("D", __mmPlan.angle),
     je(__mmPlan.weapon, !0),
     O.send("F", 1, __mmPlan.angle),
-    (__mmMatThiefAttackHeld = !0),
+    O.send("F", 0, null),
+    (__mmMatThiefAttackHeld = !1),
+    __mmTrackPlayerToolCooldown(v.sid, __mmPlan.weapon, "mat-thief-break"),
     (__mmMatThiefReleaseTimer = setTimeout(function () {
       __mmFinishMatThief("last hit sent");
     }, __mmServerTickMs())));
@@ -28918,7 +28919,7 @@ function __mmUpdateAutoEnemySpikeBreak() {
   )
     return;
   const __mmPlan = __mmAutoEnemySpikeBreakPlan();
-  if (!__mmPlan || !__mmWeaponReady(__mmPlan.weapon)) return;
+  if (!__mmPlan || !__mmAutomaticBreakReady(__mmPlan.weapon)) return;
   __mmActionOwner === "weaponRecharge" && __mmPauseWeaponRecharge(!0);
   if (!__mmActionClaim("enemySpikeBreak", "Glotus-style hostile spike break")) return;
   ((__mmAutoEnemySpikeBreakLockedWeapon = Number(__mmPlan.weapon)),
@@ -28930,10 +28931,9 @@ function __mmUpdateAutoEnemySpikeBreak() {
     // one-tick lease raises damage on both one-hit and multi-hit spikes, then
     // releases before the next threat or gear decision.
     v.skins && v.skins[40] && __mmActivateImmediateTankTick();
-    (O.send("D", __mmPlan.angle),
-      je(__mmPlan.weapon, !0),
+    (je(__mmPlan.weapon, !0),
       O.send("F", 1, __mmPlan.angle),
-      O.send("F", 0, __mmPlan.angle),
+      O.send("F", 0, null),
       __mmTrackPlayerToolCooldown(v.sid, __mmPlan.weapon, "enemy-spike-break"),
       __mmArmAutoEnemySpikeBreakReplacement(
         __mmPlan,
@@ -39817,6 +39817,11 @@ function __mmWeaponReadyWithin(__mmWeapon, __mmLeadMs) {
       : 0,
     __mmRemaining = Math.max(__mmTrackedRemaining, __mmLiveRemaining);
   return __mmRemaining <= Math.max(0, Number(__mmLeadMs) || 0);
+}
+function __mmAutomaticBreakReady(__mmWeapon, __mmNow = Date.now()) {
+  // Automatic breakers must use the observed cooldown as well as the current
+  // reload value. The server's reload packet can arrive one tick late.
+  return __mmWeaponReadyWithin(__mmWeapon, 0);
 }
 function __mmBoostBreakWeapon() {
   if (!v || !v.alive || !Array.isArray(v.weapons) || !b || !b.weapons)
