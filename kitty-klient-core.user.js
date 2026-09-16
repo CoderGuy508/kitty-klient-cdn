@@ -2,7 +2,7 @@
 // @name         kitty klient
 // @author       Coder Guy
 // @credits       random4ik — bot script
-// @version      7.0.23
+// @version      7.0.24
 // @icon         https://cdn.discordapp.com/icons/1540876076224356437/ac27c0ce87c4c46b407ebca78e150aeb.webp?size=2048
 // @description  kitty klient — a MooMoo.io client with adaptive zoom, fast autoheal, gear automation, combat tools, predictive placement, visual markers, CC0 background music, manual quick builds, and a fully rebindable keyboard/mouse controls HUD.
 // @match        *://moomoo.io/*
@@ -267,7 +267,7 @@
     const AUTO_PUSH_FINISHER_MIGRATION_KEY = "kitty-klient-auto-push-finisher-v1";
     const ASSASSIN_RANGE_AUTO_MIGRATION_KEY = "kitty-klient-assassin-range-auto-v1";
     const TAB_SYNC_BRIDGE_KEY = "kitty-klient-tab-sync-bridge-v1";
-const KITTY_KLIENT_VERSION = "7.0.23";
+const KITTY_KLIENT_VERSION = "7.0.24";
     const KITTY_SHARED_STORAGE_APPLIED_EVENT = "KittyMooMooSharedStorageApplied";
     // FRVR's v1.8 client changed the game module and now owns its own Altcha
     // verification flow. The legacy runtime patch relies on exact bundle
@@ -1753,6 +1753,15 @@ const KITTY_KLIENT_VERSION = "7.0.23";
         });
     }
 
+    function kittyNamePrefixExempt() {
+        const session = readKittyAccountSession();
+        if (!kittyAccountSessionIsLive(session)) return false;
+        return kittyRankProfiles(session.profile).some((rank) =>
+            ["dev", "vip", "mod"].includes(rank.key)
+        );
+    }
+    window.__KittyNamePrefixExempt = kittyNamePrefixExempt;
+
     function applyKittyNameTrademark() {
         const input = document.getElementById("nameInput");
         if (!input) return;
@@ -1766,8 +1775,16 @@ const KITTY_KLIENT_VERSION = "7.0.23";
         input.dataset.kittyNameLimit = String(nameLimit);
         input.maxLength = originalMax;
         input.setAttribute("maxlength", String(originalMax));
-        input.placeholder = "k-Your Name";
+        input.placeholder = kittyNamePrefixExempt() ? "Your Name" : "k-Your Name";
         const normalize = () => {
+            if (kittyNamePrefixExempt()) {
+                input.placeholder = "Your Name";
+                input.dataset.kittyNameLimit = String(originalMax);
+                input.value = String(input.value || "").slice(0, originalMax);
+                return;
+            }
+            input.placeholder = "k-Your Name";
+            input.dataset.kittyNameLimit = String(nameLimit);
             const normalized = prefix + String(input.value || "")
                 .replace(/^(?:k-)+/i, "")
                 .slice(0, nameLimit);
@@ -1787,6 +1804,7 @@ const KITTY_KLIENT_VERSION = "7.0.23";
             input.addEventListener("input", normalize);
             input.addEventListener("change", normalize);
             const protectPrefix = (event) => {
+                if (kittyNamePrefixExempt()) return;
                 const start = Number(input.selectionStart),
                     end = Number(input.selectionEnd),
                     inputType = String(event.inputType || ""),
@@ -1807,6 +1825,7 @@ const KITTY_KLIENT_VERSION = "7.0.23";
             };
             const clampCaret = () => {
                 normalize();
+                if (kittyNamePrefixExempt()) return;
                 if (
                     input.selectionStart != null &&
                     input.selectionEnd != null &&
@@ -1844,7 +1863,7 @@ const KITTY_KLIENT_VERSION = "7.0.23";
             target: "#nameInput",
             eyebrow: "Your name",
             title: "The k- tag is automatic",
-            copy: "Type the part of your name after k-. The prefix is shown in the box, cannot be deleted, and is included when you enter the game."
+            copy: "Type the part of your name after k-. The prefix is included when you enter the game. DEV, VIP, and MOD ranks may edit their full name without it."
         }),
         Object.freeze({
             phase: "menu",
@@ -12404,9 +12423,7 @@ let __mmTrapAttackTimer = 0,
   __mmTrapWeapon = null,
   __mmTrapHat = null,
   __mmTrapAttackHeld = !1,
-  // The trap breaker keeps its F=1 stream alive. This timestamp lets a
-  // placement/food transaction re-arm it without changing Tank's separate
-  // one-swing on/off cadence.
+  // Timestamp of the most recent ready trap-break attack pulse.
   __mmTrapAttackLastHoldAt = 0,
   __mmTrapAttackHeldWeapon = null,
   // Preserve the selected main for the server acknowledgement after a
@@ -13369,6 +13386,8 @@ const __mmBreakableHealth = new WeakMap(),
   __mmPlayerToolCooldowns = Object.create(null),
   __mmHatDataById = Object.create(null);
 const __mmRecentLocalBreakableAttacks = [];
+const __mmConfirmedStructureSwings = [], __mmPendingStructureHits = [], __mmStructureSwingPackets = [];
+let __mmStructureSwingSequence = 0;
 let __mmBreakableHealthLastPruneAt = 0;
 const __mmProjectileCooldownStates = new WeakMap();
 let __mmProjectileCooldownLastScanAt = 0;
@@ -14937,34 +14956,39 @@ je = function (__mmItem, __mmIsWeapon) {
   const __mmResult = __mmOriginalSelect(__mmItem, __mmIsWeapon);
   return (__mmSyncPublishSelection(__mmItem, __mmIsWeapon), __mmResult);
 };
+function __mmNamePrefixExempt() {
+  return typeof window.__KittyNamePrefixExempt === "function" &&
+    window.__KittyNamePrefixExempt();
+}
 function __mmPrepareTrademarkNameInput() {
   // Do not touch MooMoo's minified name-input binding here. This patch block is
   // inserted before that top-level const is initialized in the current bundle,
   // so even testing the binding aborts the whole module through the TDZ.
   const __mmNameInput = document.getElementById("nameInput");
-  if (!__mmNameInput) return 13;
+  if (!__mmNameInput) return __mmNamePrefixExempt() ? 15 : 13;
   const __mmStoredOriginal = Number(__mmNameInput.dataset.kittyOriginalNameMax),
     __mmOriginalMax =
       Number.isFinite(__mmStoredOriginal) && __mmStoredOriginal > 2
         ? __mmStoredOriginal
         : Math.max(3, Number(__mmNameInput.maxLength) || 15),
-    __mmLimit = Math.max(1, __mmOriginalMax - 2),
-    __mmRaw = String(__mmNameInput.value || "")
-      .replace(/^(?:k-)+/i, "")
+    __mmExempt = __mmNamePrefixExempt(),
+    __mmLimit = Math.max(1, __mmOriginalMax - (__mmExempt ? 0 : 2)),
+    __mmRaw = (__mmExempt ? String(__mmNameInput.value || "") : String(__mmNameInput.value || "").replace(/^(?:k-)+/i, ""))
       .slice(0, __mmLimit),
-    __mmVisible = "k-" + __mmRaw;
+    __mmVisible = (__mmExempt ? "" : "k-") + __mmRaw;
   (__mmNameInput.dataset.kittyOriginalNameMax = String(__mmOriginalMax),
     __mmNameInput.dataset.kittyNameLimit = String(__mmLimit),
     (__mmNameInput.maxLength = __mmOriginalMax),
     __mmNameInput.setAttribute("maxlength", String(__mmOriginalMax)),
-    (__mmNameInput.placeholder = "k-Your Name"),
+    (__mmNameInput.placeholder = __mmExempt ? "Your Name" : "k-Your Name"),
     __mmNameInput.value !== __mmVisible &&
       (__mmNameInput.value = __mmVisible));
   return __mmLimit;
 }
 function __mmTrademarkPlayerName(__mmName) {
-  const __mmLimit = __mmPrepareTrademarkNameInput(),
-    __mmRaw = String(__mmName || "")
+  const __mmLimit = __mmPrepareTrademarkNameInput();
+  if (__mmNamePrefixExempt()) return String(__mmName || "").slice(0, __mmLimit);
+  const __mmRaw = String(__mmName || "")
       .replace(/^(?:k-)+/i, "")
       .slice(0, __mmLimit);
   return "k-" + __mmRaw;
@@ -24940,23 +24964,14 @@ function __mmBreakableState(__mmObject) {
       )),
       (__mmState.confidence = "confirmed"));
   } else if (__mmLiveChanged) {
-    // A lower object-health update is authoritative, but never raise a
-    // placeable back above a confirmed hit estimate. The game can repeatedly
-    // deliver max health for an already-damaged build on this client version.
+    // A changed lower live value is authoritative and corrects estimates.
+    // Creation/max-health replays are handled separately above.
     ((__mmState.liveHealth = __mmLiveHealth),
       (__mmState.pendingDamage = __mmPending),
       (__mmState.lastAuthoritativeAt = __mmNow),
       (__mmState.lastLiveChangeAt = __mmNow));
     if (__mmLiveHealth < __mmPreviousLive - 0.001) {
-      ((__mmState.health = Math.max(
-        0,
-        Math.min(
-          Number.isFinite(__mmPreviousHealth)
-            ? __mmPreviousHealth
-            : __mmLiveHealth,
-          __mmLiveHealth,
-        ),
-      )),
+      ((__mmState.health = __mmLiveHealth),
         (__mmState.pending.length = 0),
         (__mmState.pendingDamage = 0),
         (__mmState.confidence = "live"));
@@ -24988,16 +25003,9 @@ function __mmPredictBreakableHit(__mmState, __mmDamage, __mmSource) {
   const __mmNow = Date.now(),
     __mmHitDamage = Math.max(0, Number(__mmDamage));
   if (!(__mmHitDamage > 0)) return !1;
-  const __mmDedupeKey = String(__mmSource || "unknown"),
-    __mmRecent = __mmState.lastPredicted;
-  // Some MooMoo builds echo the same hit through two visual callbacks.  One
-  // confirmed hit should be one prediction, never two bars of missing health.
-  if (
-    __mmRecent &&
-    __mmRecent.key === __mmDedupeKey &&
-    __mmNow - Number(__mmRecent.at || 0) < Math.max(240, __mmServerTickMs() * 2)
-  )
-    return !1;
+  const __mmDedupeKey = String(__mmSource || "unknown");
+  __mmBreakablePendingDamage(__mmState, __mmNow);
+  if (__mmState.pending.some((hit) => hit.source === __mmDedupeKey)) return !1;
   (__mmState.pending.push({
     damage: __mmHitDamage,
     at: __mmNow,
@@ -28959,151 +28967,79 @@ function __mmBreakableAngleDifference(__mmFirst, __mmSecond) {
     ),
   );
 }
-function __mmLocalBreakableHitProfile(__mmObject, __mmHitAngle) {
-  if (!v || !v.alive) return null;
-  const __mmNow = Date.now();
-  for (
-    let __mmIndex = __mmRecentLocalBreakableAttacks.length - 1;
-    __mmIndex >= 0;
-    __mmIndex--
-  ) {
-    const __mmAttack = __mmRecentLocalBreakableAttacks[__mmIndex],
-      __mmAge = __mmNow - Number(__mmAttack && __mmAttack.at);
-    if (!__mmAttack || __mmAge > 700) {
-      __mmRecentLocalBreakableAttacks.splice(__mmIndex, 1);
+// Like Glotus, pair object-hit notifications with server-confirmed gathering
+// swings. Outgoing F packets are intent, not proof that a weapon hit anything.
+function __mmMatchConfirmedStructureHits() {
+  const now = Date.now(), lifetime = Math.max(160, Math.min(450, __mmServerTickMs() * 2));
+  for (const queue of [__mmConfirmedStructureSwings, __mmPendingStructureHits]) {
+    while (queue.length && now - queue[0].at > lifetime) queue.shift();
+  }
+  for (let index = __mmPendingStructureHits.length - 1; index >= 0; index--) {
+    const hit = __mmPendingStructureHits[index], object = hit.object;
+    if (!object || object.active === false || (typeof ns === "function" && ns(object.sid) !== object)) {
+      __mmPendingStructureHits.splice(index, 1);
       continue;
     }
-    const __mmWeapon = b && b.weapons && b.weapons[__mmAttack.weapon];
-    if (!__mmWeapon) continue;
-    const __mmDistance = Math.hypot(
-        Number(__mmObject.x) - Number(v.x),
-        Number(__mmObject.y) - Number(v.y),
-      ),
-      __mmReach =
-        (Number(__mmWeapon.range) || 0) + __mmCleanupObjectScale(__mmObject) + 16,
-      __mmDirection = Math.atan2(
-        Number(__mmObject.y) - Number(v.y),
-        Number(__mmObject.x) - Number(v.x),
-      ),
-      __mmAngleTolerance = Math.max(
-        0.35,
-        Number(y && y.gatherAngle) || 0.35,
-      ) + 0.14;
-    if (
-      __mmWeapon.projectile == null &&
-      (__mmDistance > __mmReach ||
-        __mmBreakableAngleDifference(__mmDirection, __mmAttack.angle) >
-          __mmAngleTolerance ||
-        __mmBreakableAngleDifference(__mmDirection, __mmHitAngle) >
-          __mmAngleTolerance + 0.12)
-    )
-      continue;
-    const __mmDamage = __mmWeaponStructureDamage(
-      {
-        weaponVariant: __mmAttack.weaponVariant,
-        skinIndex: __mmAttack.skinIndex,
-      },
-      __mmAttack.weapon,
-      __mmObject,
-    );
-    if (!(__mmDamage > 0)) continue;
-    return {
-      damage: __mmDamage,
-      source: __mmAttack.id,
-      local: !0,
-      at: __mmAttack.at,
-    };
-  }
-  return null;
-}
-function __mmObservedObjectHitProfile(__mmObject, __mmHitAngle) {
-  if (!__mmObject) return null;
-  const __mmLocal = __mmLocalBreakableHitProfile(__mmObject, __mmHitAngle);
-  if (__mmLocal) return __mmLocal;
-  const __mmNow = Date.now(),
-    __mmPlayers = [];
-  v && __mmPlayers.push(v);
-  if (Array.isArray(E))
-    for (let __mmIndex = 0; __mmIndex < E.length; __mmIndex++) {
-      const __mmPlayer = E[__mmIndex];
-      __mmPlayer && !__mmPlayers.includes(__mmPlayer) &&
-        __mmPlayers.push(__mmPlayer);
+    let best = null, bestScore = Infinity;
+    for (const swing of __mmConfirmedStructureSwings) {
+      if (swing.objects.has(object)) continue;
+      const weapon = b && b.weapons && b.weapons[swing.weapon];
+      if (!weapon || weapon.projectile != null || weapon.shield) continue;
+      const dx = Number(object.x) - swing.x, dy = Number(object.y) - swing.y,
+        distance = Math.hypot(dx, dy), direction = Math.atan2(dy, dx),
+        tolerance = Number(y && y.gatherAngle) || Math.PI / 2.6;
+      if (!Number.isFinite(distance) || distance > (Number(weapon.range) || 0) + __mmCleanupObjectScale(object) ||
+          __mmBreakableAngleDifference(direction, swing.angle) > tolerance ||
+          __mmBreakableAngleDifference(hit.angle, swing.angle) > 1.25) continue;
+      const score = Math.abs(hit.at - swing.at) + __mmBreakableAngleDifference(hit.angle, swing.angle) * 100;
+      if (score < bestScore) { best = swing; bestScore = score; }
     }
-  let __mmBest = null,
-    __mmBestScore = Infinity;
-  for (let __mmIndex = 0; __mmIndex < __mmPlayers.length; __mmIndex++) {
-    const __mmPlayer = __mmPlayers[__mmIndex],
-      __mmRecent =
-        __mmPlayer && __mmPlayer.sid != null
-          ? __mmRecentPlayerSwings[String(__mmPlayer.sid)]
-          : null;
-    if (!__mmPlayer || !__mmPlayer.alive || !__mmRecent) continue;
-    const __mmAge = __mmNow - Number(__mmRecent.at),
-      __mmWeaponId =
-        __mmRecent.weapon == null ? __mmPlayer.weaponIndex : __mmRecent.weapon,
-      __mmWeapon = b && b.weapons && b.weapons[__mmWeaponId];
-    if (__mmAge < 0 || __mmAge > 900 || !__mmWeapon) continue;
-    const __mmDx = Number(__mmObject.x) - Number(__mmPlayer.x),
-      __mmDy = Number(__mmObject.y) - Number(__mmPlayer.y),
-      __mmDistance = Math.hypot(__mmDx, __mmDy),
-      __mmDirection = Math.atan2(__mmDy, __mmDx),
-      __mmAngleTolerance = Math.max(0.35, Number(y && y.gatherAngle) || 0.35) +
-        0.14,
-      __mmMeleeReach =
-        (Number(__mmWeapon.range) || 0) + __mmCleanupObjectScale(__mmObject) + 16;
-    if (
-      __mmWeapon.projectile == null &&
-      (__mmDistance > __mmMeleeReach ||
-        __mmBreakableAngleDifference(__mmDirection, __mmHitAngle) >
-          __mmAngleTolerance)
-    )
-      continue;
-    const __mmDamage = __mmWeaponStructureDamage(
-      __mmPlayer,
-      __mmWeaponId,
-      __mmObject,
-    );
-    if (!(__mmDamage > 0)) continue;
-    const __mmScore =
-      __mmAge +
-      (__mmWeapon.projectile == null ? __mmDistance * 0.12 : 260) +
-      (String(__mmPlayer.sid) === String(v && v.sid) ? -35 : 0);
-    if (__mmScore < __mmBestScore)
-      ((__mmBestScore = __mmScore),
-        (__mmBest = {
-          damage: __mmDamage,
-          source:
-            "swing:" + String(__mmPlayer.sid) + ":" + String(__mmWeaponId) + ":" +
-            String(Math.round(Number(__mmRecent.at) / 20)),
-          local: String(__mmPlayer.sid) === String(v && v.sid),
-          at: __mmRecent.at,
-        }));
+    if (!best) continue;
+    best.objects.add(object);
+    __mmPendingStructureHits.splice(index, 1);
+    const state = __mmBreakableState(object);
+    if (!state) continue;
+    // A health delta received after this notification already includes it.
+    if (state.lastLiveChangeAt >= hit.at && state.lastLiveChangeAt > 0) continue;
+    __mmPredictBreakableHit(state, __mmWeaponStructureDamage(best, best.weapon, object), best.id);
   }
-  return __mmBest;
 }
-function __mmObserveObjectHit(__mmAngle, __mmObjectSid) {
-  const __mmObject = typeof ns === "function" ? ns(__mmObjectSid) : null,
-    __mmState = __mmBreakableState(__mmObject);
-  if (!__mmObject || !__mmState) return;
-  const __mmNow = Date.now(),
-    __mmProfile = __mmObservedObjectHitProfile(
-      __mmObject,
-      Number(__mmAngle) || 0,
-    );
-  if (!__mmProfile || !(__mmProfile.damage > 0)) return;
-  // If this exact callback arrived after the game already supplied a fresh
-  // object-health delta, that delta includes the hit. Trust it rather than
-  // subtracting the same swing a second time.
-  if (
-    __mmNow - Number(__mmState.lastLiveChangeAt || 0) <= 28 &&
-    !__mmState.pending.length
-  )
-    return;
-  __mmPredictBreakableHit(
-    __mmState,
-    __mmProfile.damage,
-    __mmProfile.source,
-  );
+function __mmQueueStructureSwing(sid, didHit, weapon) {
+  if (Number(didHit) !== 1) return;
+  __mmStructureSwingPackets.push({sid, didHit, weapon, at: Date.now()});
+  if (__mmStructureSwingPackets.length > 128) __mmStructureSwingPackets.shift();
+}
+function __mmFlushStructureSwings() {
+  // Glotus processes K swings after the next position packet. That packet
+  // supplies the attack-phase facing, equipped hat and weapon variant.
+  const packets = __mmStructureSwingPackets.splice(0);
+  for (const packet of packets) {
+    if (Date.now() - packet.at > Math.max(160, Math.min(450, __mmServerTickMs() * 2))) continue;
+    __mmObserveConfirmedStructureSwing(packet.sid, packet.didHit, packet.weapon);
+  }
+}
+function __mmObserveConfirmedStructureSwing(sid, didHit, weaponId) {
+  if (Number(didHit) !== 1) return;
+  const player = typeof Rt === "function" ? Rt(sid) : null;
+  if (!player || !player.alive) return;
+  const position = __mmServerEntityPosition(player), weapon = Number(weaponId),
+    angle = Number(player.dir);
+  if (!position || !Number.isFinite(angle)) return;
+  __mmConfirmedStructureSwings.push({
+    at: Date.now(), id: "confirmed:" + (++__mmStructureSwingSequence), weapon,
+    x: position.x, y: position.y, angle,
+    skinIndex: player.skinIndex, weaponVariant: player.weaponVariant,
+    objects: new Set()
+  });
+  if (__mmConfirmedStructureSwings.length > 128) __mmConfirmedStructureSwings.shift();
+  __mmMatchConfirmedStructureHits();
+}
+function __mmObserveObjectHit(angle, sid) {
+  const object = typeof ns === "function" ? ns(sid) : null;
+  if (!object || !Number.isFinite(Number(angle)) || !__mmBreakableState(object)) return;
+  __mmPendingStructureHits.push({object, angle: Number(angle), at: Date.now()});
+  if (__mmPendingStructureHits.length > 256) __mmPendingStructureHits.shift();
+  __mmMatchConfirmedStructureHits();
 }
 function __mmBreakableOverlayInfo(__mmObject) {
   const __mmState = __mmBreakableState(__mmObject);
@@ -34646,19 +34582,9 @@ function __mmStopHeldAttackPulse() {
     (__mmPrimaryAttackDown = !1));
 }
 function __mmResumeHeldAttack() {
-  if (
-    __mmTrapAttackActive &&
-    __mmTrapAttackHeld &&
-    __mmTrapAttackHeldWeapon != null
-  ) {
-    const __mmAngle = Number.isFinite(__mmTrapAimAngle)
-      ? __mmTrapAimAngle
-      : Ci();
-    (je(__mmTrapAttackHeldWeapon, !0),
-      O.send("D", __mmAngle),
-      O.send("F", 1, __mmAngle));
-    return;
-  }
+  // The escape scheduler owns ready-only attack pulses. A food/build restore
+  // must never start an unchecked hold or reuse a stale target angle.
+  if (__mmTrapAttackActive) return;
   // Food/build/insta actions issue their own F=0. Only resume an actual
   // physical hold: a delayed placement/heal restore after mouseup used to
   // re-arm the old main-hand attack and waste a fresh reload.
@@ -55054,8 +54980,8 @@ function __mmUpdateTrapEscapeGear(__mmWeapon) {
     (__mmTrapHat = __mmInstaSafeRestoreHat(
       __mmBushRestoreHat(v.skinIndex),
     ));
-  // F=1 stays down through reloads, but Tank is armed only by the loaded-swing
-  // branch in __mmBreakTrap. This keeps the visible Tank pattern on/off/on/off
+  // Attack pulses are released immediately; Tank is armed only by the ready
+  // swing branch in __mmBreakTrap. This keeps the visible Tank pattern on/off/on/off
   // rather than pinning it for the complete escape.
   return !0;
 }
@@ -56197,6 +56123,17 @@ function __mmPauseTrapEscapeForPredictedInsta() {
   } else __mmStopTrapAttack();
   return !0;
 }
+function __mmPulseTrapBreakAttack(__mmAngle) {
+  O.send("D", __mmAngle);
+  __mmTrapAttackHeld = !0;
+  try {
+    O.send("F", 1, __mmAngle);
+  } finally {
+    O.send("F", 0, __mmAngle);
+    __mmTrapAttackHeld = !1;
+    __mmReturnTrapBreakAimToMouse();
+  }
+}
 function __mmBreakTrap() {
   if (
     !__mmTrapEscapeEnabled ||
@@ -56304,7 +56241,6 @@ function __mmBreakTrap() {
     // authoritative trap update. This removes a Hammer reselect race against
     // the one-frame stale object health that follows a destroying swing.
     __mmAwaitingFinalKnockback =
-      __mmTrapAttackHeld &&
       String(__mmTrapFinalKnockbackTargetKey) === String(__mmTargetKey) &&
       __mmNow < __mmTrapFinalKnockbackUntil &&
       __mmLockedWeapon === Number(v.weapons[0]),
@@ -56334,6 +56270,7 @@ function __mmBreakTrap() {
     __mmWeapon,
     __mmTrapManualReadyAt,
     __mmNow,
+    !1, // A one-shot pulse cannot wait on the server for a predicted reload.
   );
   if (__mmSwingReady && __mmPlan.finalKnockback) {
     // Soldier applies before this exact final main swing. Do not stack Tank on
@@ -56354,18 +56291,13 @@ function __mmBreakTrap() {
     __mmChangedWeapon && O.send("F", 0, __mmRawMouseAimDirection());
     (Number(__mmSelectedWeapon()) !== Number(__mmWeapon) || __mmChangedWeapon) &&
       je(__mmWeapon, !0);
-    // Hold/aim only on the predicted loaded swing. The follow-up D packet
-    // restores the live cursor direction in this same task, so reload and
-    // placement phases never leave the player staring at the pit or spike.
+    // Match Glotus: release each ready attack before restoring cursor aim.
+    // Leaving F=1 down allows the next reload to swing at the mouse instead.
     if (__mmSwingReady) {
-      O.send("D", __mmAngle);
-      (O.send("F", 1, __mmAngle),
-        (__mmTrapAttackLastHoldAt = __mmNow),
-        __mmReturnTrapBreakAimToMouse());
+      __mmPulseTrapBreakAttack(__mmAngle);
+      __mmTrapAttackLastHoldAt = __mmNow;
     }
-    // F=1 may remain held, but each predicted ready phase is a new Tank
-    // swing. Advance the local clock on that phase so Tank is not refreshed
-    // repeatedly while the same weapon hit is still reloading.
+    // Advance only after sending a ready pulse.
     __mmSwingReady &&
       (__mmTrackPlayerToolCooldown(v.sid, __mmWeapon, "trap-escape-hold"),
       (__mmTrapManualReadyAt = __mmNow + __mmCooldown),
@@ -56373,7 +56305,7 @@ function __mmBreakTrap() {
         ((__mmTrapFinalKnockbackTargetKey = __mmTargetKey),
         (__mmTrapFinalKnockbackUntil =
           __mmNow + Math.max(100, __mmServerTickMs() * 1.5))));
-    ((__mmTrapAttackHeld = !0),
+    ((__mmTrapAttackHeld = !1),
       (__mmTrapAttackHeldWeapon = __mmWeapon),
       (__mmTrapAttackTargetKey = __mmTargetKey),
       (__mmTrapWeaponSelectAt = __mmNow));
@@ -56950,7 +56882,7 @@ function __mmReleasePrimaryTankLease(__mmAllowWatchdog = !1) {
     __mmGearArbiter.commit());
   return !0;
 }
-function __mmManualWeaponArming(__mmWeapon, __mmReadyAt, __mmNow = Date.now()) {
+function __mmManualWeaponArming(__mmWeapon, __mmReadyAt, __mmNow = Date.now(), __mmAllowLatencyLead = !0) {
   if (!v || !v.alive || __mmWeapon == null) return !1;
   const __mmTick = __mmServerTickMs(),
     __mmPing = Math.max(
@@ -56960,10 +56892,10 @@ function __mmManualWeaponArming(__mmWeapon, __mmReadyAt, __mmNow = Date.now()) {
     // Apply latency lead only in whole server ticks. This prevents a
     // half-ready Bull/Tank flash on
     // ordinary sub-tick latency while retaining high-ping compensation.
-    __mmLead = Math.max(
+    __mmLead = __mmAllowLatencyLead ? Math.max(
       0,
       Math.min(2, Math.floor(__mmPing / __mmTick)) * __mmTick,
-    ),
+    ) : 0,
     __mmState = __mmAdvancePlayerToolCooldowns(v, __mmNow),
     __mmReconciled = __mmReconcileLocalToolCooldown(
       v,
@@ -59340,6 +59272,7 @@ __mmStartThreatTrap();
 __mmStartSmartPlacement();
 Jl = function () {
   const __mmResult = __mmOriginalPlayerPositionUpdate.apply(this, arguments);
+  __mmFlushStructureSwings();
   (__mmAdvanceCombatServerTick(),
     __mmObserveBotKillCandidates(),
     __mmUpdateLiveState(!0),
@@ -59502,7 +59435,8 @@ Pl = function (__mmPlayerSid, __mmDidHit, __mmWeapon) {
   // another player's visual attack from reaching the stock game code.
   const __mmResult = __mmOriginalPlayerAttack.apply(this, arguments);
   try {
-    (__mmObserveWeaponXpGather(__mmPlayerSid, __mmDidHit, __mmWeapon),
+    (__mmQueueStructureSwing(__mmPlayerSid, __mmDidHit, __mmWeapon),
+      __mmObserveWeaponXpGather(__mmPlayerSid, __mmDidHit, __mmWeapon),
       __mmObserveHeldGearSwing(__mmPlayerSid, __mmWeapon),
       __mmRecordPlayerSwing(__mmPlayerSid, __mmWeapon),
       __mmSyncObservedPlayerSwing(__mmPlayerSid, __mmWeapon),
