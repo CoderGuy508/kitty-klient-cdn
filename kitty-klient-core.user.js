@@ -2,7 +2,7 @@
 // @name         kitty klient
 // @author       Coder Guy
 // @credits       random4ik — bot script
-// @version      7.0.35
+// @version      7.0.36
 // @icon         https://cdn.discordapp.com/icons/1540876076224356437/ac27c0ce87c4c46b407ebca78e150aeb.webp?size=2048
 // @description  kitty klient — a MooMoo.io client with adaptive zoom, fast autoheal, gear automation, combat tools, predictive placement, visual markers, CC0 background music, manual quick builds, and a fully rebindable keyboard/mouse controls HUD.
 // @match        *://moomoo.io/*
@@ -267,7 +267,7 @@
     const AUTO_PUSH_FINISHER_MIGRATION_KEY = "kitty-klient-auto-push-finisher-v1";
     const ASSASSIN_RANGE_AUTO_MIGRATION_KEY = "kitty-klient-assassin-range-auto-v1";
     const TAB_SYNC_BRIDGE_KEY = "kitty-klient-tab-sync-bridge-v1";
-const KITTY_KLIENT_VERSION = "7.0.35";
+const KITTY_KLIENT_VERSION = "7.0.36";
     const KITTY_SHARED_STORAGE_APPLIED_EVENT = "KittyMooMooSharedStorageApplied";
 
 
@@ -4506,12 +4506,12 @@ const KITTY_KLIENT_VERSION = "7.0.35";
         addHudToggle(automationSurvival, "autoRespawn", "Auto respawn", "Return after a death when the server permits it");
         addHudToggle(automationSurvival, "soldierAuto", "Soldier helmet", "Use Soldier gear for safe idle and combat-range protection");
         addHudToggle(automationSurvival, "movementGear", "Movement gear", "Use speed gear and an adaptive tail while moving");
-        addHudToggle(automationSurvival, "musketRecharge", "Glotus weapon reload", "Match Glotus UseFastest: select the faster hand while it reloads, then the other hand, and return to the faster hand when both are ready. Native 1/2 choices are temporary while this is on");
+        addHudToggle(automationSurvival, "musketRecharge", "Automatic weapon reload", "Select the faster hand while it reloads, then the other hand, and return to the faster hand when both are ready. Native 1/2 choices are temporary while this is on");
         addHudToggle(automationSurvival, "autoPurchase", "Auto purchase", "Buy the configured progression when the required resources are available, then Halo as the final purchase");
 
         const automationDefense = addHudSection(automationPage, "Defense & escape");
         addHudToggle(automationDefense, "trapEscape", "Trap escape", "Break the locking trap and build a safe exit behind you. During a rapid re-trap loop, a reachable one-hit pit is Hammer-broken and replaced with your own Pit Trap instead of adding more rear spikes.");
-        addHudToggle(automationDefense, "autoEnemySpikeBreak", "Auto enemy spike break", "Break a reachable hostile spike with Glotus-style Great Hammer priority. It yields to traps, manual attacks, Instas, and immediate defensive threats.");
+        addHudToggle(automationDefense, "autoEnemySpikeBreak", "Auto enemy spike break", "Break a reachable hostile spike with Great Hammer priority. It yields to traps, manual attacks, Instas, and immediate defensive threats.");
         addHudToggle(automationDefense, "antiInsta", "Anti-insta", "Pre-heal a damaged player before a confirmed lethal hit, then defend against the combo window");
         addHudToggle(automationDefense, "antiSync", "Anti Sync", "When two or more hostile hits are predicted to arrive together, pre-heal and hold Shield toward the combined impact");
         addHudToggle(automationDefense, "antiBoostInsta", "Anti-boost insta", "React to boosted hostile approaches with the defensive combo path");
@@ -4681,7 +4681,7 @@ const KITTY_KLIENT_VERSION = "7.0.35";
         addHudToggle(syncBehavior, "syncCatchupGear", "Catch-up gear", "Use movement gear while closing a large gap");
         addHudToggle(syncBehavior, "syncPauseInCombat", "Pause during combat", "Temporarily stop follow movement while you are fighting");
         addHudToggle(syncBehavior, "syncTickCombat", "Tick combat", "Align copied attacks to the live game tick");
-        addHudToggle(syncBehavior, "syncPredictiveAutoSync", "Predictive auto sync", "Like Glotus Auto Sync: predict the next server tick, require both primary weapons to reach the same target, then send both Bull-primary swings together");
+        addHudToggle(syncBehavior, "syncPredictiveAutoSync", "Predictive auto sync", "Predict the next server tick, require both primary weapons to reach the same target, then send both Bull-primary swings together");
 
         const syncTuning = addHudSection(syncPage, "Follow tuning");
         addHudSlider(syncTuning, "syncFollowGap", "Follow gap", "Preferred space to keep from the selected teammate");
@@ -4707,7 +4707,7 @@ const KITTY_KLIENT_VERSION = "7.0.35";
         addHudToggle(visuals, "predictionGhost", "Prediction ghost", "A translucent copy projects ahead by half your live ping");
         addHudToggle(visuals, "placementVisuals", "Placement previews", "Shows blocked sample slots, scored legal candidates, predicted pre-places, and the exact slots Kitty selects");
         addHudToggle(visuals, "hotbarPlaceableLocator", "Hotbar placeable locator", "Hover a placeable in the native hotbar to mark every matching structure you own on the minimap");
-        addHudToggle(visuals, "autoPushVisuals", "Auto Push tactical lane", "Draw the Glotus alignment point, close stand point, push lane, target brackets, and live ROUTE / ALIGN / PUSH status");
+        addHudToggle(visuals, "autoPushVisuals", "Auto Push tactical lane", "Draw the alignment point, close stand point, push lane, target brackets, and live ROUTE / ALIGN / PUSH status");
         addHudToggle(visuals, "cooldownBars", "Tool cooldown bars", "Three refill bars track primary, secondary, and Turret Gear cooldowns independently");
         addHudToggle(visuals, "weaponXpBar", "Weapon XP bar", "Tracks confirmed Food, Wood, Stone, breakable refunds, animal and boss rewards, and native Gold Mine gather XP for every held tool; general Gold never fills it");
         addHudToggle(visuals, "chatHistory", "Stacked chat bubbles", "Shows up to three unexpired messages above each player plus the in-game chat-history panel");
@@ -4772,7 +4772,7 @@ const KITTY_KLIENT_VERSION = "7.0.35";
         addHudToggle(kittyInstas, "velTickInsta", "VelTick Insta", "T watches the predicted 220–245px window, leads with Turret, then sends Bull + Polearm on the next tick");
         addHudToggle(kittyInstas, "tankPredictInsta", "Tank Vel Predict RevInsta", "Prioritizes Turret → main against a nearby exposed target. Learns Tank timing from any opponent, rejects stale or inconsistent windows, and aligns Bull + main with the predicted Turret arrival. Also uses next-hat signals and fresh movement reversals.");
         addHudToggle(kittyInstas, "polearmAids", "Polearm Aids", "Against a target in your or an ally's trap: Tank + Great Hammer, then Bull + Polearm and a legal contact spike");
-        addHudToggle(kittyInstas, "autoPushInsta", "Auto Push", "Uses Glotus far-point alignment and close-point steering within 250 pixels; pauses while movement keys are held");
+        addHudToggle(kittyInstas, "autoPushInsta", "Auto Push", "Uses far-point alignment and close-point steering within 250 pixels; pauses while movement keys are held");
         addHudToggle(kittyInstas, "boostSpikeKill", "Boost + Spike", "G uses x-RedDragon's 80 ms pattern: two side spikes, two close diagonals within 150 units, then a forward Boost Pad. Kitty skips any illegal slot.");
 
         const combatStatistics = addHudSection(combatPage, "Session combat statistics");
@@ -16343,7 +16343,7 @@ const __mmInsta = {
   normalStageMs() {
     return this.redDragonPolearmMusket ? 120 : this.tick();
   },
-  glotusNormalMusket() {
+  combatModelNormalMusket() {
 
 
     return !!(
@@ -17678,11 +17678,11 @@ const __mmInsta = {
 
 
     const __mmGearHat = this.selectDamageGear();
-    const __mmGlotusMusket = this.glotusNormalMusket();
+    const __mmCombatModelMusket = this.combatModelNormalMusket();
 
 
-    __mmGlotusMusket && __mmGearArbiter.commit();
-    if (!__mmGlotusMusket && !__mmGearArbiter.acknowledged(__mmGearHat))
+    __mmCombatModelMusket && __mmGearArbiter.commit();
+    if (!__mmCombatModelMusket && !__mmGearArbiter.acknowledged(__mmGearHat))
       return void this.schedule(
         () => this.executeBurst(),
         Math.max(8, __mmFastCheckMs()),
@@ -17690,7 +17690,7 @@ const __mmInsta = {
     if (!this.sendAttack(__mmContext.primary, !0, __mmContext.target))
       return void this.cleanup("primary-send-failed");
     this.countActivation();
-    __mmGlotusMusket ? this.releaseAttack() : this.scheduleRelease();
+    __mmCombatModelMusket ? this.releaseAttack() : this.scheduleRelease();
     this.schedule(() => this.executeFollowup(), this.normalStageMs());
   },
   secondaryFollowup() {
@@ -17937,13 +17937,13 @@ const __mmInsta = {
       return void this.cleanup("secondary-or-turret-unavailable");
     this.pendingSecondaryWeapon = __mmSecondary;
     const __mmGearHat = this.selectSecondaryDamageGear();
-    const __mmGlotusMusket = this.glotusNormalMusket();
+    const __mmCombatModelMusket = this.combatModelNormalMusket();
 
 
 
-    __mmGlotusMusket && __mmGearArbiter.commit();
+    __mmCombatModelMusket && __mmGearArbiter.commit();
     if (
-      !__mmGlotusMusket &&
+      !__mmCombatModelMusket &&
       !__mmGearArbiter.acknowledged(__mmGearHat)
     )
       return void this.schedule(
@@ -17980,7 +17980,7 @@ const __mmInsta = {
     )
       return void this.cleanup("secondary-send-failed");
     ((this.pendingSecondaryWeapon = null),
-      __mmGlotusMusket ? this.releaseAttack() : this.scheduleRelease(),
+      __mmCombatModelMusket ? this.releaseAttack() : this.scheduleRelease(),
       this.schedule(() => this.finishNormalBurst(), this.normalStageMs()));
   },
   executeTankPredictMusket() {
@@ -18020,7 +18020,7 @@ const __mmInsta = {
 
 
 
-    if (this.glotusNormalMusket())
+    if (this.combatModelNormalMusket())
       return void this.cleanup("complete");
     if (this.redDragonPolearmMusket) {
 
@@ -21144,7 +21144,7 @@ function __mmFirePredictiveAutoSync(__mmTargetSid) {
     !__mmSyncPredictiveAutoSyncEnabled ||
     !__mmSyncTickCombatEnabled ||
     !__mmPredictiveAutoSyncLocalReady(__mmTarget, 0) ||
-    !__mmActionClaim("teammateAutoSync", "predicted Glotus-style shared primary")
+    !__mmActionClaim("teammateAutoSync", "predicted shared primary")
   )
     return void __mmStopPredictiveAutoSync("prediction invalidated");
   const __mmPrimary = __mmPredictiveAutoSyncPrimary(v),
@@ -28852,7 +28852,7 @@ function __mmUpdateAutoEnemySpikeBreakReplacement() {
   const __mmPlaced = __mmSmartPlaceNow(__mmCandidate, __mmSelectedTool());
   if (__mmPlaced) {
     (__mmAutoEnemySpikeBreakReplacement = null,
-      __mmSmartSetPlacementPreview([__mmCandidate], [__mmCandidate], "Glotus AutoBreak combat spike handoff"),
+      __mmSmartSetPlacementPreview([__mmCandidate], [__mmCandidate], "Automatic spike break combat spike handoff"),
       __mmSmartSetStatus("sent", "AutoBreak combat spike handoff", {
         legal: 1,
         scored: 1,
@@ -28968,7 +28968,7 @@ function __mmUpdateAutoEnemySpikeBreak() {
   const __mmPlan = __mmAutoEnemySpikeBreakPlan();
   if (!__mmPlan || !__mmAutomaticBreakReady(__mmPlan.weapon)) return;
   __mmActionOwner === "weaponRecharge" && __mmPauseWeaponRecharge(!0);
-  if (!__mmActionClaim("enemySpikeBreak", "Glotus-style hostile spike break")) return;
+  if (!__mmActionClaim("enemySpikeBreak", "hostile spike break")) return;
   ((__mmAutoEnemySpikeBreakLockedWeapon = Number(__mmPlan.weapon)),
     (__mmAutoEnemySpikeBreakLockedTargetKey = __mmPlan.key),
     (__mmAutoEnemySpikeBreakRestoreTool = __mmSelectedTool()),
@@ -31410,7 +31410,7 @@ function __mmStopAutoPurchase() {
     (__mmAutoPurchaseTimer = 0),
     (__mmAutoPurchasePending = null));
 }
-function __mmGlotusEnemyDangerRange(enemy) {
+function __mmCombatModelEnemyDangerRange(enemy) {
   const remembered=__mmPlayerToolCooldowns[String(enemy.sid)], weapons=enemy.weapons || (remembered && remembered.slots) || [];
   const primary=weapons[0] ?? enemy.primaryIndex ?? enemy.weaponIndex;
   const secondary=weapons[1];
@@ -31425,7 +31425,7 @@ function __mmGlotusEnemyDangerRange(enemy) {
     ? (Number(secondaryData.range)||0)+hitScale+margin : 0;
   return Math.max(primaryRange,secondaryRange);
 }
-function __mmEnemyWithinGlotusDangerRange(limit) {
+function __mmEnemyWithinCombatModelDangerRange(limit) {
   if (!v || !v.alive || !Array.isArray(E)) return false;
   const positions=player=>{
     const current=__mmServerEntityPosition(player)||player;
@@ -31435,7 +31435,7 @@ function __mmEnemyWithinGlotusDangerRange(limit) {
   const self=positions(v);
   for (const enemy of E) {
     if (!__mmIsEnemyPlayer(enemy)) continue;
-    const range=__mmGlotusEnemyDangerRange(enemy);
+    const range=__mmCombatModelEnemyDangerRange(enemy);
 
 
     const cutoff=range>400 ? range : Math.min(limit,range);
@@ -31444,7 +31444,7 @@ function __mmEnemyWithinGlotusDangerRange(limit) {
   return false;
 }
 function __mmEnemyWithinCombatRange() {
-  return __mmEnemyWithinGlotusDangerRange(__mmCombatRange);
+  return __mmEnemyWithinCombatModelDangerRange(__mmCombatRange);
 }
 function __mmCombatSafeHat(__mmHat) {
   if (Number(__mmHat) === 0 && v &&
@@ -33922,6 +33922,7 @@ function __mmRememberNormalHat() {
 
 const __mmGearIntentPriorities = Object.freeze({
   safety: 120,
+  spikeGearCounter: 121,
   insta: 110,
 
 
@@ -38494,7 +38495,7 @@ function __mmAntiCollisionDecelDistance(__mmSpeed) {
   }
   return Math.max(0, __mmDistance);
 }
-function __mmGlotusSafeWalkObjectAllowed(__mmObject) {
+function __mmCombatModelSafeWalkObjectAllowed(__mmObject) {
   if (!__mmObject || !__mmObject.active) return !1;
   const __mmData = b && b.list && b.list[__mmObject.id],
     __mmName = String((__mmData && __mmData.name) || "").toLowerCase(),
@@ -38508,7 +38509,7 @@ function __mmGlotusSafeWalkObjectAllowed(__mmObject) {
     !__mmFriendlyStructure(__mmObject)
   );
 }
-function __mmGlotusSafeWalkThreat(__mmDirection, __mmWalkOffset = null) {
+function __mmCombatModelSafeWalkThreat(__mmDirection, __mmWalkOffset = null) {
   if (!v || !v.alive || !Number.isFinite(Number(__mmDirection))) return null;
   const __mmMotion = __mmPassiveSpikeVelocity(),
 
@@ -38534,10 +38535,10 @@ function __mmGlotusSafeWalkThreat(__mmDirection, __mmWalkOffset = null) {
 
 
 
-    __mmGlotusWalkOffset = Number.isFinite(Number(__mmWalkOffset))
+    __mmCombatModelWalkOffset = Number.isFinite(Number(__mmWalkOffset))
       ? Math.max(0, Number(__mmWalkOffset))
       : __mmSpeed + 45,
-    __mmProbeDistance = __mmGlotusWalkOffset + __mmSpeed / 4,
+    __mmProbeDistance = __mmCombatModelWalkOffset + __mmSpeed / 4,
     __mmProbeX = __mmPlayerX + Math.cos(__mmDirection) * __mmProbeDistance,
     __mmProbeY = __mmPlayerY + Math.sin(__mmDirection) * __mmProbeDistance,
     __mmPlayerScale = Number(v.scale) || 35,
@@ -38545,7 +38546,7 @@ function __mmGlotusSafeWalkThreat(__mmDirection, __mmWalkOffset = null) {
   const __mmObjects = __mmActiveObjectSnapshot().all;
   for (let __mmIndex = 0; __mmIndex < __mmObjects.length; __mmIndex++) {
     const __mmObject = __mmObjects[__mmIndex];
-    if (!__mmGlotusSafeWalkObjectAllowed(__mmObject)) continue;
+    if (!__mmCombatModelSafeWalkObjectAllowed(__mmObject)) continue;
     const __mmScale = Math.max(1, __mmReferenceObjectScale(__mmObject)),
       __mmAcquireRadius = __mmPlayerScale + __mmScale + 150,
       __mmCurrentDistance = Math.hypot(
@@ -38594,7 +38595,7 @@ function __mmGlotusSafeWalkThreat(__mmDirection, __mmWalkOffset = null) {
       closingSpeed: __mmSpeed,
       brakingDistance: __mmProbeDistance,
       teleporter: !1,
-      glotusSafeWalk: !0,
+      combatModelSafeWalk: !0,
     };
   }
   return null;
@@ -38608,7 +38609,7 @@ function __mmAntiCollisionThreat(
 
 
 
-  return __mmGlotusSafeWalkThreat(
+  return __mmCombatModelSafeWalkThreat(
     __mmDirection,
     __mmStartingMove ? 45 : null,
   );
@@ -42193,7 +42194,7 @@ function __mmUpdateAutoPushGear(enemy, geometry) {
     "autoPushGear", __mmGearIntentPriorities.utility);
 }
 
-function __mmAutoPushGlotusGeometry(__mmEnemy, __mmSpike) {
+function __mmAutoPushCombatModelGeometry(__mmEnemy, __mmSpike) {
   const self = __mmServerEntityPosition(v),
     enemy = __mmServerEntityPosition(__mmEnemy),
     spike = __mmSpike.object,
@@ -42236,7 +42237,7 @@ function __mmUpdateAutoPushSetup(__mmEnemy, __mmTrap, __mmSelectedSpike = null) 
     return !1;
   }
   const spike = __mmSelectedSpike || __mmAutoPushAlliedSpike(__mmEnemy, __mmTrap),
-    geometry = spike && __mmAutoPushGlotusGeometry(__mmEnemy, spike);
+    geometry = spike && __mmAutoPushCombatModelGeometry(__mmEnemy, spike);
   const __mmContactSample = geometry && geometry.contact
     ? __mmAutoPushContactSample(__mmEnemy, __mmTrap, spike.object)
     : null;
@@ -42244,7 +42245,7 @@ function __mmUpdateAutoPushSetup(__mmEnemy, __mmTrap, __mmSelectedSpike = null) 
       (__mmContactSample.spam || !__mmContactSample.stalled))) {
     __mmStopAutoPushSetup(geometry && geometry.contact
       ? (__mmContactSample.spam ? "spike damage spam detected" : "push contact reached")
-      : "outside Glotus push range");
+      : "outside push range");
     return !1;
   }
   if (__mmAutoPushPointBlocked(geometry.standX, geometry.standY, null)) {
@@ -42253,7 +42254,7 @@ function __mmUpdateAutoPushSetup(__mmEnemy, __mmTrap, __mmSelectedSpike = null) 
       reason: "stand point blocked", stoppedAt: performance.now(), route: [] });
     return !1;
   }
-  if (!__mmActionClaim("autoPushSetup", "Glotus push alignment")) {
+  if (!__mmActionClaim("autoPushSetup", "push alignment")) {
     __mmStopAutoPushSetup("alignment blocked");
     return !1;
   }
@@ -42277,7 +42278,7 @@ function __mmUpdateAutoPushSetup(__mmEnemy, __mmTrap, __mmSelectedSpike = null) 
     goalX: geometry.goalX, goalY: geometry.goalY,
     waypointX: waypoint.x, waypointY: waypoint.y,
     route: __mmAutoPushRoute,
-    reason: geometry.aligned ? "Glotus close stand point" : "Glotus far alignment point" });
+    reason: geometry.aligned ? "close stand point" : "far alignment point" });
   if (__mmAutoPushClearRoute(waypoint, __mmTrap))
     __mmAutoPushSetMovement(Math.atan2(waypoint.y - geometry.self.y, waypoint.x - geometry.self.x));
   else if (__mmAutoPushMoveAngle != null) {
@@ -46433,10 +46434,12 @@ function __mmAutoSpikeSpamCanPlaceNow() {
   );
 }
 function __mmUpdateAutoSpikeSpam() {
-  const __mmNow = Date.now();
+  const __mmNow = Date.now(),
+    __mmTrappedPlacementEnabled = __mmAutoSpikeSpamEnabled ||
+      (__mmSmartAutoPlaceEnabled && __mmSmartQuadSpikesEnabled && !__mmInstaTestingModeEnabled);
   __mmAutoSpikeSpamCleanReservations(__mmNow);
   if (
-    (!__mmAutoSpikeSpamEnabled && !__mmAutoSpikeKillEnabled) ||
+    (!__mmTrappedPlacementEnabled && !__mmAutoSpikeKillEnabled) ||
     __mmEmergencyGetawayActive() ||
     !v ||
     !v.alive
@@ -46452,7 +46455,7 @@ function __mmUpdateAutoSpikeSpam() {
 
   const __mmLethalCandidate =
       __mmAutoSpikeKillEnabled && __mmAutoSpikeKillCandidate(__mmSpike),
-    __mmTrappedPlan = __mmAutoSpikeSpamEnabled
+    __mmTrappedPlan = __mmTrappedPlacementEnabled
       ? __mmAutoSpikeSpamTrappedPlan(__mmSpike)
       : { target: null, candidate: null },
     __mmTarget = __mmTrappedPlan.target,
@@ -47852,13 +47855,16 @@ function __mmKittyAntiBullTail() {
 }
 function __mmEnemyLoadedBullMain(__mmEnemy) {
   if (!v || !v.alive || !__mmEnemy || !b || !b.weapons) return null;
-  const __mmPrimary = Array.isArray(__mmEnemy.weapons)
+  const __mmCooldowns = __mmAdvancePlayerToolCooldowns(__mmEnemy, Date.now()),
+    __mmPrimary = Array.isArray(__mmEnemy.weapons)
       ? Number(__mmEnemy.weapons[0])
       : NaN,
     __mmWeapon = b.weapons[__mmPrimary],
-    __mmReload = __mmEnemy.reloads
-      ? Number(__mmEnemy.reloads[__mmPrimary])
-      : NaN,
+    __mmEntry = __mmCooldowns && __mmCooldowns.weapons && __mmCooldowns.weapons[String(__mmPrimary)],
+    __mmReload = __mmEntry && __mmEntry.remaining != null
+      ? Number(__mmEntry.remaining)
+      : __mmEnemy.reloads && __mmEnemy.reloads[__mmPrimary] != null
+        ? Number(__mmEnemy.reloads[__mmPrimary]) : NaN,
 
 
     __mmHasBull = !!(
@@ -47916,9 +47922,7 @@ function __mmEnemyLoadedBullMain(__mmEnemy) {
     __mmPredictedDistance = Math.hypot(__mmClosestX, __mmClosestY),
     __mmReach =
       (Number(__mmWeapon.range) || 0) +
-      (Number(v.scale) || 35) +
-      (Number(__mmEnemy.scale) || 35) +
-      12;
+      (Number(v.hitScale) || Number(v.scale) || 35);
   if (
     !Number.isFinite(__mmDistance) ||
     !Number.isFinite(__mmPredictedDistance) ||
@@ -48061,7 +48065,7 @@ function __mmUpdateSpikeGearCounter() {
         !0,
         !1,
         "spikeGearCounter",
-        __mmGearIntentPriorities.insta,
+        __mmGearIntentPriorities.spikeGearCounter,
       ));
     return;
   }
@@ -48077,17 +48081,13 @@ function __mmUpdateSpikeGearCounter() {
 
 
 
-  if (
-    Number(v.skinIndex) !== 11 ||
-    (__mmTail != null && Number(v.tailIndex) !== Number(__mmTail))
-  )
-    __mmEquipGearPair(
+  __mmEquipGearPair(
       11,
       __mmTail,
       !0,
       !1,
       "spikeGearCounter",
-      __mmGearIntentPriorities.insta,
+      __mmGearIntentPriorities.spikeGearCounter,
     );
 }
 function __mmStartSpikeGearCounter() {
@@ -50663,7 +50663,7 @@ function __mmAutomaticQuadCandidateEnabled(__mmCandidate) {
     (__mmData.dmg || /spike/i.test(String(__mmData.name || "")))
   );
 }
-function __mmSmartGlotusQuadTrapCandidates(__mmItem, __mmEnemy) {
+function __mmSmartCombatModelQuadTrapCandidates(__mmItem, __mmEnemy) {
   if (
     __mmItem == null ||
     !__mmEnemy ||
@@ -50693,7 +50693,7 @@ function __mmSmartGlotusQuadTrapCandidates(__mmItem, __mmEnemy) {
     if (!__mmCandidate || !__mmCandidate.valid) continue;
     ((__mmCandidate.points = 8 - __mmIndex * 0.02),
       (__mmCandidate.priority = !0),
-      __mmCandidate.reasons.push("Glotus exact quad fill"),
+      __mmCandidate.reasons.push("exact quad fill"),
       __mmResult.push(__mmCandidate));
   }
   return __mmResult;
@@ -50731,7 +50731,7 @@ function __mmSmartQuadTrapCandidates(
       );
     }),
     __mmExact = __mmTrapItem
-      ? __mmSmartGlotusQuadTrapCandidates(__mmTrapItem.item, __mmEnemy)
+      ? __mmSmartCombatModelQuadTrapCandidates(__mmTrapItem.item, __mmEnemy)
       : [];
 
 
@@ -50776,7 +50776,7 @@ function __mmSmartQuadTrapCandidates(
   }
   return __mmResult;
 }
-function __mmSmartGlotusQuadSpikeCandidates(
+function __mmSmartCombatModelQuadSpikeCandidates(
   __mmItem,
   __mmEnemy,
   __mmNow,
@@ -50845,10 +50845,10 @@ function __mmSmartGlotusQuadSpikeCandidates(
       (__mmCandidate.priority = !0),
       __mmCandidate.reasons.push(
         __mmCaught
-          ? "Glotus trapped-target exact spike fill"
+          ? "trapped-target exact spike fill"
           : __mmKnockbackLane
-            ? "Glotus knockback spike fill"
-            : "Glotus contact spike fill",
+            ? "knockback spike fill"
+            : "contact spike fill",
       ),
       __mmResult.push(__mmCandidate));
   }
@@ -50991,7 +50991,7 @@ function __mmSmartQuadSpikeCandidates(
   const __mmExactItem = __mmSpikeItem && __mmSpikeItem.item,
     __mmExact = __mmExactItem == null
       ? []
-      : __mmSmartGlotusQuadSpikeCandidates(
+      : __mmSmartCombatModelQuadSpikeCandidates(
           __mmExactItem,
           __mmEnemy,
           __mmNow,
@@ -51011,7 +51011,7 @@ function __mmSmartQuadSpikeCandidates(
     else if (__mmExactCandidate.points > __mmExisting.points) {
       ((__mmExisting.points = __mmExactCandidate.points),
         (__mmExisting.priority = !0),
-        __mmExisting.reasons.push("Glotus exact spike fill confirmed"));
+        __mmExisting.reasons.push("exact spike fill confirmed"));
     }
   }
   return __mmSpikeCandidates;
@@ -52199,7 +52199,7 @@ function __mmTrySmartTrapReplace(__mmKnown, __mmEnemy, __mmNow) {
   (__mmSmartSetPlacementPreview(
     [__mmCandidate],
     [__mmCandidate],
-    "Glotus-style exact trap replace",
+    "exact trap replace",
   ),
     __mmSmartSetStatus("sent", "exact trapped-enemy pit replace", {
       legal: 1,
@@ -53861,27 +53861,27 @@ function __mmUpdateSmartPlacement() {
 
 
 
-      __mmGlotusPressure = __mmSmartGlotusQuadSpikeCandidates(
+      __mmCombatModelPressure = __mmSmartCombatModelQuadSpikeCandidates(
         __mmSpike,
         __mmTrappedPlacementTarget,
         __mmNow,
       );
-    for (let __mmGlotusIndex = 0; __mmGlotusIndex < __mmGlotusPressure.length; __mmGlotusIndex++) {
-      const __mmGlotusCandidate = __mmGlotusPressure[__mmGlotusIndex],
+    for (let __mmCombatModelIndex = 0; __mmCombatModelIndex < __mmCombatModelPressure.length; __mmCombatModelIndex++) {
+      const __mmCombatModelCandidate = __mmCombatModelPressure[__mmCombatModelIndex],
         __mmKnown = __mmKittyPressure.find(function (__mmCandidate) {
           return (
-            __mmCandidate.item === __mmGlotusCandidate.item &&
+            __mmCandidate.item === __mmCombatModelCandidate.item &&
             __mmReferenceAngleDistance(
               __mmCandidate.angle,
-              __mmGlotusCandidate.angle,
+              __mmCombatModelCandidate.angle,
             ) < 0.002
           );
         });
-      if (!__mmKnown) __mmKittyPressure.push(__mmGlotusCandidate);
-      else if (__mmGlotusCandidate.points > __mmKnown.points) {
-        ((__mmKnown.points = __mmGlotusCandidate.points),
+      if (!__mmKnown) __mmKittyPressure.push(__mmCombatModelCandidate);
+      else if (__mmCombatModelCandidate.points > __mmKnown.points) {
+        ((__mmKnown.points = __mmCombatModelCandidate.points),
           (__mmKnown.priority = !0),
-          __mmKnown.reasons.push("Glotus trapped fill confirmed"));
+          __mmKnown.reasons.push("trapped fill confirmed"));
       }
     }
     if (!__mmKittyPressure.length) {
@@ -56916,7 +56916,7 @@ function __mmCanAutoSoldier() {
   );
 }
 function __mmEnemyWithinSoldierRange() {
-  return __mmEnemyWithinGlotusDangerRange(__mmSoldierRange);
+  return __mmEnemyWithinCombatModelDangerRange(__mmSoldierRange);
 }
 function __mmEquipSoldier() {
   if (!__mmCanAutoSoldier() || v.skinIndex === 6) return;
