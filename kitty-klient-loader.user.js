@@ -20,4 +20,4 @@
 // @require      https://cdn.jsdelivr.net/gh/CoderGuy508/kitty-klient-cdn@92cee77183d11f439a6ccf2e899f3fc20d91a3b9/kitty-klient-core.user.js
 // ==/UserScript==
 
-
+void 0;
