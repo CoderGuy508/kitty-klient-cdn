@@ -2,7 +2,7 @@
 // @name         kitty klient
 // @author       Coder Guy
 // @credits       random4ik — bot script
-// @version      7.0.32
+// @version      7.0.33
 // @icon         https://cdn.discordapp.com/icons/1540876076224356437/ac27c0ce87c4c46b407ebca78e150aeb.webp?size=2048
 // @description  kitty klient — a MooMoo.io client with adaptive zoom, fast autoheal, gear automation, combat tools, predictive placement, visual markers, CC0 background music, manual quick builds, and a fully rebindable keyboard/mouse controls HUD.
 // @match        *://moomoo.io/*
@@ -267,7 +267,7 @@
     const AUTO_PUSH_FINISHER_MIGRATION_KEY = "kitty-klient-auto-push-finisher-v1";
     const ASSASSIN_RANGE_AUTO_MIGRATION_KEY = "kitty-klient-assassin-range-auto-v1";
     const TAB_SYNC_BRIDGE_KEY = "kitty-klient-tab-sync-bridge-v1";
-const KITTY_KLIENT_VERSION = "7.0.32";
+const KITTY_KLIENT_VERSION = "7.0.33";
     const KITTY_SHARED_STORAGE_APPLIED_EVENT = "KittyMooMooSharedStorageApplied";
     // FRVR's v1.8 client changed the game module and now owns its own Altcha
     // verification flow. The legacy runtime patch relies on exact bundle
@@ -44532,6 +44532,51 @@ function __mmBaseSpikeSyncContactCandidates(
     }
   return __mmCandidates;
 }
+let __mmSpikeSyncContactState = null;
+function __mmExistingSpikeSyncPlan() {
+  if (!__mmSpikeSyncEnabled || Date.now()-__mmSpikeSyncLastAt < __mmServerTickMs()*2 ||
+      !__mmDedicatedTickRuntimeReady("spikeSync") || !v.skins || !v.skins[7]) return null;
+  const primary = v.weapons[0], data = __mmDedicatedMeleeWeaponData(primary);
+  if (!data || !__mmWeaponReady(primary)) return null;
+  const self = __mmServerEntityPosition(v) || v;
+  for (const enemy of (__mmLiveStateFresh() ? __mmLiveState.enemies : E)) {
+    if (!__mmIsEnemyPlayer(enemy) || !__mmShieldBypass(v, enemy)) continue;
+    const current = __mmServerEntityPosition(enemy), previousX = enemy.x1, previousY = enemy.y1;
+    if (!current || previousX == null || previousY == null ||
+        !Number.isFinite(Number(previousX)) || !Number.isFinite(Number(previousY))) continue;
+    const next = {x:current.x+(current.x-Number(previousX)), y:current.y+(current.y-Number(previousY))},
+      reach = (Number(data.range)||0)+(Number(v.scale)||35)*1.8;
+    if (Math.hypot(current.x-self.x,current.y-self.y)>reach ||
+        Math.hypot(next.x-self.x,next.y-self.y)>reach) continue;
+    const spike = __mmActiveObjectSnapshot().spikes.find(object => object && object.active &&
+      __mmFriendlyStructure(object) && __mmSpikeHostileToEnemy(object,enemy) &&
+      Math.hypot(next.x-object.x,next.y-object.y) <= (Number(enemy.scale)||35)+__mmThreatObjectScale(object));
+    if (spike) return {enemySid:enemy.sid,primary,angle:Math.atan2(next.y-self.y,next.x-self.x),
+      existingContact:true,spike};
+  }
+  return null;
+}
+function __mmAdvanceSpikeSyncContact() {
+  const state = __mmSpikeSyncContactState;
+  if (!state) return false;
+  const enemy = __mmDedicatedKnockbackEnemy(state.plan.enemySid);
+  if (!__mmSpikeSyncEnabled || !v || !v.alive || !enemy || __mmActionOwner !== "spikeSync") {
+    __mmStopSpikeSync("contact sync context lost");
+    return true;
+  }
+  const elapsed = __mmCombatServerTick-state.tick;
+  if (elapsed >= 4) {
+    __mmStopSpikeSync("contact sync complete");
+    return true;
+  }
+  __mmSpikeSyncAimAngle = __mmSyncAimAngle(enemy,__mmServerTickMs());
+  O.send("D",__mmSpikeSyncAimAngle);
+  if (elapsed >= 1 && !state.turretAttempted) {
+    state.turretAttempted = true;
+    __mmBaseSpikeSyncTurretStage(state.plan);
+  }
+  return true;
+}
 function __mmBaseSpikeSyncPlan() {
   if (
     !__mmSpikeSyncEnabled ||
@@ -44597,6 +44642,7 @@ function __mmBaseSpikeSyncPlan() {
   return __mmBest;
 }
 function __mmStopSpikeSync(__mmReason) {
+  __mmSpikeSyncContactState = null;
   const __mmRestore = __mmActionMayRestore("spikeSync"),
     __mmTool = __mmSpikeSyncRestoreTool,
     __mmHat = __mmSpikeSyncRestoreHat,
@@ -44624,18 +44670,19 @@ function __mmBaseSpikeSyncTurretStage(__mmPlan) {
     !__mmInsta.turretReady() ||
     !__mmInsta.turretInRange(__mmEnemy)
   )
-    return void __mmStopSpikeSync("Turret follow-up unavailable");
+    return __mmPlan.existingContact ? undefined : void __mmStopSpikeSync("Turret follow-up unavailable");
   const __mmAngle = __mmSyncAimAngle(__mmEnemy, __mmServerTickMs());
   try {
     (__mmCancelCombatHatLock(!1),
       (__mmSpikeSyncAimAngle = __mmAngle),
       __mmEquipGearPair(__mmTurretGear, __mmInsta.damageTail(), !0));
     if (!__mmAssumeTurretGearShot())
-      return void __mmStopSpikeSync("Turret follow-up unavailable");
+      return __mmPlan.existingContact ? undefined : void __mmStopSpikeSync("Turret follow-up unavailable");
     (O.send("D", __mmAngle), je(__mmPlan.primary, !0));
   } catch (__mmSpikeSyncTurretError) {
     return void __mmStopSpikeSync("Turret follow-up failed");
   }
+  if (__mmPlan.existingContact) return;
   __mmSpikeSyncTimer = setTimeout(function () {
     __mmStopSpikeSync("Base Spike Sync sent");
   }, __mmServerTickMs());
@@ -44651,8 +44698,10 @@ function __mmBaseSpikeSyncPrimaryStage(__mmPlan) {
           Math.max(0, Number(window.pingTime) || 0) * 0.5,
         )
       : null;
-  if (!__mmContact || !__mmShieldBypass(v, __mmEnemy))
+  if (!__mmContact || !__mmWeaponReady(__mmPlan.primary) || !__mmShieldBypass(v, __mmEnemy))
     return void __mmStopSpikeSync("Primary target left reach");
+  if (__mmPlan.existingContact && Number.isFinite(__mmPlan.angle))
+    __mmContact.angle = __mmPlan.angle;
   try {
     (__mmCancelCombatHatLock(!1),
       (__mmSpikeSyncAimAngle = __mmContact.angle));
@@ -44671,6 +44720,7 @@ function __mmBaseSpikeSyncPrimaryStage(__mmPlan) {
   } catch (__mmSpikeSyncPrimaryError) {
     return void __mmStopSpikeSync("Primary send failed");
   }
+  if (__mmPlan.existingContact) return;
   __mmSpikeSyncTimer = setTimeout(function () {
     ((__mmSpikeSyncTimer = 0), __mmBaseSpikeSyncTurretStage(__mmPlan));
   }, __mmServerTickMs());
@@ -44682,7 +44732,7 @@ function __mmStartBaseSpikeSync(__mmPlan) {
     !__mmActionClaim("spikeSync", "base contact geometry")
   )
     return !1;
-  if (!__mmReserveTacticalChannel("placement", "spikeSync", 83)) {
+  if (!__mmPlan.existingContact && !__mmReserveTacticalChannel("placement", "spikeSync", 83)) {
     __mmActionRelease("spikeSync", "placement channel busy");
     return !1;
   }
@@ -44694,6 +44744,14 @@ function __mmStartBaseSpikeSync(__mmPlan) {
     )),
     (__mmSpikeSyncRestoreTail = __mmBushRestoreTail(v.tailIndex)),
     (__mmSpikeSyncAimAngle = __mmPlan.angle));
+  if (__mmPlan.existingContact) {
+    __mmSpikeSyncContactState = {plan:__mmPlan,tick:__mmCombatServerTick,turretAttempted:false};
+    // Server updates own the phase edges; this only releases a stalled session.
+    __mmSpikeSyncTimer = setTimeout(() => __mmStopSpikeSync("contact sync timed out"),
+      Math.max(1000,__mmServerTickMs()*8));
+    __mmBaseSpikeSyncPrimaryStage(__mmPlan);
+    return __mmActionOwner === "spikeSync";
+  }
   const __mmPlaced = __mmSmartPlaceBurst(
     __mmPlan.spikes,
     __mmSpikeSyncRestoreTool,
@@ -45025,6 +45083,7 @@ function __mmStartSpikeSyncHammer(__mmPlan) {
   return !0;
 }
 function __mmUpdateDedicatedKnockbackTicks() {
+  if (__mmAdvanceSpikeSyncContact()) return;
   const __mmNow = Date.now();
   if (
     (!__mmPrimaryKnockbackTickEnabled &&
@@ -45040,6 +45099,8 @@ function __mmUpdateDedicatedKnockbackTicks() {
   )
     return;
   __mmDedicatedKnockbackScanAt = __mmNow;
+  const __mmExistingContact = __mmExistingSpikeSyncPlan();
+  if (__mmExistingContact && __mmStartBaseSpikeSync(__mmExistingContact)) return;
   const __mmSpikeSyncPlan = __mmSpikeSyncHammerPlan();
   if (__mmSpikeSyncPlan && __mmStartSpikeSyncHammer(__mmSpikeSyncPlan)) return;
   const __mmBaseSpikeSync = __mmBaseSpikeSyncPlan();
@@ -46260,15 +46321,34 @@ function __mmAutoSpikeSpamCandidate(__mmTarget, __mmSpike) {
   }
   return __mmBest;
 }
+function __mmTrappedSpikeRing(target, item) {
+  if (!target || !target.trap || !target.trap.active ||
+      !__mmServerTrapContact(target.enemy,target.trap)) return [];
+  const data = b.list[item], self = __mmServerEntityPosition(v), enemy = __mmServerEntityPosition(target.enemy);
+  if (!data || !(data.dmg>0) || !self || !enemy || Math.hypot(enemy.x-self.x,enemy.y-self.y)>200) return [];
+  const scale = Number(data.scale)||49,
+    radius = (Number(v.scale)||35)+scale+(Number(data.placeOffset)||0),
+    base = Math.atan2(enemy.y-self.y,enemy.x-self.x), candidates = [];
+  for (let step=0;step<48;step++) {
+    const angle = base+step*Math.PI/24, x = self.x+Math.cos(angle)*radius, y = self.y+Math.sin(angle)*radius;
+    // Fill pressure slots around the caught target, not unrelated space behind us.
+    if (Math.hypot(x-enemy.x,y-enemy.y)>scale+(Number(target.enemy.scale)||35)+(Number(target.trap.scale)||45) ||
+        !__mmAutoSpikeSpamPositionClear(x,y,scale) ||
+        candidates.some(c=>Math.hypot(x-c.x,y-c.y)<scale+c.scale)) continue;
+    candidates.push({item,x,y,angle,scale,targetSid:target.enemy.sid,mode:"trappedRing",intentReady:true});
+  }
+  return candidates;
+}
 function __mmAutoSpikeSpamTrappedPlan(__mmSpike) {
   const __mmTargets = __mmAutoSpikeSpamTargets();
   for (let __mmIndex = 0; __mmIndex < __mmTargets.length; __mmIndex++) {
     const __mmTarget = __mmTargets[__mmIndex],
-      __mmCandidate =
+      __mmRing = __mmTrappedSpikeRing(__mmTarget,__mmSpike),
+      __mmCandidate = __mmRing[0] ||
         __mmAutoSpikeSpamRearCandidate(__mmTarget, __mmSpike) ||
         __mmAutoSpikeSpamCandidate(__mmTarget, __mmSpike);
     if (__mmCandidate)
-      return { target: __mmTarget, candidate: __mmCandidate };
+      return { target: __mmTarget, candidate: __mmCandidate, candidates: __mmRing };
   }
   return {
     target: __mmTargets.length ? __mmTargets[0] : null,
@@ -46368,7 +46448,7 @@ function __mmUpdateAutoSpikeSpam() {
     __mmIntentReady = __mmUpdateAutoSpikeSpamIntent(__mmTarget, __mmNow),
     __mmCandidate = __mmLethalCandidate || __mmTrappedPlan.candidate;
   if (!__mmCandidate) return void __mmAutoSpikeSpamResetCandidate();
-  __mmCandidate.mode !== "spikeKill" &&
+  __mmCandidate.mode !== "spikeKill" && __mmCandidate.mode !== "trappedRing" &&
     (__mmCandidate.intentReady = __mmIntentReady);
   __mmAutoSpikeSpamGhost = __mmCandidate;
   const __mmKey =
@@ -46401,7 +46481,15 @@ function __mmUpdateAutoSpikeSpam() {
           ? "lethal spike push priority"
           : "trapped-player spike priority",
       );
-    __mmPlaceAutoSpikeSpam(__mmCandidate, __mmNow);
+    if (!__mmLethalCandidate && __mmTrappedPlan.candidates && __mmTrappedPlan.candidates.length) {
+      for (const candidate of __mmTrappedPlan.candidates) {
+        if (!__mmAutoSpikeSpamCanPlaceNow() ||
+            !__mmServerTrapContact(__mmTarget.enemy,__mmTarget.trap) ||
+            !__mmTarget.trap.active) break;
+        if (__mmAutoSpikeSpamPositionClear(candidate.x,candidate.y,candidate.scale) &&
+            !__mmPlaceAutoSpikeSpam(candidate,__mmNow)) break;
+      }
+    } else __mmPlaceAutoSpikeSpam(__mmCandidate, __mmNow);
   }
 }
 function __mmStartAutoSpikeSpam() {
