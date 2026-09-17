@@ -2,7 +2,7 @@
 // @name         kitty klient
 // @author       Coder Guy
 // @credits       random4ik — bot script
-// @version      7.0.33
+// @version      7.0.34
 // @icon         https://cdn.discordapp.com/icons/1540876076224356437/ac27c0ce87c4c46b407ebca78e150aeb.webp?size=2048
 // @description  kitty klient — a MooMoo.io client with adaptive zoom, fast autoheal, gear automation, combat tools, predictive placement, visual markers, CC0 background music, manual quick builds, and a fully rebindable keyboard/mouse controls HUD.
 // @match        *://moomoo.io/*
@@ -267,7 +267,7 @@
     const AUTO_PUSH_FINISHER_MIGRATION_KEY = "kitty-klient-auto-push-finisher-v1";
     const ASSASSIN_RANGE_AUTO_MIGRATION_KEY = "kitty-klient-assassin-range-auto-v1";
     const TAB_SYNC_BRIDGE_KEY = "kitty-klient-tab-sync-bridge-v1";
-const KITTY_KLIENT_VERSION = "7.0.33";
+const KITTY_KLIENT_VERSION = "7.0.34";
     const KITTY_SHARED_STORAGE_APPLIED_EVENT = "KittyMooMooSharedStorageApplied";
     // FRVR's v1.8 client changed the game module and now owns its own Altcha
     // verification flow. The legacy runtime patch relies on exact bundle
@@ -48292,6 +48292,7 @@ function __mmUpdateAntiInsta() {
   if (!__mmThreat) return;
   const __mmShieldPlan = __mmAntiInstaShieldPlan(__mmThreat),
     __mmCanShield = !!(
+      !(__mmTrapEscapeEnabled && __mmTrapEscapeSoldierForInsta()) &&
       __mmShieldPlan &&
       Array.isArray(v.weapons) &&
       v.weapons.includes(__mmShieldWeapon)
@@ -55473,6 +55474,7 @@ function __mmRestoreTrapHat() {
   ((__mmTrapHat = null), (__mmTrapHatRestoreAttempts = 0));
 }
 function __mmStopTrapAttack() {
+  __mmGearArbiter.release("trap:insta-cover");
   const __mmHadBreakAim = __mmTrapAttackActive || __mmTrapBreakAimUntil > 0,
     __mmReleaseAngle = Number.isFinite(__mmTrapAimAngle)
     ? __mmTrapAimAngle
@@ -56492,90 +56494,27 @@ function __mmTrapEscapeImminentThreat(__mmSnapshot, __mmNow) {
     firstImpactMs: __mmEntries.length ? __mmEntries[0].impactMs : Infinity,
     angle: __mmEntries.length ? __mmEntries[0].angle : null };
 }
-function __mmPauseTrapEscapeForPredictedInsta() {
-  if (!v || !v.alive || !__mmIsTrapped()) return !1;
-  const __mmNow = Date.now();
-  const __mmThreat = __mmTrapEscapeImminentThreat(__mmCombatThreatSnapshot(!0), __mmNow),
-    __mmTick = Math.max(1, __mmServerTickMs()),
-    __mmHealth = Math.max(1, Number(v.health) || 100),
-    __mmImpactMs = Number(__mmThreat && __mmThreat.firstImpactMs),
-    __mmImminentImpact =
-      Number.isFinite(__mmImpactMs) &&
-      __mmImpactMs >= 0 &&
-      __mmImpactMs <= Math.max(110, Math.min(320, __mmTick * 3)),
-    __mmImpactDamage = Math.max(0, Number(__mmThreat && __mmThreat.damage) || 0),
-    __mmEnemies = __mmLiveStateFresh() ? __mmLiveState.enemies : E,
-    __mmTankThreat = __mmTrappedTankInstaThreat(
-      __mmEnemies,
-      __mmThreat,
-      __mmNow,
-    ),
-    __mmTankLead = !!(
-      __mmTankThreat &&
-      (!__mmImminentImpact ||
-        __mmTankThreat.impactMs <= __mmImpactMs + __mmTick * 0.25)
-    ),
-    __mmCredibleInsta =
-      (__mmImminentImpact &&
-        __mmImpactDamage >= Math.max(25, __mmHealth * 0.3)) ||
-      !!__mmTankThreat;
-  if (!__mmCredibleInsta) {
-    __mmTrapEscapeDangerPauseUntil = 0;
-    return !1;
-  }
-  if (__mmNow < __mmTrapEscapeDangerPauseUntil) return !0;
-  const __mmDefenseThreat = __mmTankThreat
-      ? {
-          ...__mmThreat,
-          damage: Math.max(Number(__mmThreat.damage) || 0, __mmTankThreat.damage),
-          potentialDamage: Math.max(
-            Number(__mmThreat.potentialDamage) || 0,
-            __mmTankThreat.potentialDamage,
-          ),
-          firstImpactMs: __mmTankLead
-            ? __mmTankThreat.impactMs
-            : __mmImpactMs,
-          angle: __mmTankLead ? __mmTankThreat.angle : __mmThreat.angle,
-        }
-      : __mmThreat,
-    __mmDefenseImpact = __mmTankLead
-      ? __mmTankThreat.impactMs
-      : __mmImminentImpact
-        ? __mmImpactMs
-        : __mmTick,
-    __mmHoldMs = Math.max(
-      __mmTick,
-      Math.min(300, Math.round(__mmDefenseImpact + __mmTick * 1.25)),
-    );
-  __mmTrapEscapeDangerPauseUntil = __mmNow + __mmHoldMs;
-  // Queue the refill before releasing Tank/breaker input, so the food packet
-  // reaches the server before Shield owns the predicted hit edge.
-  __mmTryAntiInstaPreHeal(__mmDefenseThreat);
-  __mmInsta.isActive() && __mmInsta.cancel("predicted trapped Insta threat");
-  const __mmShieldPlan = __mmTankLead
-    ? {
-        angle: __mmTankThreat.angle,
-        impactMs: __mmTankThreat.impactMs,
-        holdMs: __mmHoldMs,
-        hits: 1,
-      }
-    : __mmAntiInstaShieldPlan(__mmDefenseThreat);
-  if (
-    __mmShieldPlan &&
-    Array.isArray(v.weapons) &&
-    v.weapons.includes(__mmShieldWeapon)
-  ) {
-    __mmPauseTrapEscapeForAntiInsta(__mmHoldMs);
-    __mmUseShieldDefense(null, {
-      angle: __mmShieldPlan.angle,
-      holdMs: __mmHoldMs,
-      forceAntiInsta: !0,
-      reason: "trapped " +
-        String((__mmTankThreat && __mmTankThreat.source) || "Insta") +
-        " prediction",
-    });
-  } else __mmStopTrapAttack();
-  return !0;
+function __mmTrapEscapeEnemyMainReady(enemy, now) {
+  if (!__mmIsEnemyPlayer(enemy)) return false;
+  const main = enemy.weapons && enemy.weapons[0] != null ? enemy.weapons[0]
+    : enemy.primaryIndex != null ? enemy.primaryIndex : enemy.weaponIndex,
+    data = b && b.weapons && b.weapons[main],
+    self = __mmServerEntityPosition(v) || v, pos = __mmServerEntityPosition(enemy) || enemy;
+  if (main == null || Number(main) >= 9 || !data || data.projectile != null || data.shield ||
+      Math.hypot(pos.x-self.x,pos.y-self.y) > (Number(data.range)||0)+(Number(v.scale)||35)+(Number(enemy.scale)||35)+24)
+    return false;
+  const state = __mmAdvancePlayerToolCooldowns(enemy,now), entry = state && state.weapons && state.weapons[String(main)];
+  return !!(entry && entry.remaining != null && Number.isFinite(Number(entry.remaining)) && Number(entry.remaining)<=0);
+}
+function __mmTrapEscapeSoldierForInsta() {
+  if (!v || !v.alive || !__mmIsTrapped()) return false;
+  const now = Date.now(), enemies = __mmLiveStateFresh() ? __mmLiveState.enemies : E,
+    loaded = Array.isArray(enemies) ? enemies.filter(enemy => __mmTrapEscapeEnemyMainReady(enemy,now)) : [];
+  if (!loaded.length) return false;
+  const threat = __mmTrapEscapeImminentThreat(__mmCombatThreatSnapshot(true),now),
+    tank = __mmTrappedTankInstaThreat(loaded,threat,now);
+  return !!tank || (Number.isFinite(threat.firstImpactMs) &&
+    threat.damage >= Math.max(25,(Number(v.health)||100)*0.3));
 }
 function __mmTrapBreakAimAngle(__mmTarget) {
   const __mmSelfPosition = __mmServerEntityPosition(v) || v,
@@ -56633,14 +56572,17 @@ function __mmBreakTrap() {
   // face Shield. Do not immediately steal it back on the next escape tick;
   // __mmStopShieldDefense schedules this same breaker as soon as the block
   // window ends.
+  const __mmSoldierBreak = __mmTrapEscapeSoldierForInsta();
+  if (__mmSoldierBreak && __mmActionOwner === "shieldDefense") {
+    __mmAntiInstaTrapShieldUntil = 0;
+    __mmStopShieldDefense("continue breaking with Soldier");
+  }
   if (Date.now() < __mmAntiInstaTrapShieldUntil) {
     if (__mmActionOwner === "shieldDefense" && __mmShieldDefenseTimer) return;
     __mmAntiInstaTrapShieldUntil = 0;
   }
-  // Match Glotus Autobreak: yield the held breaker during a credible incoming
-  // Insta/Tank window, defend if possible, then resume when the short window
-  // expires instead of swinging continuously into the combo.
-  if (__mmPauseTrapEscapeForPredictedInsta()) return;
+  // Incoming Insta changes the hat, not the breaker's attack schedule.
+  __mmTrapEscapeDangerPauseUntil = 0;
   // An Insta that started immediately before the lock is stale combat work;
   // cancel it now and reclaim the same weapon/hat/aim channels for escape.
   // Returning here used to leave a caught player idle until every Insta stage
@@ -56673,6 +56615,12 @@ function __mmBreakTrap() {
   }
   if (!__mmActionClaim("trapEscape", "locked pit trap")) return;
   __mmAutoHeal(!0);
+  if (__mmSoldierBreak) {
+    __mmCancelCombatHatLock(!1);
+    __mmGearArbiter.request("trap:insta-cover", {hat:v.skins && v.skins[6] ? 6 : 0},
+      {priority:__mmGearIntentPriorities.safety});
+    __mmGearArbiter.commit();
+  } else __mmGearArbiter.release("trap:insta-cover");
   const __mmTrap = __mmCurrentNearbyTrap();
   const __mmTrapTarget = __mmTrapEscapeBreakTarget(__mmTrap);
   if (__mmTrapTarget == null) return void __mmStopTrapAttack();
@@ -56680,11 +56628,11 @@ function __mmBreakTrap() {
   // one-Hammer break edge into an immediate pre-placement transaction before
   // returning to this local pit. The timer in this helper releases and invokes
   // this same breaker on the next server phase, so it never abandons escape.
-  if (__mmTrySmartHammerRetrap(__mmTrapTarget)) return;
+  if (!__mmSoldierBreak && __mmTrySmartHammerRetrap(__mmTrapTarget)) return;
   // When an opponent replaces this locking pit in rapid succession, claim
   // the just-opened slot instead of continuing the rear-spike build loop.
   // The helper only proceeds for a reachable, one-hit Great Hammer break.
-  if (!__mmSavedFriendLockingTrap(__mmTrapTarget) && __mmTryTrapEscapeOwnReplace(__mmTrapTarget)) return;
+  if (!__mmSoldierBreak && !__mmSavedFriendLockingTrap(__mmTrapTarget) && __mmTryTrapEscapeOwnReplace(__mmTrapTarget)) return;
   // Reserve and send the rear escape placement while this exact hostile pit
   // still owns the movement lock. The build helper retries a blocked rear arc
   // and the breaker resumes its per-swing Tank pulse afterwards.
@@ -56743,7 +56691,8 @@ function __mmBreakTrap() {
         Number(__mmBreakTarget.y) - Number(v.y),
       ) <= __mmTrapWeaponRange(__mmLockedWeapon, __mmBreakTarget),
     __mmWeapon = __mmKeepLockedWeapon ? __mmLockedWeapon : __mmPlan.weapon,
-    __mmCooldown = __mmPlan.finalKnockback ? __mmPlan.cooldown : __mmKeepLockedWeapon
+    __mmCooldown = __mmSoldierBreak ? __mmManualWeaponCooldown(__mmWeapon,v.skins && v.skins[6] ? 6 : 0)
+      : __mmPlan.finalKnockback ? __mmPlan.cooldown : __mmKeepLockedWeapon
       ? __mmManualWeaponCooldown(
           __mmWeapon,
           v.skins && v.skins[40] ? 40 : null,
@@ -56773,7 +56722,7 @@ function __mmBreakTrap() {
     __mmNow,
     !1,
   );
-  if (__mmSwingReady && __mmPlan.finalKnockback) {
+  if (__mmSwingReady && __mmPlan.finalKnockback && !__mmSoldierBreak) {
     // Soldier applies before this exact final main swing. Do not stack Tank on
     // it: the knockback escape is chosen specifically for Soldier's lethal
     // structure damage and the main weapon's push.
@@ -56781,6 +56730,7 @@ function __mmBreakTrap() {
     __mmGearArbiter.commit();
   } else if (
     __mmSwingReady &&
+    !__mmSoldierBreak &&
     v.skins &&
     v.skins[40] &&
     !__mmArmTankForTrap()
