@@ -2,7 +2,7 @@
 // @name         kitty klient
 // @author       Coder Guy
 // @credits       random4ik — bot script
-// @version      7.0.31
+// @version      7.0.32
 // @icon         https://cdn.discordapp.com/icons/1540876076224356437/ac27c0ce87c4c46b407ebca78e150aeb.webp?size=2048
 // @description  kitty klient — a MooMoo.io client with adaptive zoom, fast autoheal, gear automation, combat tools, predictive placement, visual markers, CC0 background music, manual quick builds, and a fully rebindable keyboard/mouse controls HUD.
 // @match        *://moomoo.io/*
@@ -267,7 +267,7 @@
     const AUTO_PUSH_FINISHER_MIGRATION_KEY = "kitty-klient-auto-push-finisher-v1";
     const ASSASSIN_RANGE_AUTO_MIGRATION_KEY = "kitty-klient-assassin-range-auto-v1";
     const TAB_SYNC_BRIDGE_KEY = "kitty-klient-tab-sync-bridge-v1";
-const KITTY_KLIENT_VERSION = "7.0.31";
+const KITTY_KLIENT_VERSION = "7.0.32";
     const KITTY_SHARED_STORAGE_APPLIED_EVENT = "KittyMooMooSharedStorageApplied";
     // FRVR's v1.8 client changed the game module and now owns its own Altcha
     // verification flow. The legacy runtime patch relies on exact bundle
@@ -702,7 +702,7 @@ const KITTY_KLIENT_VERSION = "7.0.31";
         Object.freeze({ id: "primaryAttack", group: "Combat & gear", binding: "Mouse0", action: "Primary attack", note: "Held attack with Kitty's Bull and tail timing.", hold: true }),
         Object.freeze({ id: "secondaryAttack", group: "Combat & gear", binding: "Mouse2", action: "Secondary attack / Tank", note: "Held secondary or situational Shield/Tank path.", hold: true }),
         Object.freeze({ id: "clickBoostInsta", group: "Combat & gear", binding: "Shift+Mouse0", action: "Click Boost Insta", note: "Starts Boost Insta when ready; otherwise continues as a primary hold.", hold: true }),
-        Object.freeze({ id: "normalInsta", group: "Combat & gear", binding: "KeyR", action: "Normal Insta", note: "Runs the same qualified combo planner as Combat Auto Insta; with no target, it keeps the manual mouse-aim burst." }),
+        Object.freeze({ id: "normalInsta", group: "Combat & gear", binding: "KeyR", action: "Normal Insta", note: "Polearm/Katana + Great Hammer with Turret and Bull runs manual reverse; other kits use the combo planner. With no target, uses mouse aim." }),
         Object.freeze({ id: "boostInsta", group: "Combat & gear", binding: "Shift+KeyR", action: "Boost Insta", note: "Uses a ready Crossbow or Musket with the boost Insta kit." }),
         Object.freeze({ id: "oneTickInsta", group: "Combat & gear", binding: "Shift+KeyP", action: "Toggle One-Tick Insta", note: "Toggles the secondary-first one-tick profile." }),
         Object.freeze({ id: "velTickInsta", group: "Combat & gear", binding: "KeyT", action: "Toggle VelTick Insta", note: "Toggles predicted 220–245px Turret then Bull + Polearm timing." }),
@@ -4743,7 +4743,7 @@ const KITTY_KLIENT_VERSION = "7.0.31";
         const actions = addHudSection(combatPage, "Gear & boost controls");
         addHudToggle(actions, "bullHelmet", "Bull helmet", "Equip Bull and the damage tail on a ready melee swing, including safe nearby-animal farming; it immediately yields to danger and higher-priority gear");
         addHudToggle(actions, "tankRightClick", "Smart Tank breaks", "On either click, queue Tank only for each loaded swing tick when that click's weapon can reach a nearby player-built breakable. Right click keeps Shield defense; left click stays on the main weapon and never uses Tank while an enemy, mob, boss, or Treasure is in its attack path.");
-        addHudToggle(actions, "instaKill", "R insta", "Uses the same qualified Bull/Turret combo planner as Auto Insta; without a target, it fires the manual mouse-aim burst");
+        addHudToggle(actions, "instaKill", "R insta", "R manually reverses Polearm/Katana + Great Hammer with Turret and Bull; other kits use the combo planner. Without a target, uses mouse aim");
         addHudToggle(actions, "autoInsta", "Auto Insta", "Continuously watches the nearest enemy and fires at the first lethal tick: shield-safe contact, ready primary/secondary/Turret, and enough full-health damage. Left-click and Shift+click remain available");
         addHudToggle(actions, "autoAim", "Kitty target aim", "While left click is held, aim at the nearer hostile player or active animal without changing out of the main weapon. Accessories follow fixed Kitty's close-target and danger rules.");
         addHudToggle(actions, "autoBarbarian", "Auto Barbarian", "On a confirmed nonlethal enemy main swing, use Barbarian Armor for the retaliation tick. It yields to projectile, sync, Musket, trap, and lethal threats.");
@@ -4758,7 +4758,7 @@ const KITTY_KLIENT_VERSION = "7.0.31";
 
         const kittyInstas = addHudSection(combatPage, "Kitty Insta library");
         addHudToggle(kittyInstas, "autoBowUpgradeInsta", "Bow Upgrade Insta", "R prefers a ready close-range normal Insta and chains the upgrade shots only when compatible; otherwise a fully ready Bow → Crossbow → Musket run is the ranged fallback. Friendly and personal-turret shots can trigger it too");
-        addHudToggle(kittyInstas, "reverseInsta", "Reverse R order", "R uses Turret + secondary first, then Bull + primary. Polearm + Great Hammer sends Turret/Hammer, then Bull/Polearm on the next tick; Shift+R remains Kitty's Crossbow/Musket boost Insta");
+        addHudToggle(kittyInstas, "reverseInsta", "Reverse R order", "Prefers Turret + secondary before Bull + primary. R always uses reverse for Polearm/Katana + Great Hammer with Turret and Bull, regardless of this toggle; Shift+R uses the Crossbow/Musket boost Insta");
         addHudToggle(kittyInstas, "oneTickInsta", "One-Tick Insta", "Shift+P toggles the secondary-first one-server-tick combo; projectile timing is prediction-adjusted");
         addHudToggle(kittyInstas, "sevenShameInsta", "7-Shame Insta", "When the nearest enemy's server-reported Shame count is exactly 7, fire a fully ready lethal Insta. It stays off when that count is unavailable.");
         addHudToggle(kittyInstas, "appleInsta", "Apple Insta", "Automatically uses Turret + Great Hammer, then Bull + Polearm against a nearby Soldier-helmet target only when the Hammer landing lane has open space");
@@ -4770,7 +4770,7 @@ const KITTY_KLIENT_VERSION = "7.0.31";
         addHudToggle(kittyInstas, "spikeSync", "Base Spike Sync", "Place every legal contact spike around an in-range enemy, then use Bull + primary and a next-tick Turret follow-up. Does not use Tank gear");
         addHudToggle(kittyInstas, "spikeSyncHammer", "Spike Sync Hammer", "Find one Great Hammer angle that hits both an enemy and a one-hit breakable, place a legal contact spike, then stack ready Turret and primary damage");
         addHudToggle(kittyInstas, "velTickInsta", "VelTick Insta", "T watches the predicted 220–245px window, leads with Turret, then sends Bull + Polearm on the next tick");
-        addHudToggle(kittyInstas, "tankPredictInsta", "Tank Vel Predict RevInsta", "Prioritizes Turret → main against a nearby exposed target. It still learns repeat Tank Gear pulses, next-hat signals, and fresh movement reversals, then times the Turret for the predicted Tank tick before Bull + main and an optional Musket follow-up.");
+        addHudToggle(kittyInstas, "tankPredictInsta", "Tank Vel Predict RevInsta", "Prioritizes Turret → main against a nearby exposed target. Learns Tank timing from any opponent, rejects stale or inconsistent windows, and aligns Bull + main with the predicted Turret arrival. Also uses next-hat signals and fresh movement reversals.");
         addHudToggle(kittyInstas, "polearmAids", "Polearm Aids", "Against a target in your or an ally's trap: Tank + Great Hammer, then Bull + Polearm and a legal contact spike");
         addHudToggle(kittyInstas, "autoPushInsta", "Auto Push", "Uses Glotus far-point alignment and close-point steering within 250 pixels; pauses while movement keys are held");
         addHudToggle(kittyInstas, "boostSpikeKill", "Boost + Spike", "G uses x-RedDragon's 80 ms pattern: two side spikes, two close diagonals within 150 units, then a forward Boost Pad. Kitty skips any illegal slot.");
@@ -4847,8 +4847,8 @@ const KITTY_KLIENT_VERSION = "7.0.31";
 
         const smartPlacementTiming = addHudSection(placementPage, "Placement timing and recovery");
         addHudToggle(smartPlacementTiming, "smartPreplace", "Tick-minus-ping preplace", "Schedule predicted opening placements before the next server phase without waiting for confirmation");
-        addHudToggle(smartPlacementTiming, "smartAutoReplace", "Trap replace", "Predicts a lethal hit on your enemy-holding Pit Trap and restores its exact slot in the same packet phase; rejected predictions fall back to confirmed destroyed-slot replacement");
-        addHudToggle(smartPlacementTiming, "smartSpikeSyncPlace", "Destroyed-slot spike sync", "Reset the angle budget and immediately reconsider contact spikes when a nearby obstruction is destroyed");
+        addHudToggle(smartPlacementTiming, "smartAutoReplace", "Trap replace", "Pre-places into predicted broken slots using local final hits or the next observed breaker swing; keeps occupied friendly traps as traps and retries rejected predictions after removal");
+        addHudToggle(smartPlacementTiming, "smartSpikeSyncPlace", "Destroyed-slot spike sync", "Pre-place on a predicted final trap hit; confirmed removals reset the angle budget and retry contact spikes if needed");
         addHudToggle(smartPlacementTiming, "smartAntiBoostPlace", "Boost-rush placement", "Reserve the placement channel for two legal side spikes when a boost-pad rush is predicted");
         addHudToggle(smartPlacementTiming, "smartInstaUtilityPlace", "Insta utility placement", "Allow the active Insta plan to request its calculated legal spike or utility slot");
         addHudToggle(smartPlacementTiming, "smartSelectedCombatPlace", "Selected-item combat placement", "Permit the currently selected placeable to enter combat scoring; keep this off to prevent accidental special-item placement");
@@ -12413,6 +12413,7 @@ let __mmPendingHat = null,
   __mmPendingTailAt = 0;
 let __mmTrapAttackTimer = 0,
   __mmTrapAttackActive = !1,
+  __mmTrapBreakAimUntil = 0,
   // Object/grid snapshots can lag a position packet by one or two frames.
   // Retain the last hostile pit only while an escape is already active so a
   // momentary missing object update cannot abandon a player who is still
@@ -15132,6 +15133,7 @@ O.send = function () {
     const __mmManualActionAngle = __mmRawMouseAimDirection();
     Number.isFinite(__mmManualActionAngle) && (arguments[2] = __mmManualActionAngle);
   }
+  __mmProtectTrapBreakDirection(arguments);
   const __mmResult = __mmOriginalSocketSend.apply(this, arguments);
   // F=1 is the common action boundary for melee, ranged shots, structure
   // placement, food, and native manual clicks.  Send a spin direction only
@@ -15149,8 +15151,7 @@ O.send = function () {
   __mmUpgradePacket && __mmPublishCompanionUpgrade(arguments[1]);
   ((__mmMetricPackets += 1),
     (__mmMetricPacketWindow += 1),
-    __mmObserveOutgoingMeleeAttack(arguments),
-    __mmObserveOutgoingBreakableAttack(arguments),
+    __mmObserveOutgoingBreakableAttack(arguments, __mmObserveOutgoingMeleeAttack(arguments)),
     __mmObserveOutgoingProjectileAttack(arguments),
     __mmObserveOutgoingWeaponXpAttack(arguments),
     __mmSyncObserveSocketSend(arguments),
@@ -15171,6 +15172,8 @@ const __mmOriginalAimDirection = Ci;
 const __mmOriginalRender = Cl;
 const __mmOriginalMinimapRender = nl;
 Ci = function () {
+  const __mmBreakAim = __mmTrapBreakPhaseAim();
+  if (__mmBreakAim != null) return __mmBreakAim;
   // Auto Spin is server-facing only. The local renderer and all native input
   // keep the true pointer direction, including during automation.
   return __mmAutoSpinEnabled
@@ -15966,6 +15969,7 @@ function __mmDrawProjectileAimHelper() {
 }
 function __mmForcedDirectionStillActive() {
   return !!(
+    __mmTrapBreakPhaseAim() != null ||
     __mmResponsiveBreakAimActive() ||
     (__mmAutoAimEnabled &&
       __mmPrimaryHeld &&
@@ -16395,7 +16399,7 @@ const __mmInsta = {
     const __mmPrimaryData = this.weaponData(__mmPrimary);
     return !!(
       this.profile === "reverse" &&
-      __mmTarget &&
+      (__mmTarget || this.targetOptional) &&
       Number(__mmSecondary) === Number(__mmGreatHammer) &&
       __mmPrimaryData &&
       __mmPrimaryData.projectile == null &&
@@ -17449,6 +17453,12 @@ const __mmInsta = {
         ? Number(__mmForcedAngle)
         : this.aim(__mmTarget);
       je(__mmItem, !!__mmIsWeapon);
+      // These main follow-ups are one synchronous packet phase: select main,
+      // face the impact angle, then swing. Never wait for a selection/hat echo
+      // or a later mouse update to provide the direction.
+      if (__mmIsWeapon && Number(__mmItem) === Number(this.primaryWeapon) &&
+          (this.profile === "reverse" || this.profile === "turretMain"))
+        O.send("D", __mmAngle);
       O.send("F", 1, __mmAngle);
       Number(v.skinIndex) === Number(__mmTurretGear) &&
         __mmAssumeTurretGearShot();
@@ -17500,13 +17510,18 @@ const __mmInsta = {
       const __mmNow = Date.now();
       if (__mmNow > Number(__mmPlan.pulseEndAt || Infinity) - 4)
         return void this.cleanup("tank-window-expired-before-turret");
+      if (this.profile === "tankPredict") {
+        const __mmArrivalAt = __mmNow + Math.max(1, this.turretTravelMs(__mmContext.target));
+        if (__mmArrivalAt > Number(__mmPlan.pulseEndAt) - 4)
+          return void this.cleanup("tank-window-too-short");
+        __mmPlan.primaryAt = __mmArrivalAt;
+        __mmPlan.turretImpactAt = __mmArrivalAt;
+      }
       const __mmPrimaryAt = Math.max(
           __mmNow,
           Number(__mmPlan.primaryAt) || Number(__mmPlan.expectedAt) || __mmNow,
         ),
-        // Lead the shot to its own impact, while keeping the melee packet on
-        // the Tank gear edge. These are different clocks when skinIndex2
-        // arrives after a far turret's ideal launch point.
+        // Lead both hits to the same predicted arrival in the Tank window.
         __mmTurretImpactAt = Math.max(
           __mmNow,
           Number(__mmPlan.turretImpactAt) || __mmPrimaryAt,
@@ -17534,7 +17549,7 @@ const __mmInsta = {
       }
       const __mmFollowupDelay = Math.max(
         1,
-        Math.min(this.tick() * 2, __mmPrimaryAt - Date.now()),
+        __mmPrimaryAt - Date.now(),
       );
       // Turret Gear is a one-shot packet phase. Do not stand exposed in it
       // while its bullet travels toward the predicted Tank window; return to
@@ -17761,7 +17776,8 @@ const __mmInsta = {
         );
       if (
         !__mmPlan ||
-        (__mmRequiresTank && !__mmTankVisible) ||
+        (__mmRequiresTank && (!__mmTankVisible ||
+          __mmNow > Number(__mmPlan.pulseEndAt) - 4)) ||
         __mmDefensiveHat ||
         __mmUnexpectedTank ||
         !__mmWeaponReady(__mmContext.primary) ||
@@ -25306,8 +25322,9 @@ function __mmObserveOutgoingMeleeAttack(__mmArguments) {
   // to leave no local cooldown record. Register the packet immediately: the
   // idle-hand policy can then keep primary selected until the swing reloads.
   __mmTrackPlayerToolCooldown(v.sid, __mmWeapon, "outgoing-melee");
+  return !0;
 }
-function __mmObserveOutgoingBreakableAttack(__mmArguments) {
+function __mmObserveOutgoingBreakableAttack(__mmArguments, __mmReadySwing = !1) {
   if (
     !__mmArguments ||
     __mmArguments[0] !== "F" ||
@@ -25359,10 +25376,13 @@ function __mmObserveOutgoingBreakableAttack(__mmArguments) {
       __mmNow - __mmRecentLocalBreakableAttacks[0].at > 900)
   )
     __mmRecentLocalBreakableAttacks.shift();
-  // The packet above has already left the socket. When it is a verified final
-  // hit on our friendly occupied pit, append the exact replacement now rather
-  // than waiting for the destroyed-object observer to notice the removal.
-  __mmTryPredictSmartTrapReplace(__mmWeapon, __mmAngle, __mmHat);
+  // The packet has already left the socket. Capture final-hit predictions
+  // using its pre-send readiness, then append replacements in packet order.
+  if (__mmReadySwing) {
+    __mmPredictReplacementSwing(v, __mmWeapon, __mmAngle, __mmHat);
+    __mmUpdateTrapSpikeReplace(__mmCurrentNearbyTrap());
+    __mmUpdatePriorityTrapReplacement();
+  }
 }
 function __mmObserveOutgoingProjectileAttack(__mmArguments) {
   if (
@@ -33093,7 +33113,8 @@ function __mmDangerAnimalNearby() {
   if (!Array.isArray(animals)) return false;
   for (const animal of animals) {
     if (!animal || animal.active === false || animal.alive === false ||
-        !animal.visible || !animal.hostile) continue;
+        !animal.visible || !animal.hostile ||
+        __mmThreatTrapAnimalName(animal).includes("treasure")) continue;
     // A fleeing hostile mob is harmless until it turns back. Moostafa can
     // still hurt us while retreating, so retain its contact prediction.
     if (__mmThreatTrapAnimalName(animal) !== "moostafa" &&
@@ -33109,6 +33130,15 @@ function __mmDangerAnimalNearby() {
   }
   return false;
 }
+function __mmAnimalSoldierThreat() {
+  if (!v || !v.alive) return !1;
+  const __mmWinner = __mmGearArbiter.resolve("hat"),
+    __mmTank = Number(v.skinIndex) === 40 || Number(__mmPendingHat) === 40 ||
+      (__mmWinner && Number(__mmWinner.intent.hat) === 40);
+  // A deliberate click owns its damage/break gear. Animal proximity alone
+  // must not replace that Bull/Tank phase with a safety-priority Soldier lease.
+  return !__mmTank && !__mmPrimaryHeld && !__mmSecondaryHeld && __mmDangerAnimalNearby();
+}
 function __mmUpdateFreeAnimalSoldierCheck() {
   // Position packets run the full gear resolver only once per server tick.
   // Between packets, give nearby hostile animals a fast response without
@@ -33119,7 +33149,7 @@ function __mmUpdateFreeAnimalSoldierCheck() {
     !v.alive ||
     __mmIsTrapped() ||
     __mmTrapAttackActive ||
-    !__mmDangerAnimalNearby()
+    !__mmAnimalSoldierThreat()
   )
     return;
   __mmCanAutoSoldier() && __mmEquipSoldier();
@@ -33140,7 +33170,7 @@ function __mmDefaultSoldierThreat() {
     __mmSpikeDanger = !!(
       __mmPassiveSpikeAvoidanceEnabled && __mmPassiveSpikeThreat()
     ),
-    __mmAnimalDanger = __mmDangerAnimalNearby();
+    __mmAnimalDanger = __mmAnimalSoldierThreat();
   return (
     __mmEnemyDanger ||
     __mmAnimalDanger ||
@@ -33181,7 +33211,7 @@ function __mmResolveDefaultHat() {
     __mmSoldierAutoEnabled &&
     v.skins &&
     v.skins[6] &&
-    (__mmAnimalSoldierTargeted() || __mmDangerAnimalNearby())
+    __mmAnimalSoldierThreat()
   )
     return 6;
 
@@ -34546,22 +34576,21 @@ function __mmPulseHeldAttack() {
   // game-state acknowledgement to confirm Tank is equipped.
   if (__mmSecondaryHeld) return void __mmPulseSecondaryWeapon(!0);
   if (__mmPrimaryHeld) {
-    const __mmManualBreak = __mmKittyManualBreakPlan();
+    const __mmAutoAim = __mmAutoAimPlan(),
+      __mmManualBreak = __mmAutoAim ? null : __mmKittyManualBreakPlan();
     // Keep the bounded manual-break transaction in charge between server
     // packets as well. Without this early return, the short F=0 after a
     // Kitty break tap could be followed by Kitty's ordinary Bull/native F=1.
     if (__mmManualBreak)
       return void __mmPulsePrimaryManualBreak(__mmManualBreak);
-    const __mmMaterialBreak = __mmMaterialHoldBreakPlan();
+    const __mmMaterialBreak = __mmAutoAim ? null : __mmMaterialHoldBreakPlan();
     if (__mmMaterialBreak)
       return void __mmPulsePrimaryMaterialBreak(__mmMaterialBreak);
     __mmClearResponsiveBreakAim();
-    const __mmAutoAim = __mmAutoAimPlan();
     if (__mmAutoAim) {
       if (
         __mmAutoAim.type === "primary" &&
-        __mmAutoAim.kind === "animal" &&
-        __mmPulseAnimalBullAutoAim(__mmAutoAim)
+        __mmPulseEntityBullAutoAim(__mmAutoAim)
       )
         return;
       __mmApplyAutoAim(__mmAutoAim);
@@ -37512,6 +37541,24 @@ function __mmHandleInstaHotkey() {
   if (__mmInstaTestingModeEnabled) {
     __mmBushStatus("Insta testing mode: Autoheal only");
     return !1;
+  }
+  // This physical R loadout takes precedence over automatic kill qualification
+  // and the One Tick/Reverse preferences. It can also fire toward the mouse.
+  if (v && v.alive && v.weapons &&
+      [__mmPolearmWeapon, __mmKatana].includes(v.weapons[0]) &&
+      v.weapons[1] === __mmGreatHammer && v.skins &&
+      v.skins[__mmTurretGear] && v.skins[7]) {
+    const __mmTarget = __mmInsta.nearestEnemy(!0),
+      __mmStarted = __mmInsta.start({
+        profile: "reverse",
+        profileSource: "R Reverse",
+        manualHotkey: !0,
+        targetOptional: !0,
+        targetSid: __mmTarget ? __mmTarget.sid : null,
+      });
+    if (!__mmStarted)
+      __mmBushStatus("R Reverse: " + __mmInstaHotkeyBlockReason("reverse"));
+    return __mmStarted;
   }
   const __mmBowUpgradeTarget = __mmInsta.nearestEnemy(!0),
     __mmProfile = __mmOneTickInstaEnabled
@@ -41134,20 +41181,44 @@ function __mmAutoPushContactSpam(enemy, trap, spike) {
 // Only count a second spike already intersecting the first collision's
 // separation endpoint. Do not assume an arbitrary long knockback flight.
 function __mmAutoPushReplacementLethal(enemy, candidate, hazards) {
-  const pos = __mmServerEntityPosition(enemy) || enemy, health=Number(enemy.health);
-  const dx=pos.x-candidate.x, dy=pos.y-candidate.y, distance=Math.hypot(dx,dy);
-  const radius=(Number(enemy.scale)||35)+Number(candidate.scale);
-  if (!(health>0) || !(distance>0.001) || distance>radius+1) return false;
-  const endX=candidate.x+dx/distance*(radius+1), endY=candidate.y+dy/distance*(radius+1);
-  const firstDamage=Number(candidate.data && candidate.data.dmg)||0;
-  if (!(firstDamage>0)) return false;
+  if (!enemy || !candidate) return false;
+  const pos = __mmServerEntityPosition(enemy) || enemy,
+    // Assume healing between phases, including before the trap disappears.
+    health = Math.max(100, Number(enemy.maxHealth) || 0, Number(enemy.health) || 0),
+    multiplier = Math.min(__mmAutoPushTargetDamageMultiplier(enemy),
+      enemy.skinIndex2 == null ? Infinity :
+        __mmAutoPushTargetDamageMultiplier({...enemy, skinIndex: enemy.skinIndex2})),
+    dx = pos.x-candidate.x, dy = pos.y-candidate.y, distance = Math.hypot(dx,dy),
+    radius = (Number(enemy.scale)||35)+Number(candidate.scale),
+    firstDamage = Number(candidate.data && candidate.data.dmg) || 0;
+  if (!Number.isFinite(distance) || distance > radius || !(firstDamage > 0) ||
+      !(multiplier > 0)) return false;
+  if (firstDamage * multiplier >= health) return true;
+  if (!(distance > 0.001)) return false;
+  // Only the immediate collision separation may stack a second spike. Never
+  // add a later melee/turret hit, velocity travel, or next-tick knockback hit.
+  const endX = candidate.x+dx/distance*(radius+1),
+    endY = candidate.y+dy/distance*(radius+1);
   return hazards.some(h => {
-    const object=h.object;
-    if (!object || !object.active || !h.spike || Math.hypot(object.x-candidate.x,object.y-candidate.y)<1) return false;
-    const secondDamage=Number(h.damage || object.dmg || (b.list[object.id] && b.list[object.id].dmg))||0;
+    const object = h.object;
+    if (!object || !object.active || !h.spike || object === candidate.expectedRemoval ||
+        Math.hypot(object.x-candidate.x,object.y-candidate.y)<1) return false;
+    const secondDamage = Number(h.damage || object.dmg || (b.list[object.id] && b.list[object.id].dmg)) || 0;
     return Math.hypot(endX-object.x,endY-object.y) <= (Number(enemy.scale)||35)+(Number(h.scale)||49) &&
-      (firstDamage+secondDamage)*__mmAutoPushTargetDamageMultiplier(enemy) >= health;
+      (firstDamage+secondDamage)*multiplier >= health;
   });
+}
+function __mmLethalSpikeReplacement(enemy, removed, angle, preplace = true) {
+  const item = __mmSpikeItem();
+  if (!enemy || item == null || !__mmCanUseBuildItem(item)) return null;
+  const candidate = preplace
+    ? __mmSmartCandidateForExpectedRemoval(item, angle, removed)
+    : __mmSmartCandidateForAngle(item, angle, false, false);
+  if (!candidate || (!candidate.valid && !candidate.preplace) ||
+      Math.hypot(candidate.x-removed.x,candidate.y-removed.y)>14 ||
+      !__mmAutoPushReplacementLethal(enemy, candidate,
+        __mmAutoPushTargetHazards(enemy).filter(h => h.object !== removed))) return null;
+  return {item, candidate};
 }
 function __mmAutoPushReplacementAffordable(item, object) {
   if (!v || !Array.isArray(v.items) || !v.items.includes(item)) return false;
@@ -41172,9 +41243,9 @@ function __mmAutoPushPredictReplacement(enemy, trap, spike, hazards) {
         now-Number(state.lastPredictionAt)>__mmServerTickMs()*2 ||
         now-(__mmPushReplacementAttempts.get(object)||0)<Math.max(150,__mmServerTickMs()*2)) continue;
     let item=object===trap ? __mmSmartTrapReplaceAffordableItem() : __mmSpikeItem();
-    if (item==null || !__mmAutoPushReplacementAffordable(item,object)) continue;
     const angle=Math.atan2(object.y-origin.y,object.x-origin.x);
-    let candidate=__mmSmartCandidateForExpectedRemoval(item,angle,object), lethal=false;
+    let candidate=item!=null && __mmAutoPushReplacementAffordable(item,object)
+      ? __mmSmartCandidateForExpectedRemoval(item,angle,object) : null, lethal=false;
     if (object===trap) {
       const spikeItem=__mmSpikeItem();
       const alternative=spikeItem!=null && __mmAutoPushReplacementAffordable(spikeItem,object) && __mmSmartCandidateForExpectedRemoval(spikeItem,angle,object);
@@ -42301,16 +42372,16 @@ const __mmTankPredictInsta = {
     if (!__mmSamples || __mmSamples.length < 2) return !1;
     const __mmSorted = __mmSamples.slice().sort((__mmLeft, __mmRight) => __mmLeft - __mmRight),
       __mmSpread = __mmSorted[__mmSorted.length - 1] - __mmSorted[0];
-    return __mmSpread <= Math.max(90, __mmServerTickMs() * 1.5);
+    return __mmSpread <= Math.max(12, Math.min(__mmServerTickMs() * 0.45, this.median(__mmSamples) * 0.12));
   },
   pulseMs(__mmRecord) {
     // A seen Tank duration is the best description of that opponent's actual
     // vulnerable window. Fall back to one server tick until one is observed.
     return Math.max(
-      30,
+      1,
       Math.min(
         __mmServerTickMs() * 1.35,
-        this.median(__mmRecord && __mmRecord.tankDurations) ||
+        (__mmRecord && __mmRecord.tankDurations.length ? Math.min(...__mmRecord.tankDurations) : 0) ||
           __mmServerTickMs(),
       ),
     );
@@ -42412,7 +42483,7 @@ const __mmTankPredictInsta = {
       const __mmSid = String(__mmEnemy.sid), __mmHat = Number(__mmEnemy.skinIndex);
       __mmSeen[__mmSid] = !0;
       let __mmRecord = this.records[__mmSid];
-      if (!__mmRecord) {
+      if (!__mmRecord || __mmNow - __mmRecord.lastSeenAt > __mmServerTickMs() * 4) {
         __mmRecord = this.records[__mmSid] = {
           hat: __mmHat, lastTankAt: 0, lastSeenAt: __mmNow,
           intervals: [], tankDurations: [], nextTankAt: 0,
@@ -42445,43 +42516,42 @@ const __mmTankPredictInsta = {
         delete this.records[__mmSid];
   },
   plan(__mmEnemy, __mmNow = Date.now()) {
-    if (!__mmEnemy || __mmEnemy.sid == null || Number(__mmEnemy.skinIndex) === 40 ||
+    if (!__mmEnemy || __mmEnemy.sid == null || !__mmIsEnemyPlayer(__mmEnemy) ||
         !v || !v.alive || !__mmInsta.turretReady() ||
         !__mmInsta.turretInRange(__mmEnemy)) return null;
     const __mmRecord = this.records[String(__mmEnemy.sid)];
-    if (!__mmRecord || __mmNow < __mmRecord.retryAfter) return null;
+    if (!__mmRecord || __mmNow < __mmRecord.retryAfter ||
+        __mmNow - __mmRecord.lastSeenAt > __mmServerTickMs() * 2) return null;
+    const __mmPrimary = __mmInsta.supportedPrimary();
+    if (__mmPrimary == null || !__mmWeaponReady(__mmPrimary) ||
+        !__mmInsta.inRange(__mmPrimary, __mmEnemy) || !__mmInsta.pathClear(__mmEnemy)) return null;
     const __mmNextHatTank = Number(__mmEnemy.skinIndex2) === 40,
-      __mmTrap = __mmAutoTrapInstaTrapForEnemy(__mmEnemy, __mmActiveTrapObjects()),
-      __mmTankBreakContext = !!(__mmTrap && Number(__mmEnemy.weaponIndex) === __mmGreatHammer),
+      __mmCurrentTank = Number(__mmEnemy.skinIndex) === 40,
       __mmCadenceAt = this.stable(__mmRecord) ? Number(__mmRecord.nextTankAt) : 0,
       __mmPacketLead = this.packetLeadMs(),
       // skinIndex2 is an announced server edge. Anchor it once, rather than
       // moving the predicted Tank window forward on every render update.
-      __mmExpectedAt = __mmNextHatTank
-        ? Math.max(
-            __mmNow + 4,
-            Number(__mmRecord.announcedTankAt || __mmNow) +
-              Math.max(4, __mmServerTickMs() - __mmPacketLead),
-          )
-        : __mmTankBreakContext && __mmCadenceAt > __mmNow
-          ? __mmCadenceAt - __mmPacketLead
-          : 0;
-    if (!__mmExpectedAt) return null;
+      __mmExpectedAt = __mmCurrentTank
+        ? Number(__mmRecord.lastTankAt) - __mmPacketLead
+        : __mmNextHatTank && __mmRecord.announcedTankAt > 0
+          ? Number(__mmRecord.announcedTankAt) + Math.max(4, __mmServerTickMs() - __mmPacketLead)
+          : __mmCadenceAt > __mmNow
+            ? __mmCadenceAt - __mmPacketLead
+            : 0;
+    if (!(__mmExpectedAt > 0) || (__mmCurrentTank && !__mmRecord.lastTankAt)) return null;
     const __mmTravel = Math.max(1, __mmInsta.turretTravelMs(__mmEnemy)),
       __mmFireAt = __mmExpectedAt - __mmTravel,
       __mmPulseEndAt = __mmExpectedAt + this.pulseMs(__mmRecord),
       __mmTolerance = Math.max(30, __mmServerTickMs() * 0.32),
       __mmImpactAt = Math.max(__mmNow, __mmFireAt) + __mmTravel,
       __mmAlreadyFired = Number(__mmRecord.firedForAt) || 0;
-    // Do not call a late Turret a Tank insta. It must arrive after the Tank
-    // change and before the learned pulse ends. This prevents wasted combos
-    // against one-tick Tank swap hacks while cadence predictions retain enough
-    // lead to line the projectile up exactly.
+    // Require arrival within the measured exposure. Late shots cannot borrow
+    // a new window from a stale announcement, regardless of opponent type.
     if (
       __mmFireAt > __mmNow + 12 ||
       __mmImpactAt < __mmExpectedAt - __mmTolerance ||
       __mmImpactAt > __mmPulseEndAt - 4 ||
-      (!__mmNextHatTank && __mmNow - __mmFireAt > __mmTolerance) ||
+      (!__mmNextHatTank && !__mmCurrentTank && __mmNow - __mmFireAt > __mmTolerance) ||
       (__mmNextHatTank && __mmNow > __mmPulseEndAt - 4) ||
       (__mmAlreadyFired && Math.abs(__mmAlreadyFired - __mmExpectedAt) < __mmTolerance)
     )
@@ -42502,12 +42572,15 @@ const __mmTankPredictInsta = {
       __mmNow - Number(__mmRecord.reversalAt || 0) <= __mmServerTickMs() * 1.35;
     return {
       expectedAt: __mmExpectedAt,
-      primaryAt: Math.max(__mmNow, __mmExpectedAt),
+      // Stack melee with the turret arrival, not a tick before it where
+      // fast autoheal could refill the first hit.
+      primaryAt: __mmImpactAt,
       turretImpactAt: __mmImpactAt,
       pulseEndAt: __mmPulseEndAt,
-      source: __mmNextHatTank
-        ? (__mmReversalFresh ? "next-hat velocity reversal" : "next-hat")
-        : (__mmReversalFresh ? "repeat Tank break + velocity reversal" : "repeat Tank break pulse"),
+      source: __mmCurrentTank ? "observed Tank window"
+        : __mmNextHatTank
+          ? (__mmReversalFresh ? "next-hat velocity reversal" : "next-hat")
+          : (__mmReversalFresh ? "learned Tank cadence + velocity reversal" : "learned Tank cadence"),
       record: __mmRecord,
     };
   },
@@ -49714,6 +49787,142 @@ function __mmSmartCandidateForAngle(
     reasons: [],
   };
 }
+// Replacement forecasts never change confirmed object health. All replacement
+// owners share the same final-hit evidence and revalidate the slot at send time.
+const __mmReplacementBreaks = new WeakMap(),
+  __mmReplacementTimers = new Map(),
+  __mmReplacementAttempts = new WeakMap();
+function __mmReplacementSwingLethal(__mmObject, __mmPlayer, __mmWeapon, __mmAngle, __mmHat) {
+  const __mmData = b && b.weapons && b.weapons[__mmWeapon],
+    __mmState = __mmBreakableState(__mmObject),
+    __mmHealth = Number(__mmState && __mmState.health),
+    __mmOrigin = __mmServerEntityPosition(__mmPlayer) || __mmPlayer;
+  if (!__mmObject || !__mmObject.active || !__mmData ||
+      __mmData.projectile != null || __mmData.shield ||
+      !Number.isFinite(__mmHealth) || __mmHealth <= 0 ||
+      !Number.isFinite(__mmAngle) || !__mmOrigin) return !1;
+  const __mmDx = Number(__mmObject.x) - Number(__mmOrigin.x),
+    __mmDy = Number(__mmObject.y) - Number(__mmOrigin.y);
+  return Math.hypot(__mmDx, __mmDy) <=
+      (Number(__mmData.range) || 0) + __mmCleanupObjectScale(__mmObject) &&
+    __mmBreakableAngleDifference(Math.atan2(__mmDy, __mmDx), __mmAngle) <=
+      (Number(y && y.gatherAngle) || Math.PI / 2.6) &&
+    __mmWeaponStructureDamage(
+      { weaponVariant: __mmPlayer.weaponVariant, skinIndex: __mmHat },
+      __mmWeapon, __mmObject,
+    ) + 0.001 >= __mmHealth;
+}
+function __mmPredictReplacementSwing(__mmPlayer, __mmWeapon, __mmAngle, __mmHat) {
+  if (!__mmSmartAutoReplaceEnabled && !__mmSmartSpikeSyncPlaceEnabled &&
+      !__mmAutoSpikeReplaceEnabled) return;
+  const __mmNow = Date.now();
+  for (const __mmObject of __mmActiveObjectSnapshot(!0).all) {
+    if (!__mmObject || Math.hypot(__mmObject.x - v.x, __mmObject.y - v.y) > 220 ||
+        !__mmReplacementSwingLethal(__mmObject, __mmPlayer, __mmWeapon, __mmAngle, __mmHat)) continue;
+    __mmReplacementBreaks.set(__mmObject, {
+      at: __mmNow, expiresAt: __mmNow + Math.max(160, __mmServerTickMs() * 2),
+    });
+  }
+}
+function __mmReplacementBreakAt(__mmObject, __mmNow = Date.now()) {
+  if (!__mmObject || !__mmObject.active) return null;
+  const __mmLocal = __mmReplacementBreaks.get(__mmObject),
+    __mmState = __mmBreakableState(__mmObject),
+    __mmTick = __mmServerTickMs();
+  if (__mmLocal && __mmNow < __mmLocal.expiresAt) return __mmLocal.at;
+  if (__mmState && Number(__mmState.health) <= 0.001 &&
+      Number(__mmState.lastPredictionAt) > 0 &&
+      __mmNow - __mmState.lastPredictionAt <= __mmTick * 2) return __mmNow;
+  // A remote breaker must have an observed swing cycle, the same held weapon,
+  // lethal damage, reach and facing. Ready but idle players are not evidence.
+  let __mmEarliest = Infinity;
+  for (const __mmPlayer of Array.isArray(E) ? E : []) {
+    if (!__mmPlayer || __mmPlayer === v || !__mmPlayer.alive) continue;
+    const __mmSwing = __mmRecentPlayerSwings[String(__mmPlayer.sid)],
+      __mmWeapon = Number(__mmPlayer.weaponIndex),
+      __mmCooldown = __mmAdvancePlayerToolCooldowns(__mmPlayer, __mmNow),
+      __mmEntry = __mmCooldown && __mmCooldown.weapons && __mmCooldown.weapons[String(__mmWeapon)],
+      __mmRemaining = Number(__mmEntry && __mmEntry.remaining);
+    if (!__mmSwing || Number(__mmSwing.weapon) !== __mmWeapon || !__mmEntry ||
+        !Number.isFinite(__mmRemaining) || __mmRemaining < 0 || __mmRemaining > __mmTick ||
+        __mmNow - __mmSwing.at > (Number(__mmEntry.duration) || 0) + __mmTick ||
+        !__mmReplacementSwingLethal(__mmObject, __mmPlayer, __mmWeapon,
+          Number(__mmPlayer.dir), __mmPlayer.skinIndex)) continue;
+    __mmEarliest = Math.min(__mmEarliest, __mmNow + __mmRemaining);
+  }
+  return Number.isFinite(__mmEarliest) ? __mmEarliest : null;
+}
+function __mmReplacementEnabled(__mmObject, __mmRearSpike) {
+  if (__mmRearSpike) return __mmAutoSpikeReplaceEnabled && __mmIsTrapped() && !__mmEmergencyGetawayActive();
+  return __mmSmartAutoReplaceEnabled || (__mmSmartSpikeSyncPlaceEnabled && __mmObject.trap);
+}
+function __mmPreplaceReplacement(__mmObject, __mmItem, __mmRearSpike = !1) {
+  if (!v || !v.alive || __mmInstaTestingModeEnabled || __mmItem == null ||
+      !__mmReplacementEnabled(__mmObject, __mmRearSpike) ||
+      (!__mmRearSpike && !__mmSmartTrapReplaceMayPlace()) ||
+      (__mmRearSpike && __mmInsta.isActive())) return !1;
+  const __mmNow = Date.now(), __mmAt = __mmReplacementBreakAt(__mmObject, __mmNow);
+  if (__mmAt == null || __mmNow < (__mmReplacementAttempts.get(__mmObject) || 0)) return !1;
+  const __mmDelay = Math.max(0, __mmAt - __mmNow - Math.min(__mmServerTickMs() / 2,
+    Math.max(0, Number(window.pingTime) || 0) / 2));
+  if (__mmDelay > 1) {
+    if (__mmReplacementTimers.has(__mmObject)) return !1;
+    if (__mmReplacementTimers.size >= 8) return !1;
+    const __mmTimer = setTimeout(() => {
+      __mmReplacementTimers.delete(__mmObject);
+      // Recheck target, toggle, forecast, resources and geometry after waiting.
+      if (__mmRearSpike) __mmUpdateTrapSpikeReplace(__mmCurrentNearbyTrap());
+      else __mmUpdatePriorityTrapReplacement();
+    }, __mmDelay);
+    __mmReplacementTimers.set(__mmObject, __mmTimer);
+    return !1;
+  }
+  if (!__mmAutoPushReplacementAffordable(__mmItem, __mmObject)) return !1;
+  const __mmOrigin = __mmServerEntityPosition(v) || v,
+    __mmAngle = Math.atan2(__mmObject.y - __mmOrigin.y, __mmObject.x - __mmOrigin.x),
+    __mmCandidate = __mmSmartCandidateForExpectedRemoval(__mmItem, __mmAngle, __mmObject),
+    __mmOwner = __mmRearSpike ? "trapEscape" : "trapReplace";
+  if (!__mmCandidate || !__mmCandidate.preplace ||
+      Math.hypot(__mmCandidate.x - __mmObject.x, __mmCandidate.y - __mmObject.y) > 14 ||
+      !__mmReserveTacticalChannel("placement", __mmOwner) ||
+      !__mmTacticalPlacementKey(__mmOwner, __mmCandidate) ||
+      !__mmSendPredictedSmartTrapReplace(__mmItem, __mmCandidate, __mmSelectedTool())) return !1;
+  const __mmRetryAt = __mmNow + Math.max(80, __mmServerTickMs() + Math.max(0, Number(window.pingTime) || 0) / 2);
+  __mmReplacementAttempts.set(__mmObject, __mmRetryAt);
+  if (!__mmRearSpike && __mmObject.sid != null)
+    __mmSmartKnownObjects.set(String(__mmObject.sid), {
+      x: Number(__mmObject.x), y: Number(__mmObject.y), scale: Number(__mmObject.scale) || 45,
+      trap: !!__mmObject.trap, friendly: __mmFriendlyStructure(__mmObject), seenAt: __mmNow,
+    });
+  __mmAutoSpikeSpamReservations.push({ item: __mmItem, x: __mmCandidate.x,
+    y: __mmCandidate.y, scale: __mmCandidate.scale, expiresAt: __mmRetryAt });
+  __mmSmartPlacementStats.sent += 1;
+  __mmSmartSetPlacementPreview([__mmCandidate], [__mmCandidate], "predicted break replacement");
+  return !0;
+}
+function __mmUpdatePredictedReplacements() {
+  if (!v || !v.alive || (!__mmSmartAutoReplaceEnabled && !__mmSmartSpikeSyncPlaceEnabled) ||
+      !__mmSmartTrapReplaceMayPlace()) return !1;
+  const __mmEnemy = __mmNearestEnemy();
+  if (!__mmEnemy || Math.hypot(__mmEnemy.x - v.x, __mmEnemy.y - v.y) > 235) return !1;
+  __mmAutoSpikeSpamCleanReservations(Date.now());
+  for (const __mmObject of __mmActiveObjectSnapshot(!0).all) {
+    if (!__mmObject || !__mmObject.active ||
+        Math.hypot(__mmObject.x - v.x, __mmObject.y - v.y) > 190 ||
+        !__mmReplacementEnabled(__mmObject, !1) || __mmReplacementBreakAt(__mmObject) == null) continue;
+    // Containment is the fallback; prefer a lethal same-collision spike stack.
+    const __mmKeepTrap = __mmObject.trap && __mmFriendlyStructure(__mmObject) &&
+      __mmSmartTrapReplaceTarget(__mmObject),
+      __mmOrigin = __mmServerEntityPosition(v) || v,
+      __mmLethal = __mmKeepTrap && __mmLethalSpikeReplacement(__mmKeepTrap, __mmObject,
+        Math.atan2(__mmObject.y-__mmOrigin.y, __mmObject.x-__mmOrigin.x)),
+      __mmItems = __mmKeepTrap ? [__mmLethal ? __mmLethal.item : __mmSmartTrapReplaceAffordableItem()] :
+        [__mmSpikeItem(), __mmSmartTrapReplaceAffordableItem()];
+    for (const __mmItem of __mmItems)
+      if (__mmPreplaceReplacement(__mmObject, __mmItem)) return !0;
+  }
+  return !1;
+}
 function __mmSmartCandidateForExpectedRemoval(
   __mmItem,
   __mmAngle,
@@ -49763,6 +49972,7 @@ function __mmSmartCandidateForExpectedRemoval(
   if (!__mmIgnoredOverlap) return null;
   ((__mmCandidate.valid = !0),
     (__mmCandidate.preplace = !0),
+    (__mmCandidate.expectedRemoval = __mmIgnoredObject),
     (__mmCandidate.blockReason = "expected removal"),
     __mmCandidate.reasons.push("expected break preplace"));
   return __mmCandidate;
@@ -51168,10 +51378,11 @@ function __mmSmartPlaceBurst(
         __mmMaxBuildCount(__mmCandidate.item) < 1
       )
         continue;
-      const __mmFresh = __mmSmartCandidateForAngle(
-        __mmCandidate.item,
-        __mmCandidate.angle,
-      );
+      const __mmFresh = __mmCandidate.expectedRemoval
+        ? __mmSmartCandidateForExpectedRemoval(
+            __mmCandidate.item, __mmCandidate.angle, __mmCandidate.expectedRemoval,
+          )
+        : __mmSmartCandidateForAngle(__mmCandidate.item, __mmCandidate.angle);
       if (
         !__mmFresh ||
         !__mmTacticalPlacementKey(__mmOwner, __mmFresh)
@@ -51415,7 +51626,7 @@ function __mmSmartPlaceBatch(__mmCandidates, __mmReason, __mmForcedLimit) {
   for (let __mmIndex = 0; __mmIndex < __mmSelected.length; __mmIndex++) {
     const __mmCandidate = __mmSelected[__mmIndex],
       __mmPing = Number(window.pingTime),
-      __mmDelay = __mmCandidate.preplace
+      __mmDelay = __mmCandidate.preplace && !__mmCandidate.expectedRemoval
         ? Math.max(
             0,
             __mmSmartPlaceDelay -
@@ -51606,17 +51817,21 @@ function __mmSendPredictedSmartTrapReplace(
   if (
     !v ||
     !v.alive ||
+    __mmInstaTestingModeEnabled ||
     __mmItem == null ||
     !__mmCandidate ||
     !__mmCandidate.preplace ||
     !__mmAutomaticPlacementItemAllowed(__mmItem, __mmCandidate)
   )
     return !1;
+  if (__mmCandidate.expectedRemoval &&
+      (!__mmAutoPushReplacementAffordable(__mmItem, __mmCandidate.expectedRemoval) ||
+        !__mmSmartCandidateForExpectedRemoval(__mmItem, __mmCandidate.angle, __mmCandidate.expectedRemoval)))
+    return !1;
   try {
-    // The known pit still consumes a trap-group slot locally. The immediately
-    // preceding F=1 is predicted to remove that exact pit, so bypass only the
-    // stale local group-cap check; material checks and exact geometry were
-    // already verified by the caller.
+    // The expected object can still consume a local group slot. The caller
+    // qualifies the final hit; only our matching group slot may be reclaimed.
+    // Materials and exact geometry remain validated before the packet.
     (je(__mmItem),
       O.send("F", 1, __mmCandidate.angle),
       O.send("F", 0, __mmCandidate.angle),
@@ -51657,7 +51872,6 @@ function __mmTryPredictSmartTrapReplace(
     !__mmWeaponData ||
     __mmWeaponData.projectile != null ||
     !__mmWeaponReady(__mmWeapon) ||
-    __mmTrapItem == null ||
     !Number.isFinite(Number(__mmOrigin.x)) ||
     !Number.isFinite(Number(__mmOrigin.y))
   )
@@ -51714,7 +51928,9 @@ function __mmTryPredictSmartTrapReplace(
         Number(__mmTrap.y) - Number(__mmOrigin.y),
         Number(__mmTrap.x) - Number(__mmOrigin.x),
       ),
-      __mmCandidate = __mmSmartCandidateForExpectedRemoval(
+      __mmLethal = __mmLethalSpikeReplacement(__mmEnemy, __mmTrap, __mmPlacementAngle),
+      __mmReplacementItem = __mmLethal ? __mmLethal.item : __mmTrapItem,
+      __mmCandidate = __mmLethal ? __mmLethal.candidate : __mmTrapItem == null ? null : __mmSmartCandidateForExpectedRemoval(
         __mmTrapItem,
         __mmPlacementAngle,
         __mmTrap,
@@ -51741,7 +51957,7 @@ function __mmTryPredictSmartTrapReplace(
     }
     if (
       !__mmSendPredictedSmartTrapReplace(
-        __mmTrapItem,
+        __mmReplacementItem,
         __mmCandidate,
         { item: __mmWeapon, weapon: !0 },
       )
@@ -51770,7 +51986,7 @@ function __mmTryPredictSmartTrapReplace(
         expiresAt: __mmNow + Math.max(220, __mmServerTickMs() * 2),
       }),
       __mmAutoSpikeSpamReservations.push({
-        item: __mmTrapItem,
+        item: __mmReplacementItem,
         x: __mmCandidate.x,
         y: __mmCandidate.y,
         scale: __mmCandidate.scale,
@@ -51812,9 +52028,6 @@ function __mmTrySmartTrapReplace(__mmKnown, __mmEnemy, __mmNow) {
   const __mmTrapItem = __mmSmartPitTrapItem(),
     __mmOrigin = __mmServerEntityPosition(v) || v;
   if (
-    __mmTrapItem == null ||
-    !__mmCanUseBuildItem(__mmTrapItem) ||
-    __mmMaxBuildCount(__mmTrapItem) < 1 ||
     !Number.isFinite(Number(__mmOrigin.x)) ||
     !Number.isFinite(Number(__mmOrigin.y))
   )
@@ -51823,7 +52036,11 @@ function __mmTrySmartTrapReplace(__mmKnown, __mmEnemy, __mmNow) {
       Number(__mmKnown.y) - Number(__mmOrigin.y),
       Number(__mmKnown.x) - Number(__mmOrigin.x),
     ),
-    __mmCandidate = __mmSmartCandidateForAngle(
+    __mmLethal = __mmLethalSpikeReplacement(__mmEnemy, __mmKnown, __mmAngle, false),
+    __mmReplacementItem = __mmLethal ? __mmLethal.item : __mmTrapItem,
+    __mmCandidate = __mmLethal ? __mmLethal.candidate :
+      __mmTrapItem == null || !__mmCanUseBuildItem(__mmTrapItem) || __mmMaxBuildCount(__mmTrapItem) < 1
+        ? null : __mmSmartCandidateForAngle(
       __mmTrapItem,
       __mmAngle,
       !1,
@@ -51842,7 +52059,7 @@ function __mmTrySmartTrapReplace(__mmKnown, __mmEnemy, __mmNow) {
     return !1;
   ((__mmCandidate.points = 100),
     (__mmCandidate.priority = !0),
-    __mmCandidate.reasons.push("exact trap replace"));
+    __mmCandidate.reasons.push(__mmLethal ? "lethal stacked spike replace" : "exact trap replace"));
   if (!__mmActionClaim("trapReplace", "exact enemy-holding trap replace"))
     return !1;
   if (
@@ -51855,7 +52072,7 @@ function __mmTrySmartTrapReplace(__mmKnown, __mmEnemy, __mmNow) {
   const __mmTool = __mmSelectedTool();
   if (
     !__mmSendAutomaticPlacement(
-      __mmTrapItem,
+      __mmReplacementItem,
       __mmCandidate.angle,
       __mmTool,
       !1,
@@ -51866,7 +52083,7 @@ function __mmTrySmartTrapReplace(__mmKnown, __mmEnemy, __mmNow) {
     return !1;
   }
   (__mmAutoSpikeSpamReservations.push({
-    item: __mmTrapItem,
+    item: __mmReplacementItem,
     x: __mmCandidate.x,
     y: __mmCandidate.y,
     scale: __mmCandidate.scale,
@@ -51980,16 +52197,15 @@ function __mmSmartObserveRemovedObjects(__mmNow) {
 }
 function __mmUpdatePriorityTrapReplacement() {
   if (
-    !__mmSmartAutoReplaceEnabled ||
+    (!__mmSmartAutoReplaceEnabled && !__mmSmartSpikeSyncPlaceEnabled) ||
     !v ||
     !v.alive ||
     !__mmSmartTrapReplaceMayPlace()
   )
     return !1;
-  // This is intentionally only the exact captured-enemy replacement path.
-  // Generic placement stays in its normal stage, while a removed/predicted pit
-  // is checked before optional Instas on every authoritative combat tick.
-  return __mmSmartObserveRemovedObjects(Date.now());
+  // Predicted openings get the first placement phase. Confirmed deletion is
+  // the fallback when a forecast or its early placement is rejected.
+  return __mmUpdatePredictedReplacements() || __mmSmartObserveRemovedObjects(Date.now());
 }
 function __mmSmartPlaceAutoMillRow(__mmCandidates, __mmMill) {
   if (
@@ -54935,6 +55151,12 @@ function __mmUpdateTrapSpikeReplace(__mmCurrentTrap) {
       (__mmSlot.x = Number(__mmBlocker.x)),
       (__mmSlot.y = Number(__mmBlocker.y)),
       (__mmSlot.scale = Number(__mmBlocker.scale) || __mmSlot.scale));
+    __mmAutoSpikeSpamCleanReservations(Date.now());
+    if (!__mmHoldingMcGrabby() &&
+        __mmPreplaceReplacement(__mmBlocker, __mmSpikeItem(), !0))
+      __mmTrapSpikeReplaceLastAt = Date.now();
+    // Retain the slot until confirmation so a rejected prediction can fall
+    // back to the first actually open placement phase.
     return;
   }
   // Wait until the rear trap has genuinely appeared once. This prevents a
@@ -55108,8 +55330,10 @@ function __mmObserveTrapEscapeSwing(__mmPlayerSid, __mmWeapon) {
       __mmResolvedWeapon !== Number(__mmTrapAttackHeldWeapon))
   )
     return;
-  __mmTrapManualReadyAt =
-    Date.now() + __mmManualWeaponCooldown(__mmResolvedWeapon, 40);
+  // The outgoing pulse already started this reload. A delayed swing echo
+  // must not start another full cooldown on top of it.
+  if (__mmTrapAttackLastHoldAt > 0 && __mmTrapManualReadyAt > 0) return;
+  __mmTrapManualReadyAt = Date.now() + __mmManualWeaponCooldown(__mmResolvedWeapon, 40);
 }
 function __mmCancelTrapHatRestoreTimer() {
   (__mmTrapHatRestoreTimer && clearTimeout(__mmTrapHatRestoreTimer),
@@ -55161,7 +55385,8 @@ function __mmRestoreTrapHat() {
   ((__mmTrapHat = null), (__mmTrapHatRestoreAttempts = 0));
 }
 function __mmStopTrapAttack() {
-  const __mmReleaseAngle = Number.isFinite(__mmTrapAimAngle)
+  const __mmHadBreakAim = __mmTrapAttackActive || __mmTrapBreakAimUntil > 0,
+    __mmReleaseAngle = Number.isFinite(__mmTrapAimAngle)
     ? __mmTrapAimAngle
     : Ci();
   (__mmTrapEscapeOwnReplaceTimer &&
@@ -55180,6 +55405,7 @@ function __mmStopTrapAttack() {
     __mmTrapAttackHeld && O.send("F", 0, __mmReleaseAngle),
     (__mmTrapAttackHeld = !1),
     (__mmTrapAttackLastHoldAt = 0),
+    (__mmTrapBreakAimUntil = 0),
     (__mmTrapAttackHeldWeapon = null),
     (__mmTrapAttackTargetKey = null),
     (__mmTrapFinalKnockbackTargetKey = null),
@@ -55200,7 +55426,8 @@ function __mmStopTrapAttack() {
     (__mmTrapLastConfirmed = null),
     (__mmTrapLastConfirmedAt = 0),
     __mmRestoreTrapHat(),
-    __mmActionRelease("trapEscape", "trap clear"));
+    __mmActionRelease("trapEscape", "trap clear"),
+    __mmHadBreakAim && __mmScheduleMouseAimReturn());
 }
 function __mmPauseSoldierForBreaking() {
   // Swing and break paths no longer restore a remembered Soldier hat. The
@@ -56069,18 +56296,23 @@ function __mmTrappedTankInstaThreat(__mmEnemies, __mmSnapshot, __mmNow) {
         __mmRecord && __mmTankPredictInsta.stable(__mmRecord)
           ? Number(__mmRecord.nextTankAt) - __mmTankPredictInsta.packetLeadMs()
           : 0,
-      __mmExpectedAt = __mmNextHatTank
-        ? __mmNow + Math.max(4, __mmTick - __mmTankPredictInsta.packetLeadMs())
+      __mmExpectedAt = __mmNextHatTank && __mmRecord && Number(__mmRecord.announcedTankAt) > 0
+        ? Number(__mmRecord.announcedTankAt) + Math.max(4, __mmTick - __mmTankPredictInsta.packetLeadMs())
         : __mmFreshTank
           ? __mmNow
           : __mmCadenceAt > __mmNow && __mmCadenceAt - __mmNow <= __mmHorizon
             ? __mmCadenceAt
             : 0;
-    if (!__mmExpectedAt) continue;
+    if (!__mmExpectedAt || __mmExpectedAt < __mmNow - __mmTick ||
+        __mmExpectedAt > __mmNow + __mmHorizon) continue;
     const __mmWeaponId = Number(__mmEnemy.weaponIndex),
       __mmWeapon = b && b.weapons && b.weapons[__mmWeaponId];
     if (!__mmWeapon || __mmWeapon.projectile != null || __mmWeapon.shield)
       continue;
+    const __mmCooldown = __mmAdvancePlayerToolCooldowns(__mmEnemy, __mmNow),
+      __mmReload = __mmCooldown && __mmCooldown.weapons && __mmCooldown.weapons[String(__mmWeaponId)];
+    if (!__mmReload || !Number.isFinite(Number(__mmReload.remaining)) ||
+        Number(__mmReload.remaining) > Math.max(0, __mmExpectedAt - __mmNow)) continue;
     const __mmPredictedEnemy = __mmTankPredictInsta.projectedPosition(
         __mmEnemy,
         __mmRecord,
@@ -56100,17 +56332,17 @@ function __mmTrappedTankInstaThreat(__mmEnemies, __mmSnapshot, __mmNow) {
         (Number(__mmEnemy.scale) || 35) +
         (Number(v.scale) || 35) +
         24,
-      __mmFacing = Number.isFinite(Number(__mmEnemy.dir))
+      __mmFacing = __mmEnemy.dir != null && Number.isFinite(Number(__mmEnemy.dir))
         ? Number(__mmEnemy.dir)
-        : Number(__mmEnemy.d2),
+        : __mmEnemy.d2 != null ? Number(__mmEnemy.d2) : NaN,
       __mmFacingError = Number.isFinite(__mmFacing)
         ? Math.abs(
             Math.atan2(
-              Math.sin(__mmFacing - __mmAngle),
-              Math.cos(__mmFacing - __mmAngle),
+              Math.sin(__mmFacing - (__mmAngle + Math.PI)),
+              Math.cos(__mmFacing - (__mmAngle + Math.PI)),
             ),
           )
-        : 0;
+        : Infinity;
     if (__mmDistance > __mmReach || __mmFacingError > 0.86) continue;
     const __mmDamage = __mmThreatMeleeDamage(__mmEnemy, __mmWeaponId),
       __mmKnockDistance =
@@ -56118,8 +56350,8 @@ function __mmTrappedTankInstaThreat(__mmEnemies, __mmSnapshot, __mmNow) {
       __mmSpike = __mmThreatHostileSpikeOnSegment(
         Number(__mmSelf.x),
         Number(__mmSelf.y),
-        Number(__mmSelf.x) + Math.cos(__mmAngle) * __mmKnockDistance,
-        Number(__mmSelf.y) + Math.sin(__mmAngle) * __mmKnockDistance,
+        Number(__mmSelf.x) - Math.cos(__mmAngle) * __mmKnockDistance,
+        Number(__mmSelf.y) - Math.sin(__mmAngle) * __mmKnockDistance,
       ),
       __mmPotentialDamage =
         __mmDamage + Math.max(0, Number(__mmSpike && __mmSpike.damage) || 0),
@@ -56151,11 +56383,31 @@ function __mmTrappedTankInstaThreat(__mmEnemies, __mmSnapshot, __mmNow) {
   }
   return __mmBest;
 }
+function __mmTrapEscapeImminentThreat(__mmSnapshot, __mmNow) {
+  const __mmTick = Math.max(1, __mmServerTickMs()),
+    __mmHorizon = Math.max(110, Math.min(320, __mmTick * 3)),
+    __mmEntries = (__mmSnapshot && Array.isArray(__mmSnapshot.entries) ? __mmSnapshot.entries : [])
+      .filter((__mmEntry) => {
+        if (!__mmEntry || !Number.isFinite(__mmEntry.impactMs) ||
+            __mmEntry.impactMs < 0 || __mmEntry.impactMs > __mmHorizon) return !1;
+        if (__mmEntry.type !== "melee") return !!(__mmEntry.source && __mmEntry.source.active);
+        const __mmRecent = __mmEntry.source && __mmRecentPlayerSwings[String(__mmEntry.source.sid)];
+        // The broad threat HUD retains old melee swings for its forecast.
+        // Those already-resolved hits must not repeatedly pause a breaker.
+        return !!(__mmRecent && __mmNow >= __mmRecent.at &&
+          __mmNow - __mmRecent.at <= __mmTick &&
+          Number(__mmRecent.weapon) === Number(__mmEntry.weapon));
+      }).sort((a, b) => a.impactMs - b.impactMs),
+    __mmSpikeDamage = Math.max(0, ...__mmEntries.map(e => Number(e.spike && e.spike.damage) || 0)),
+    __mmDamage = __mmEntries.reduce((sum, e) => sum + Math.max(0, Number(e.damage) || 0), __mmSpikeDamage);
+  return { ...__mmSnapshot, entries: __mmEntries, damage: __mmDamage,
+    firstImpactMs: __mmEntries.length ? __mmEntries[0].impactMs : Infinity,
+    angle: __mmEntries.length ? __mmEntries[0].angle : null };
+}
 function __mmPauseTrapEscapeForPredictedInsta() {
   if (!v || !v.alive || !__mmIsTrapped()) return !1;
   const __mmNow = Date.now();
-  if (__mmNow < __mmTrapEscapeDangerPauseUntil) return !0;
-  const __mmThreat = __mmCombatThreatSnapshot(!0),
+  const __mmThreat = __mmTrapEscapeImminentThreat(__mmCombatThreatSnapshot(!0), __mmNow),
     __mmTick = Math.max(1, __mmServerTickMs()),
     __mmHealth = Math.max(1, Number(v.health) || 100),
     __mmImpactMs = Number(__mmThreat && __mmThreat.firstImpactMs),
@@ -56179,7 +56431,11 @@ function __mmPauseTrapEscapeForPredictedInsta() {
       (__mmImminentImpact &&
         __mmImpactDamage >= Math.max(25, __mmHealth * 0.3)) ||
       !!__mmTankThreat;
-  if (!__mmCredibleInsta) return !1;
+  if (!__mmCredibleInsta) {
+    __mmTrapEscapeDangerPauseUntil = 0;
+    return !1;
+  }
+  if (__mmNow < __mmTrapEscapeDangerPauseUntil) return !0;
   const __mmDefenseThreat = __mmTankThreat
       ? {
           ...__mmThreat,
@@ -56242,16 +56498,40 @@ function __mmTrapBreakAimAngle(__mmTarget) {
   );
 }
 function __mmPulseTrapBreakAttack(__mmAngle) {
-  // Glotus sends the target angle on the action packet itself. Sending D to
-  // the pit and immediately sending D back to the cursor can overwrite the
-  // action direction on a busy tick, so Trap Escape must not do either.
+  // Glotus's attack priority suppresses the mouse update for this phase.
+  // Protect the same short window across Kitty's independent input loops.
+  if (!Number.isFinite(__mmAngle)) return;
+  __mmTrapAimAngle = __mmAngle;
+  __mmTrapBreakAimUntil = Date.now() + __mmServerTickMs();
+  __mmLocalVisualAimAngle = __mmAngle;
+  __mmNoteLocalVisualAim(__mmAngle);
   __mmTrapAttackHeld = !0;
   try {
     O.send("F", 1, __mmAngle);
   } finally {
-    O.send("F", 0, null);
-    __mmTrapAttackHeld = !1;
+    try {
+      O.send("F", 0, null);
+      // A nested heal/preplace may have faced its own build slot. Finish the
+      // break phase on the breaker target, never on that slot or the pointer.
+      if (__mmTrapBreakPhaseAim() != null) O.send("D", __mmAngle);
+    } finally {
+      __mmTrapAttackHeld = !1;
+      __mmScheduleMouseAimReturn();
+    }
   }
+}
+function __mmTrapBreakPhaseAim() {
+  return v && v.alive && __mmTrapEscapeEnabled && __mmTrapAttackActive &&
+    __mmActionOwner === "trapEscape" && Date.now() < __mmTrapBreakAimUntil &&
+    Number.isFinite(__mmTrapAimAngle)
+    ? __mmTrapAimAngle : null;
+}
+function __mmProtectTrapBreakDirection(__mmArgs) {
+  const __mmAim = __mmTrapBreakPhaseAim();
+  // Placement action angles stay intact; only background rotation is held.
+  // A safety action taking ownership immediately releases this protection.
+  if (__mmAim != null && __mmArgs && __mmArgs[0] === "D")
+    __mmArgs[1] = __mmAim;
 }
 function __mmBreakTrap() {
   if (
@@ -56265,7 +56545,10 @@ function __mmBreakTrap() {
   // face Shield. Do not immediately steal it back on the next escape tick;
   // __mmStopShieldDefense schedules this same breaker as soon as the block
   // window ends.
-  if (Date.now() < __mmAntiInstaTrapShieldUntil) return;
+  if (Date.now() < __mmAntiInstaTrapShieldUntil) {
+    if (__mmActionOwner === "shieldDefense" && __mmShieldDefenseTimer) return;
+    __mmAntiInstaTrapShieldUntil = 0;
+  }
   // Match Glotus Autobreak: yield the held breaker during a credible incoming
   // Insta/Tank window, defend if possible, then resume when the short window
   // expires instead of swinging continuously into the combo.
@@ -56336,14 +56619,14 @@ function __mmBreakTrap() {
     (__mmTrapAttackActive = !0),
     (__mmTrapWeapon = __mmSelectedWeapon()),
     (__mmTrapHat == null && (__mmTrapHat = __mmTrapRestoreHat))));
-  // Retain the target angle as attack metadata only. It must not become a
-  // persistent visual/server facing direction between the ready break ticks.
+  // Refresh the target bearing; only a ready swing owns a short aim phase.
   __mmTrapAimAngle = __mmAngle;
   // The Soldier knockback finish belongs to the locking pit itself. Contact
   // spikes keep the normal Great Hammer auto-break path, even while trapped.
   const __mmPlan = __mmTrapBreakPlan(
     __mmBreakTarget,
-    __mmBreakTarget === __mmTrapTarget,
+    __mmBreakTarget === __mmTrapTarget &&
+      String(__mmTrapFinalKnockbackTargetKey) !== String(__mmTargetKey),
   );
   if (!__mmPlan) return;
   // Do not chase the fastest currently-ready hand while trapped. That made
@@ -56372,20 +56655,35 @@ function __mmBreakTrap() {
         Number(__mmBreakTarget.y) - Number(v.y),
       ) <= __mmTrapWeaponRange(__mmLockedWeapon, __mmBreakTarget),
     __mmWeapon = __mmKeepLockedWeapon ? __mmLockedWeapon : __mmPlan.weapon,
-    __mmCooldown = __mmKeepLockedWeapon
+    __mmCooldown = __mmPlan.finalKnockback ? __mmPlan.cooldown : __mmKeepLockedWeapon
       ? __mmManualWeaponCooldown(
           __mmWeapon,
           v.skins && v.skins[40] ? 40 : null,
         )
       : __mmPlan.cooldown,
     __mmChangedWeapon =
-      __mmTrapAttackHeld &&
+      __mmTrapAttackHeldWeapon == null ||
       Number(__mmTrapAttackHeldWeapon) !== Number(__mmWeapon);
+  // A new hand must not inherit the other weapon's fallback reload. Select it
+  // even if gear is temporarily leased, so its real held-weapon reload advances.
+  try {
+    if (Number(__mmSelectedWeapon()) !== Number(__mmWeapon) || __mmChangedWeapon)
+      je(__mmWeapon, !0);
+  } catch (__mmTrapSelectError) {
+    return;
+  }
+  if (__mmChangedWeapon) __mmTrapManualReadyAt = 0;
+  __mmTrapAttackHeldWeapon = __mmWeapon;
+  // One bounded acknowledgement window, then the normal breaker resumes if
+  // the predicted final knockback failed. Never issue a second KB attempt on
+  // that same pit or fire the old main under the fallback plan's Tank gear.
+  if (__mmAwaitingFinalKnockback) return;
   if (!__mmUpdateTrapEscapeGear(__mmWeapon)) return;
   const __mmSwingReady = __mmManualWeaponArming(
     __mmWeapon,
     __mmTrapManualReadyAt,
     __mmNow,
+    !1,
   );
   if (__mmSwingReady && __mmPlan.finalKnockback) {
     // Soldier applies before this exact final main swing. Do not stack Tank on
@@ -56401,13 +56699,7 @@ function __mmBreakTrap() {
   )
     return;
   try {
-    // A tool swap is only permitted when the locked breaker is no longer
-    // usable. Normal reload phases stay on the same hand.
-    __mmChangedWeapon && O.send("F", 0, __mmRawMouseAimDirection());
-    (Number(__mmSelectedWeapon()) !== Number(__mmWeapon) || __mmChangedWeapon) &&
-      je(__mmWeapon, !0);
-    // Match Glotus: release each ready attack before restoring cursor aim.
-    // Leaving F=1 down allows the next reload to swing at the mouse instead.
+    // Release every ready attack while retaining its angle for this phase.
     if (__mmSwingReady) {
       __mmPulseTrapBreakAttack(__mmAngle);
       __mmTrapAttackLastHoldAt = __mmNow;
@@ -56592,7 +56884,7 @@ function __mmPredictedContactSoldier() {
     velocity = __mmPassiveSpikeVelocity(), tick = __mmServerTickMs(),
     endX = self.x + velocity.x * tick, endY = self.y + velocity.y * tick,
     snapshot = __mmActiveObjectSnapshot(), spikes = new Set(snapshot.spikes);
-  let contact = __mmDangerAnimalNearby();
+  let contact = __mmAnimalSoldierThreat();
   for (const object of snapshot.all) {
     if (!object || !object.active) continue;
     const data = b && b.list && b.list[object.id],
@@ -57836,19 +58128,18 @@ function __mmRunManualCombatGearTick(__mmForce = !1) {
         : __mmPulseSecondaryWeapon(!0)
     );
   if (!__mmPrimaryHeld) return;
-  const __mmManualBreak = __mmKittyManualBreakPlan();
+  const __mmAutoAim = __mmAutoAimPlan(),
+      __mmManualBreak = __mmAutoAim ? null : __mmKittyManualBreakPlan();
   if (__mmManualBreak)
     return void __mmPulsePrimaryManualBreak(__mmManualBreak);
-  const __mmMaterialBreak = __mmMaterialHoldBreakPlan();
+  const __mmMaterialBreak = __mmAutoAim ? null : __mmMaterialHoldBreakPlan();
   if (__mmMaterialBreak)
     return void __mmPulsePrimaryMaterialBreak(__mmMaterialBreak);
   __mmClearResponsiveBreakAim();
-  const __mmAutoAim = __mmAutoAimPlan();
   if (__mmAutoAim) {
     if (
       __mmAutoAim.type === "primary" &&
-      __mmAutoAim.kind === "animal" &&
-      __mmPulseAnimalBullAutoAim(__mmAutoAim)
+      __mmPulseEntityBullAutoAim(__mmAutoAim)
     )
       return;
     __mmApplyAutoAim(__mmAutoAim);
@@ -57914,31 +58205,30 @@ function __mmRunManualCombatGearTick(__mmForce = !1) {
   // held left click in downtime gear without ever sending F=1.
   __mmPulsePrimaryBullWeapon(__mmAutoAim);
 }
-function __mmPulseAnimalBullAutoAim(
+function __mmPulseEntityBullAutoAim(
   __mmPlan,
   __mmNow = Date.now(),
 ) {
-  // Animal farming is the only Bull path that intentionally does not wait
-  // for a skin acknowledgement. The packets leave in one server phase as
-  // Bull -> aimed F=1 -> F=0, and the one-tick combat lease restores normal
-  // gear on the next phase. Player combat continues to use the acknowledged
-  // Bull state machine below.
+  // A ready entity hit is one ordered transaction: Bull, primary, aim, fire.
+  // Do not wait for a cosmetic echo or let a nearby structure take the click.
   if (
     !__mmPlan ||
     __mmPlan.type !== "primary" ||
-    __mmPlan.kind !== "animal" ||
+    !["animal", "player"].includes(__mmPlan.kind) ||
     !__mmPrimaryHeld ||
     !v ||
     !v.alive ||
     Number(__mmPlan.weapon) !== Number(v.weapons && v.weapons[0]) ||
-    !__mmAutoAimEntityLive(__mmPlan.target, "animal") ||
+    !__mmAutoAimEntityLive(__mmPlan.target, __mmPlan.kind) ||
     !__mmBullPrimaryAvailable() ||
-    !__mmSafeAnimalBullContact(__mmPlan.weapon)
+    __mmIsTrapped() || __mmCombatHatAntiInstaActive() ||
+    !b.weapons[__mmPlan.weapon] || b.weapons[__mmPlan.weapon].projectile != null ||
+    b.weapons[__mmPlan.weapon].shield
   )
     return !1;
   (__mmPrepareAutoAimTarget(__mmPlan),
     (__mmPrimaryManualWeapon = Number(__mmPlan.weapon)));
-  // Keep tracking the animal while reload/another utility lease owns this
+  // Keep tracking the entity while reload/another utility lease owns this
   // phase, but never fall into the ordinary acknowledged-Bull path. The local
   // ready time matters here because a live reload value may lag the F=0 packet.
   if (
@@ -57951,7 +58241,12 @@ function __mmPulseAnimalBullAutoAim(
     __mmCombatHatLockActive()
   )
     return !0;
+  if (__mmPredictedContactSoldier()) return !0;
   __mmPrimaryAttackDown && __mmReleasePrimaryBullTap();
+  // A structure hit from the preceding input phase cannot retain Tank over
+  // this newly selected entity target.
+  (__mmClearPrimaryGearTimer(), __mmClearPrimaryTankLease(),
+    __mmGearArbiter.release("manual:"));
   const __mmTail = __mmPrimaryDamageTail();
   // Use the one-tick lease rather than the normal Bull stage. Requesting the
   // manual priority explicitly also allows this direct hit to supersede a
@@ -57969,22 +58264,24 @@ function __mmPulseAnimalBullAutoAim(
     __mmGearArbiter.commit(),
     __mmPrimaryClickHat == null &&
       (__mmPrimaryClickHat = __mmBestPostCombatHat()),
-    (__mmPrimaryGearStage = "animal-bull"));
+    (__mmPrimaryGearStage = "entity-bull"));
   try {
-    if (!__mmPrimaryHeld || !__mmSendAutoAimAttack(1, __mmPlan))
+    if (!__mmPrimaryHeld) return !0;
+    je(__mmPlan.weapon, !0);
+    if (!__mmSendAutoAimAttack(1, __mmPlan))
       return !0;
     // Release in the same packet phase. This leaves the physical hold free
-    // for the next loaded animal hit instead of parking it behind Bull.
+    // for the next loaded entity hit instead of parking it behind Bull.
     O.send("F", 0, null);
   } catch (__mmAnimalBullAttackError) {
     return !0;
   }
-  (__mmTrackPlayerToolCooldown(v.sid, __mmPlan.weapon, "animal-bull-direct"),
+  (__mmTrackPlayerToolCooldown(v.sid, __mmPlan.weapon, "entity-bull-direct"),
     (__mmPrimaryManualFiredTick = __mmCombatServerTick),
     (__mmPrimaryManualReadyAt =
       __mmNow + __mmManualWeaponCooldown(__mmPlan.weapon, 7)),
     (__mmPrimaryAttackDown = !1),
-    // Do not leave the crosshair pinned to the animal after the bounded tap.
+    // Do not leave the crosshair pinned to the entity after the bounded tap.
     // Cooldown pulses deliberately do not reapply it, so this is a real
     // mouse-aim return rather than a deferred callback that auto aim blocks.
     __mmClearAutoAim(!1),
@@ -58095,15 +58392,14 @@ function __mmSendPrimaryBullTap(
 }
 function __mmPulsePrimaryBullWeapon(__mmAutoAim = __mmAutoAimPlan()) {
   if (!__mmPrimaryHeld) return;
-  const __mmManualBreak = __mmKittyManualBreakPlan();
+  const __mmManualBreak = __mmAutoAim ? null : __mmKittyManualBreakPlan();
   if (__mmManualBreak)
     return void __mmPulsePrimaryManualBreak(__mmManualBreak);
   __mmClearResponsiveBreakAim();
   if (__mmAutoAim) {
     if (
       __mmAutoAim.type === "primary" &&
-      __mmAutoAim.kind === "animal" &&
-      __mmPulseAnimalBullAutoAim(__mmAutoAim)
+      __mmPulseEntityBullAutoAim(__mmAutoAim)
     )
       return;
     __mmApplyAutoAim(__mmAutoAim);
@@ -58620,7 +58916,7 @@ function __mmTankSecondaryPreferred(__mmWeapon = __mmRightClickWeapon()) {
 }
 function __mmPrimaryTankCombatBlocked() {
   // Combat safety is independent of the Auto Soldier toggle or hat ownership.
-  if (__mmEnemyWithinCombatRange() || __mmDangerAnimalNearby()) return !0;
+  if (__mmEnemyWithinCombatRange()) return !0;
   const __mmThreat = __mmCombatThreatSnapshot();
   return !!(__mmThreat &&
     (Number(__mmThreat.nearbyEnemies) > 0 ||
@@ -58628,13 +58924,10 @@ function __mmPrimaryTankCombatBlocked() {
       Number(__mmThreat.potentialDamage) > 0));
 }
 function __mmTankPrimaryTarget(__mmWeapon = v && v.weapons && v.weapons[0]) {
-  // Left click stays on slot zero and does not enter Tank while a hostile
-  // player or incoming damage is detected, a dangerous animal is nearby,
-  // or while the cursor is fighting an animal. Animals include mobs, bosses, and Treasure in the
-  // native entity list. This keeps the held break path from stealing its
-  // normal left-click gear during PvE; right click retains its separate Tank
-  // behavior. __mmKittyTankTarget supplies the live player-built-breakable
-  // and weapon-reach contact calculation.
+  // Left click stays on slot zero. Player combat and an aimed animal take
+  // precedence over structure breaking, but mere animal proximity cannot
+  // veto Tank on a structure hit. Treasure is attackable here, not a Soldier
+  // threat. __mmKittyTankTarget supplies the breakable and reach checks.
   if (
     !__mmTankRightClickEnabled ||
     !v ||
