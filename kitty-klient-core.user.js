@@ -2,7 +2,7 @@
 // @name         kitty klient
 // @author       Coder Guy
 // @credits       random4ik — bot script
-// @version      7.0.36
+// @version      7.0.37
 // @icon         https://cdn.discordapp.com/icons/1540876076224356437/ac27c0ce87c4c46b407ebca78e150aeb.webp?size=2048
 // @description  kitty klient — a MooMoo.io client with adaptive zoom, fast autoheal, gear automation, combat tools, predictive placement, visual markers, CC0 background music, manual quick builds, and a fully rebindable keyboard/mouse controls HUD.
 // @match        *://moomoo.io/*
@@ -267,7 +267,7 @@
     const AUTO_PUSH_FINISHER_MIGRATION_KEY = "kitty-klient-auto-push-finisher-v1";
     const ASSASSIN_RANGE_AUTO_MIGRATION_KEY = "kitty-klient-assassin-range-auto-v1";
     const TAB_SYNC_BRIDGE_KEY = "kitty-klient-tab-sync-bridge-v1";
-const KITTY_KLIENT_VERSION = "7.0.36";
+const KITTY_KLIENT_VERSION = "7.0.37";
     const KITTY_SHARED_STORAGE_APPLIED_EVENT = "KittyMooMooSharedStorageApplied";
 
 
@@ -11837,6 +11837,7 @@ let __mmAutoSpikeInstaTimer = 0,
 const __mmAutoSpikeInstaMotion = Object.create(null);
 let __mmAutoSpikeSpamTimer = 0,
   __mmAutoSpikeSpamLastAt = 0,
+  __mmTrappedSpikeRingLastTick = -1,
   __mmAutoSpikeSpamGhost = null,
   __mmAutoSpikeSpamCandidateKey = null,
   __mmAutoSpikeSpamCandidateSince = 0,
@@ -16299,7 +16300,7 @@ const __mmInsta = {
   tankPredictPlan: null,
   tankCoverTimer: 0,
 
-  reversePrimaryAt: 0,
+  reverseOpeningTick: null,
   isActive() {
     return this.state !== "idle" && this.state !== "cleanup";
   },
@@ -16406,21 +16407,47 @@ const __mmInsta = {
       !__mmPrimaryData.shield
     );
   },
+  reverseAim(target) {
+    const self = __mmServerEntityPosition(v), enemy = __mmServerEntityPosition(target);
+    return self && enemy ? Math.atan2(enemy.y-self.y,enemy.x-self.x) : this.aim(target);
+  },
+  openReverse(context) {
+    const secondary = this.secondaryFollowup();
+    if (!__mmWeaponReady(context.primary) || !__mmWeaponReady(secondary))
+      return void this.cleanup("reverse-weapons-unavailable");
+    if (!this.turretReady()) return void this.cleanup("reverse-turret-unavailable");
+    this.selectSecondaryDamageGear();
+    __mmGearArbiter.commit();
+    const angle = this.reverseAim(context.target);
+    O.send("D",angle);
+    if (!this.sendAttack(secondary,true,context.target,angle))
+      return void this.cleanup("reverse-secondary-send-failed");
+    __mmAssumeTurretGearShot();
+    this.reverseOpeningTick = __mmCombatServerTick;
+    this.countActivation();
+    this.scheduleRelease();
+    this.schedule(() => this.cleanup("reverse-server-timeout"),Math.max(1000,this.tick()*8));
+  },
+  advanceReverse() {
+    if (this.profile !== "reverse" || this.state !== "executeBurst" || this.reverseOpeningTick == null) return false;
+    const context = this.context(false);
+    if (!context) { this.cleanup("reverse-target-lost"); return true; }
+    if (__mmCombatServerTick <= this.reverseOpeningTick) {
+      O.send("D",this.reverseAim(context.target));
+      return true;
+    }
+    this.reverseOpeningTick = null;
+    this.releaseAttack();
+    this.selectDamageGear();
+    __mmGearArbiter.commit();
+    if (!this.sendAttack(context.primary,true,context.target,this.reverseAim(context.target)))
+      return void this.cleanup("reverse-primary-send-failed");
+    this.preparePostSpike(context.target);
+    this.scheduleRelease();
+    this.schedule(() => this.finishNormalBurst(),this.tick());
+    return true;
+  },
   profileStep(__mmTarget, __mmWeapon) {
-
-
-    if (
-      this.reverseTurretPolearm(
-        this.primaryWeapon,
-        __mmWeapon,
-        __mmTarget,
-      ) &&
-      Number(this.reversePrimaryAt) > 0
-    )
-      return Math.max(
-        1,
-        Math.min(700, Number(this.reversePrimaryAt) - Date.now()),
-      );
     if (this.profile !== "oneTick") return this.tick();
     const __mmData = this.weaponData(__mmWeapon),
       __mmProjectile =
@@ -17273,7 +17300,7 @@ const __mmInsta = {
     this.profile = __mmRequestedProfile;
     this.profileSource = String(__mmOptions.profileSource || this.profile);
     this.tankPredictPlan = __mmOptions.tankPredictPlan || null;
-    this.reversePrimaryAt = 0;
+    this.reverseOpeningTick = null;
     this.popupShown = !1;
     if (!this.runtimeReady()) return (this.cleanup("runtime-unavailable"), !1);
     this.capture();
@@ -17447,6 +17474,7 @@ const __mmInsta = {
     if (!v || !v.alive || __mmItem == null) return !1;
     this.releaseAttack();
     if (this.automatic && __mmIsWeapon && __mmTarget &&
+      !(this.profile === "reverse" && this.reverseTurretPolearm(this.primaryWeapon,this.secondaryFollowup(),__mmTarget)) &&
       (!this.inRange(__mmItem, __mmTarget) || !this.pathClear(__mmTarget))) return !1;
     try {
       const __mmAngle = __mmForcedAngle != null && Number.isFinite(Number(__mmForcedAngle))
@@ -17617,6 +17645,8 @@ const __mmInsta = {
       this.schedule(() => this.executeFollowup(), this.tick());
       return;
     }
+    if (this.reverseTurretPolearm(__mmContext.primary,this.secondaryFollowup(),__mmContext.target))
+      return void this.openReverse(__mmContext);
     if (this.reverseProfile()) {
       const __mmSecondary = this.secondaryFollowup();
       if (
@@ -17628,30 +17658,10 @@ const __mmInsta = {
       )
         return void this.cleanup("reverse-secondary-unavailable");
       this.pendingSecondaryWeapon = __mmSecondary;
-      const __mmReverseTurretPolearm = this.reverseTurretPolearm(
-          __mmContext.primary,
-          __mmSecondary,
-          __mmContext.target,
-        ),
-        __mmGearHat = this.selectSecondaryDamageGear();
-      if (__mmGearHat == null)
-        return void this.cleanup("reverse-turret-unavailable");
-      if (__mmReverseTurretPolearm) {
-
-
-        try {
-          O.send("D", this.aim(__mmContext.target));
-          __mmGearArbiter.commit();
-          __mmAssumeTurretGearShot();
-        } catch (__mmReverseTurretError) {
-          return void this.cleanup("reverse-turret-send-failed");
-        }
-        this.reversePrimaryAt = Date.now() + this.tick();
-      } else if (!__mmGearArbiter.acknowledged(__mmGearHat))
-        return void this.schedule(
-          () => this.executeBurst(),
-          Math.max(8, __mmFastCheckMs()),
-        );
+      const __mmGearHat = this.selectSecondaryDamageGear();
+      if (__mmGearHat == null) return void this.cleanup("reverse-turret-unavailable");
+      if (!__mmGearArbiter.acknowledged(__mmGearHat))
+        return void this.schedule(() => this.executeBurst(),Math.max(8,__mmFastCheckMs()));
       if (!this.sendAttack(__mmSecondary, !0, __mmContext.target))
         return void this.cleanup("reverse-secondary-send-failed");
       this.countActivation();
@@ -17707,18 +17717,6 @@ const __mmInsta = {
   },
   executeFollowup() {
     if (this.state !== "executeBurst") return;
-
-    const __mmReversePrimaryAt = Number(this.reversePrimaryAt) || 0,
-      __mmNow = Date.now();
-    if (
-      this.profile === "reverse" &&
-      __mmReversePrimaryAt > __mmNow + 2
-    )
-      return void this.schedule(
-        () => this.executeFollowup(),
-        Math.max(1, __mmReversePrimaryAt - __mmNow),
-      );
-
 
     this.releaseAttack();
 
@@ -17868,34 +17866,10 @@ const __mmInsta = {
           !this.inRange(__mmContext.primary, __mmContext.target))
       )
         return void this.cleanup("reverse-primary-unavailable");
-      const __mmReverseTurretPolearm = this.reverseTurretPolearm(
-          __mmContext.primary,
-          this.pendingSecondaryWeapon || this.secondaryFollowup(),
-          __mmContext.target,
-        ),
-        __mmGearHat = this.selectDamageGear();
-
-
-      if (__mmReverseTurretPolearm) __mmGearArbiter.commit();
-      else if (!__mmGearArbiter.acknowledged(__mmGearHat))
-        return void this.schedule(
-          () => this.executeFollowup(),
-          Math.max(8, __mmFastCheckMs()),
-        );
-      const __mmImpactAim = __mmReverseTurretPolearm && __mmContext.target
-        ? __mmSyncAimAngle(
-            __mmContext.target,
-            Math.max(0, __mmReversePrimaryAt - Date.now()),
-          )
-        : null;
-      if (
-        !this.sendAttack(
-          __mmContext.primary,
-          !0,
-          __mmContext.target,
-          __mmImpactAim,
-        )
-      )
+      const __mmGearHat = this.selectDamageGear();
+      if (!__mmGearArbiter.acknowledged(__mmGearHat))
+        return void this.schedule(() => this.executeFollowup(),Math.max(8,__mmFastCheckMs()));
+      if (!this.sendAttack(__mmContext.primary,true,__mmContext.target))
         return void this.cleanup("reverse-primary-send-failed");
       (this.scheduleRelease(),
         this.schedule(() => this.finishNormalBurst(), this.tick()));
@@ -18160,7 +18134,7 @@ const __mmInsta = {
     this.postSpikeCalculatedAt = 0;
     this.postSpikeTarget = null;
     this.tankPredictPlan = null;
-    this.reversePrimaryAt = 0;
+    this.reverseOpeningTick = null;
     this.profile = "normal";
     this.profileSource = "R";
     this.popupShown = !1;
@@ -40470,21 +40444,14 @@ function __mmPriorityReverseCanKill(__mmTarget, __mmPredictedSoldierOff) {
   return Number.isFinite(__mmRawDamage) && __mmRawDamage + 0.001 >= __mmHealth;
 }
 function __mmPriorityReversePolearmPlan() {
-  if (!__mmPriorityReversePolearmLoadout() || __mmInstaTestingModeEnabled)
-    return null;
-  const __mmTarget = __mmInsta.nearestEnemy(),
-    __mmWindow = __mmPriorityReverseSoldierWindow(__mmTarget);
-  if (
-    !__mmTarget ||
-    !__mmWindow ||
-    !__mmInsta.fullBurstReady(__mmTarget, "reverse", !1) ||
-    !__mmInsta.inRange(__mmGreatHammer, __mmTarget) ||
-    !__mmPriorityReverseCanKill(__mmTarget, __mmWindow.predicted)
-  )
-    return null;
-  return { target: __mmTarget, predictedSoldierOff: __mmWindow.predicted };
+  if (!__mmPriorityReversePolearmLoadout() || __mmInstaTestingModeEnabled) return null;
+  const target = __mmInsta.nearestEnemy();
+  if (!target || !__mmInsta.fullBurstReady(target,"reverse",false) ||
+      __mmInsta.autoBurstDamage("reverse") < 100) return null;
+  return {target,predictedSoldierOff:false};
 }
 function __mmUpdatePriorityReversePolearmInsta() {
+  if (__mmInsta.advanceReverse()) return true;
   const __mmPlan = __mmPriorityReversePolearmPlan();
   if (!__mmPlan) return !1;
   return __mmInsta.start({
@@ -46335,7 +46302,7 @@ function __mmAutoSpikeSpamCandidate(__mmTarget, __mmSpike) {
 }
 function __mmTrappedSpikeRing(target, item) {
   if (!target || !target.trap || !target.trap.active ||
-      !__mmServerTrapContact(target.enemy,target.trap)) return [];
+      !__mmAutoPushTrapContact(target.enemy,target.trap)) return [];
   const data = b.list[item], self = __mmServerEntityPosition(v), enemy = __mmServerEntityPosition(target.enemy);
   if (!data || !(data.dmg>0) || !self || !enemy || Math.hypot(enemy.x-self.x,enemy.y-self.y)>200) return [];
   const scale = Number(data.scale)||49,
@@ -46343,29 +46310,16 @@ function __mmTrappedSpikeRing(target, item) {
     base = Math.atan2(enemy.y-self.y,enemy.x-self.x), candidates = [];
   for (let step=0;step<48;step++) {
     const angle = base+step*Math.PI/24, x = self.x+Math.cos(angle)*radius, y = self.y+Math.sin(angle)*radius;
-
-    if (Math.hypot(x-enemy.x,y-enemy.y)>scale+(Number(target.enemy.scale)||35)+(Number(target.trap.scale)||45) ||
-        !__mmAutoSpikeSpamPositionClear(x,y,scale) ||
+    if (!__mmAutoSpikeSpamPositionClear(x,y,scale) ||
         candidates.some(c=>Math.hypot(x-c.x,y-c.y)<scale+c.scale)) continue;
     candidates.push({item,x,y,angle,scale,targetSid:target.enemy.sid,mode:"trappedRing",intentReady:true});
   }
   return candidates;
 }
 function __mmAutoSpikeSpamTrappedPlan(__mmSpike) {
-  const __mmTargets = __mmAutoSpikeSpamTargets();
-  for (let __mmIndex = 0; __mmIndex < __mmTargets.length; __mmIndex++) {
-    const __mmTarget = __mmTargets[__mmIndex],
-      __mmRing = __mmTrappedSpikeRing(__mmTarget,__mmSpike),
-      __mmCandidate = __mmRing[0] ||
-        __mmAutoSpikeSpamRearCandidate(__mmTarget, __mmSpike) ||
-        __mmAutoSpikeSpamCandidate(__mmTarget, __mmSpike);
-    if (__mmCandidate)
-      return { target: __mmTarget, candidate: __mmCandidate, candidates: __mmRing };
-  }
-  return {
-    target: __mmTargets.length ? __mmTargets[0] : null,
-    candidate: null,
-  };
+  const target = __mmAutoSpikeSpamTargets()[0] || null,
+    candidates = target ? __mmTrappedSpikeRing(target,__mmSpike) : [];
+  return {target,candidate:candidates[0] || null,candidates};
 }
 function __mmPlaceAutoSpikeSpam(__mmCandidate, __mmNow) {
   if (
@@ -46496,9 +46450,11 @@ function __mmUpdateAutoSpikeSpam() {
           : "trapped-player spike priority",
       );
     if (!__mmLethalCandidate && __mmTrappedPlan.candidates && __mmTrappedPlan.candidates.length) {
+      if (__mmTrappedSpikeRingLastTick === __mmCombatServerTick) return;
+      __mmTrappedSpikeRingLastTick = __mmCombatServerTick;
       for (const candidate of __mmTrappedPlan.candidates) {
         if (!__mmAutoSpikeSpamCanPlaceNow() ||
-            !__mmServerTrapContact(__mmTarget.enemy,__mmTarget.trap) ||
+            !__mmAutoPushTrapContact(__mmTarget.enemy,__mmTarget.trap) ||
             !__mmTarget.trap.active) break;
         if (__mmAutoSpikeSpamPositionClear(candidate.x,candidate.y,candidate.scale) &&
             !__mmPlaceAutoSpikeSpam(candidate,__mmNow)) break;
@@ -47825,7 +47781,10 @@ function __mmStartTurretSteal() {
 }
 function __mmResetSpikeGearCounter(__mmRestore) {
   const __mmTailRestore = __mmSpikeGearCounterPreviousTail;
-  (__mmSpikeGearCounterRestoreTimer &&
+  (__mmSpikeGearCounterTimer &&
+    clearTimeout(__mmSpikeGearCounterTimer),
+    (__mmSpikeGearCounterTimer = 0),
+    __mmSpikeGearCounterRestoreTimer &&
     clearTimeout(__mmSpikeGearCounterRestoreTimer),
     (__mmSpikeGearCounterRestoreTimer = 0),
     (__mmSpikeGearCounterTargetSid = null),
@@ -47856,15 +47815,15 @@ function __mmKittyAntiBullTail() {
 function __mmEnemyLoadedBullMain(__mmEnemy) {
   if (!v || !v.alive || !__mmEnemy || !b || !b.weapons) return null;
   const __mmCooldowns = __mmAdvancePlayerToolCooldowns(__mmEnemy, Date.now()),
-    __mmPrimary = Array.isArray(__mmEnemy.weapons)
-      ? Number(__mmEnemy.weapons[0])
-      : NaN,
+    __mmPrimary = Number(__mmEnemy.weapons && __mmEnemy.weapons[0] != null
+      ? __mmEnemy.weapons[0]
+      : __mmEnemy.primaryIndex != null ? __mmEnemy.primaryIndex : __mmEnemy.weaponIndex),
     __mmWeapon = b.weapons[__mmPrimary],
     __mmEntry = __mmCooldowns && __mmCooldowns.weapons && __mmCooldowns.weapons[String(__mmPrimary)],
     __mmReload = __mmEntry && __mmEntry.remaining != null
       ? Number(__mmEntry.remaining)
       : __mmEnemy.reloads && __mmEnemy.reloads[__mmPrimary] != null
-        ? Number(__mmEnemy.reloads[__mmPrimary]) : NaN,
+        ? Number(__mmEnemy.reloads[__mmPrimary]) : 0,
 
 
     __mmHasBull = !!(
@@ -47874,6 +47833,8 @@ function __mmEnemyLoadedBullMain(__mmEnemy) {
     );
   if (
     !__mmHasBull ||
+    !Number.isInteger(__mmPrimary) ||
+    __mmPrimary < 0 || __mmPrimary >= 9 ||
     !__mmWeapon ||
     __mmWeapon.projectile != null ||
     __mmWeapon.shield ||
@@ -47966,6 +47927,87 @@ function __mmKittyAntiBullThreat() {
   }
   return __mmBest;
 }
+function __mmSpikeGearCounterTarget() {
+  const __mmEnemies = __mmLiveStateFresh() ? __mmLiveState.enemies : E;
+  if (!Array.isArray(__mmEnemies) || __mmSpikeGearCounterTargetSid == null)
+    return null;
+  return __mmEnemies.find((__mmEnemy) =>
+    __mmIsEnemyPlayer(__mmEnemy) &&
+    String(__mmEnemy.sid) === String(__mmSpikeGearCounterTargetSid),
+  ) || null;
+}
+function __mmTrySpikeGearCounterattack(__mmEnemy) {
+  if (
+    !__mmEnemy ||
+    __mmSpikeGearCounterTimer ||
+    Number(v.skinIndex) !== 11 ||
+    !Array.isArray(v.weapons)
+  )
+    return !1;
+  const __mmPrimary = v.weapons[0],
+    __mmEnemyPrimary = Array.isArray(__mmEnemy.weapons)
+      ? __mmEnemy.weapons[0]
+      : null,
+    __mmWeapon = b && b.weapons && b.weapons[__mmPrimary],
+    __mmEnemyWeapon = b && b.weapons && b.weapons[__mmEnemyPrimary],
+    __mmRecent = __mmRecentPlayerSwings[String(__mmEnemy.sid)],
+    __mmEnemyHasBull =
+      Number(__mmEnemy.skinIndex) === 7 ||
+      Number(__mmEnemy.skinIndex2) === 7 ||
+      !!(__mmEnemy.skins && __mmEnemy.skins[7]),
+    __mmNow = Date.now();
+  if (
+    __mmPrimary == null ||
+    !__mmWeapon ||
+    __mmWeapon.projectile != null ||
+    __mmWeapon.shield ||
+    !__mmEnemyWeapon ||
+    !__mmEnemyHasBull ||
+    !__mmWeaponReady(__mmPrimary) ||
+    !__mmRecent ||
+    Number(__mmRecent.weapon) !== Number(__mmEnemyPrimary) ||
+    __mmNow - Number(__mmRecent.at) > __mmServerTickMs() * 1.25
+  )
+    return !1;
+  const __mmSelf = __mmServerEntityPosition(v) || v,
+    __mmEnemyPosition = __mmServerEntityPosition(__mmEnemy) || __mmEnemy,
+    __mmDistance = Math.hypot(
+      Number(__mmEnemyPosition.x) - Number(__mmSelf.x),
+      Number(__mmEnemyPosition.y) - Number(__mmSelf.y),
+    ),
+    __mmOwnReach =
+      (Number(__mmWeapon.range) || 0) + (Number(__mmEnemy.scale) || 35),
+    __mmEnemyReach =
+      (Number(__mmEnemyWeapon.range) || 0) + (Number(v.scale) || 35);
+  if (__mmDistance > __mmOwnReach || __mmDistance > __mmEnemyReach) return !1;
+  const __mmAngle = Math.atan2(
+    Number(__mmEnemyPosition.y) - Number(__mmSelf.y),
+    Number(__mmEnemyPosition.x) - Number(__mmSelf.x),
+  );
+  try {
+    __mmEquipGearPair(
+      7,
+      __mmKittyAntiBullTail(),
+      !0,
+      !1,
+      "spikeGearCounter",
+      __mmGearIntentPriorities.spikeGearCounter,
+    );
+    __mmGearArbiter.commit();
+    (O.send("D", __mmAngle),
+      je(__mmPrimary, !0),
+      O.send("F", 1, __mmAngle),
+      __mmTrackPlayerToolCooldown(v.sid, __mmPrimary, "spike-gear-counter"));
+  } catch (__mmSpikeGearCounterattackError) {
+    return !1;
+  }
+  __mmSpikeGearCounterTimer = setTimeout(function () {
+    ((__mmSpikeGearCounterTimer = 0),
+      v && v.alive && O.send("F", 0, __mmAngle),
+      __mmResetSpikeGearCounter(!0));
+  }, __mmServerTickMs());
+  return !0;
+}
 function __mmAutoBarbarianMeleeThreat() {
   if (
     !__mmAutoBarbarianEnabled ||
@@ -48046,10 +48088,14 @@ function __mmUpdateSpikeGearCounter() {
     __mmTrapAttackActive
   )
     return void __mmResetSpikeGearCounter(!0);
+  const __mmArmedTarget = __mmSpikeGearCounterTarget();
+  if (__mmTrySpikeGearCounterattack(__mmArmedTarget)) return;
   const __mmBullThreat = __mmKittyAntiBullThreat(),
     __mmEnemy = __mmBullThreat && __mmBullThreat.enemy;
   if (!__mmEnemy)
     return void __mmResetSpikeGearCounter(!0);
+  if (!__mmActionCanPreempt("spikeGearCounter")) return;
+  if (__mmCombatHatLockActive()) __mmCancelCombatHatLock(!1);
   const __mmTail = __mmKittyAntiBullTail();
   if (
     String(__mmSpikeGearCounterTargetSid) !== String(__mmEnemy.sid) &&
@@ -48067,6 +48113,7 @@ function __mmUpdateSpikeGearCounter() {
         "spikeGearCounter",
         __mmGearIntentPriorities.spikeGearCounter,
       ));
+    __mmGearArbiter.commit();
     return;
   }
   if (String(__mmSpikeGearCounterTargetSid) !== String(__mmEnemy.sid))
@@ -48089,6 +48136,7 @@ function __mmUpdateSpikeGearCounter() {
       "spikeGearCounter",
       __mmGearIntentPriorities.spikeGearCounter,
     );
+  __mmGearArbiter.commit();
 }
 function __mmStartSpikeGearCounter() {
   __mmEnsureOperationPipeline();
@@ -48303,7 +48351,6 @@ function __mmUpdateAntiInsta() {
   if (!__mmThreat) return;
   const __mmShieldPlan = __mmAntiInstaShieldPlan(__mmThreat),
     __mmCanShield = !!(
-      !(__mmTrapEscapeEnabled && __mmTrapEscapeSoldierForInsta()) &&
       __mmShieldPlan &&
       Array.isArray(v.weapons) &&
       v.weapons.includes(__mmShieldWeapon)
@@ -55485,6 +55532,7 @@ function __mmRestoreTrapHat() {
   ((__mmTrapHat = null), (__mmTrapHatRestoreAttempts = 0));
 }
 function __mmStopTrapAttack() {
+  __mmGearArbiter.release("safety:trap-danger");
   __mmGearArbiter.release("trap:insta-cover");
   const __mmHadBreakAim = __mmTrapAttackActive || __mmTrapBreakAimUntil > 0,
     __mmReleaseAngle = Number.isFinite(__mmTrapAimAngle)
@@ -56248,10 +56296,13 @@ function __mmTryAntiRetrapPush(__mmTrap) {
       (__mmTrapAttackHeldWeapon = null),
       (__mmTrapAttackTargetKey = null),
       __mmInsta.turretReady() &&
-        (__mmActivateCombatHat(__mmTurretGear), __mmAssumeTurretGearShot()),
+        (__mmActivateCombatHat(__mmTurretGear),
+        __mmGearArbiter.commit(),
+        __mmAssumeTurretGearShot()),
       O.send("D", __mmAngle),
       je(__mmPrimary, !0),
       O.send("F", 1, __mmAngle),
+      __mmTrackPlayerToolCooldown(v.sid, __mmPrimary, "anti-retrap-counter"),
       (__mmAntiRetrapLastAt = Date.now()));
   } catch (__mmAntiRetrapError) {
     return !1;
@@ -56520,12 +56571,26 @@ function __mmTrapEscapeEnemyMainReady(enemy, now) {
 function __mmTrapEscapeSoldierForInsta() {
   if (!v || !v.alive || !__mmIsTrapped()) return false;
   const now = Date.now(), enemies = __mmLiveStateFresh() ? __mmLiveState.enemies : E,
-    loaded = Array.isArray(enemies) ? enemies.filter(enemy => __mmTrapEscapeEnemyMainReady(enemy,now)) : [];
-  if (!loaded.length) return false;
-  const threat = __mmTrapEscapeImminentThreat(__mmCombatThreatSnapshot(true),now),
+    loaded = Array.isArray(enemies) ? enemies.filter(enemy => __mmTrapEscapeEnemyMainReady(enemy,now)) : [],
+    snapshot = __mmCombatThreatSnapshot(true),
+    threat = __mmTrapEscapeImminentThreat(snapshot,now),
     tank = __mmTrappedTankInstaThreat(loaded,threat,now);
-  return !!tank || (Number.isFinite(threat.firstImpactMs) &&
-    threat.damage >= Math.max(25,(Number(v.health)||100)*0.3));
+  return __mmCombatHatAntiInstaActive() || !!tank ||
+    (Number.isFinite(threat.firstImpactMs) &&
+      threat.damage >= Math.max(25,(Number(v.health)||100)*0.3));
+}
+function __mmPauseTrapBreakingForDanger() {
+  const readyAt = __mmTrapManualReadyAt, weapon = __mmTrapAttackHeldWeapon;
+  if (__mmTrapAttackActive || __mmTrapEscapeOwnReplaceTimer || __mmSmartHammerRetrapTimer)
+    __mmStopTrapAttack();
+  __mmTrapManualReadyAt = readyAt;
+  __mmTrapAttackHeldWeapon = weapon;
+  __mmCancelCombatHatLock(false);
+  __mmGearArbiter.release("trap:escape-tank");
+  __mmGearArbiter.request("safety:trap-danger", {hat:v.skins && v.skins[6] ? 6 : 0},
+    {priority:__mmGearIntentPriorities.safety});
+  __mmGearArbiter.commit();
+  __mmAutoHeal(true);
 }
 function __mmTrapBreakAimAngle(__mmTarget) {
   const __mmSelfPosition = __mmServerEntityPosition(v) || v,
@@ -56583,16 +56648,15 @@ function __mmBreakTrap() {
 
 
 
-  const __mmSoldierBreak = __mmTrapEscapeSoldierForInsta();
-  if (__mmSoldierBreak && __mmActionOwner === "shieldDefense") {
-    __mmAntiInstaTrapShieldUntil = 0;
-    __mmStopShieldDefense("continue breaking with Soldier");
+  if (Date.now() < __mmAntiInstaTrapShieldUntil &&
+      __mmActionOwner === "shieldDefense" && __mmShieldDefenseTimer) return;
+  __mmAntiInstaTrapShieldUntil = 0;
+  if (__mmTrapEscapeSoldierForInsta()) {
+    __mmPauseTrapBreakingForDanger();
+    return;
   }
-  if (Date.now() < __mmAntiInstaTrapShieldUntil) {
-    if (__mmActionOwner === "shieldDefense" && __mmShieldDefenseTimer) return;
-    __mmAntiInstaTrapShieldUntil = 0;
-  }
-
+  __mmGearArbiter.release("safety:trap-danger");
+  const __mmSoldierBreak = false;
   __mmTrapEscapeDangerPauseUntil = 0;
 
 
@@ -56635,6 +56699,8 @@ function __mmBreakTrap() {
   const __mmTrap = __mmCurrentNearbyTrap();
   const __mmTrapTarget = __mmTrapEscapeBreakTarget(__mmTrap);
   if (__mmTrapTarget == null) return void __mmStopTrapAttack();
+
+  if (!__mmSoldierBreak && __mmTryAntiRetrapPush(__mmTrapTarget)) return;
 
 
 
