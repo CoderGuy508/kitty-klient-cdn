@@ -701,11 +701,7 @@ const KITTY_KLIENT_VERSION = "7.0.38";
         Object.freeze({ id: "moveRight", group: "Movement", binding: "KeyD", action: "Move right", note: "Hold to move east. This replaces MooMoo's fixed D movement key." }),
         Object.freeze({ id: "primaryAttack", group: "Combat & gear", binding: "Mouse0", action: "Primary attack", note: "Held attack with Kitty's Bull and tail timing.", hold: true }),
         Object.freeze({ id: "secondaryAttack", group: "Combat & gear", binding: "Mouse2", action: "Secondary attack / Tank", note: "Held secondary or situational Shield/Tank path.", hold: true }),
-        Object.freeze({ id: "clickBoostInsta", group: "Combat & gear", binding: "Shift+Mouse0", action: "Click Boost Insta", note: "Starts Boost Insta when ready; otherwise continues as a primary hold.", hold: true }),
-        Object.freeze({ id: "normalInsta", group: "Combat & gear", binding: "KeyR", action: "Normal Insta", note: "Polearm/Katana + Great Hammer with Turret and Bull runs manual reverse; other kits use the combo planner. With no target, uses mouse aim." }),
-        Object.freeze({ id: "boostInsta", group: "Combat & gear", binding: "Shift+KeyR", action: "Boost Insta", note: "Uses a ready Crossbow or Musket with the boost Insta kit." }),
-        Object.freeze({ id: "oneTickInsta", group: "Combat & gear", binding: "Shift+KeyP", action: "Toggle One-Tick Insta", note: "Toggles the secondary-first one-tick profile." }),
-        Object.freeze({ id: "velTickInsta", group: "Combat & gear", binding: "KeyT", action: "Toggle VelTick Insta", note: "Toggles predicted 220–245px Turret then Bull + Polearm timing." }),
+        Object.freeze({ id: "normalInsta", group: "Combat & gear", binding: "KeyR", action: "Insta (R)", note: "Polearm/Katana + Great Hammer with Turret and Bull runs manual reverse; other kits use the combo planner. With no target, uses mouse aim." }),
         Object.freeze({ id: "boostSpike", group: "Combat & gear", binding: "KeyG", action: "Boost + Spike", note: "x-RedDragon G pattern: side spikes, close diagonals, then a forward Boost Pad every 80 ms while held.", hold: true }),
         Object.freeze({ id: "quadTrap", group: "Combat & gear", binding: "Shift+KeyB", action: "Manual Quad Trap", note: "Forces one legal four-slot trap solve." }),
         Object.freeze({ id: "quadSpike", group: "Combat & gear", binding: "Shift+KeyC", action: "Manual Quad Spike", note: "Forces one legal four-slot spike solve." }),
@@ -728,6 +724,7 @@ const KITTY_KLIENT_VERSION = "7.0.38";
     const KITTY_DEFAULT_KEYBINDS = Object.freeze(Object.fromEntries(
         KITTY_BINDING_ACTIONS.map((entry) => [entry.id, entry.binding])
     ));
+    const KITTY_RETIRED_INSTA_KEYS = Object.freeze(["soldierPredictInsta", "autoBowUpgradeInsta", "reverseInsta", "oneTickInsta", "sevenShameInsta", "appleInsta", "bleedInsta", "knockbackInsta", "primaryKnockbackTick", "hammerTurretKnockbackTick", "hammerTrapKnockbackTick", "spikeSync", "spikeSyncHammer", "velTickInsta", "tankPredictInsta", "polearmAids", "autoTrapInsta", "autoSpikeInsta", "instaSync", "antiBoostInsta", "trapKnockbackStrike", "autoPushFinisher", "meowChainInsta"]);
     const HUD_DEFAULTS = Object.freeze({
 
 
@@ -745,7 +742,7 @@ const KITTY_KLIENT_VERSION = "7.0.38";
         autoAcceptTeamRequests: false,
         autoDeclineTeamRequests: false,
         autoRespawn: false,
-        antiBoostInsta: true,
+        antiBoostInsta: false,
         antiInsta: true,
         antiSync: true,
         antiCollision: true,
@@ -759,7 +756,7 @@ const KITTY_KLIENT_VERSION = "7.0.38";
         trapKnockbackStrike: false,
         turretSteal: true,
         spikeGearCounter: true,
-        sevenShameInsta: true,
+        sevenShameInsta: false,
         dashMovement: true,
         musketRecharge: true,
         autoPurchase: false,
@@ -818,27 +815,27 @@ const KITTY_KLIENT_VERSION = "7.0.38";
         instaKill: true,
         autoInsta: true,
         autoAim: true,
-        soldierPredictInsta: true,
-        autoBowUpgradeInsta: true,
-        reverseInsta: true,
-        oneTickInsta: true,
-        appleInsta: true,
-        bleedInsta: true,
-        knockbackInsta: true,
-        primaryKnockbackTick: true,
-        hammerTurretKnockbackTick: true,
-        hammerTrapKnockbackTick: true,
-        spikeSync: true,
-        spikeSyncHammer: true,
-        velTickInsta: true,
-        tankPredictInsta: true,
-        polearmAids: true,
+        soldierPredictInsta: false,
+        autoBowUpgradeInsta: false,
+        reverseInsta: false,
+        oneTickInsta: false,
+        appleInsta: false,
+        bleedInsta: false,
+        knockbackInsta: false,
+        primaryKnockbackTick: false,
+        hammerTurretKnockbackTick: false,
+        hammerTrapKnockbackTick: false,
+        spikeSync: false,
+        spikeSyncHammer: false,
+        velTickInsta: false,
+        tankPredictInsta: false,
+        polearmAids: false,
         autoPushInsta: true,
-        autoPushFinisher: true,
+        autoPushFinisher: false,
         autoPushVisuals: true,
         boostSpikeKill: true,
-        autoTrapInsta: true,
-        autoSpikeInsta: true,
+        autoTrapInsta: false,
+        autoSpikeInsta: false,
         autoSpikeSpam: false,
         autoSpikeKill: false,
         animalTrap: true,
@@ -865,11 +862,11 @@ const KITTY_KLIENT_VERSION = "7.0.38";
         smartBetrayalSpikeRing: true,
         smartTeammateBetrayalSpikeRing: true,
         smartHammerRetrap: true,
-        instaSync: true,
+        instaSync: false,
         boostBreak: true,
         boostChat: true,
         materialReply: true,
-        meowChainInsta: true,
+        meowChainInsta: false,
         instaChat: true,
         bushChat: true,
         friendAddedChat: true,
@@ -988,12 +985,7 @@ const KITTY_KLIENT_VERSION = "7.0.38";
             "smartAntiBoostPlace", "smartInstaUtilityPlace", "smartSelectedCombatPlace",
             "smartBoostPadSpikeRing", "smartHammerRetrap", "animalTrap", "passiveMobTrap", "bossTeleporter"
         ]),
-        insta: Object.freeze([
-            "instaKill", "autoInsta", "autoAim", "autoBowUpgradeInsta", "reverseInsta", "oneTickInsta",
-            "sevenShameInsta", "appleInsta", "bleedInsta", "knockbackInsta", "primaryKnockbackTick",
-            "hammerTurretKnockbackTick", "hammerTrapKnockbackTick", "spikeSync", "spikeSyncHammer",
-            "velTickInsta", "tankPredictInsta", "polearmAids", "autoPushInsta", "autoTrapInsta", "autoSpikeInsta", "instaSync"
-        ]),
+        insta: Object.freeze(["autoInsta"]),
         combat: Object.freeze([
             "bullHelmet", "tankRightClick", "antiInsta", "antiSync", "antiBoostInsta", "antiCollision",
             "shieldDefense", "multiThreatShield", "placementDefense", "antiRetrapPush",
@@ -2929,6 +2921,11 @@ const KITTY_KLIENT_VERSION = "7.0.38";
         return KITTY_MENU_COMPLEXITY_LEVELS.includes(level) ? level : "easy";
     }
 
+    function normalizeKittyInstaSettings(settings) {
+        KITTY_RETIRED_INSTA_KEYS.forEach((key) => { settings[key] = false; });
+        settings.instaKill = settings.autoInsta;
+        return settings;
+    }
     function normalizeHudSettings(candidate) {
         const settings = { ...HUD_DEFAULTS };
         settings.keybinds = { ...KITTY_DEFAULT_KEYBINDS };
@@ -2938,6 +2935,7 @@ const KITTY_KLIENT_VERSION = "7.0.38";
         HUD_BOOLEAN_KEYS.forEach((key) => {
             if (typeof candidate[key] === "boolean") settings[key] = candidate[key];
         });
+        normalizeKittyInstaSettings(settings);
 
 
         if (
@@ -4408,7 +4406,7 @@ const KITTY_KLIENT_VERSION = "7.0.38";
         const easyPlacement = addHudSection(easyPage, "Placement");
         addHudCompactGroup(easyPlacement, "autoPlace", "Auto Place", "Turns Kitty's automatic combat placement tools on or off together");
         const easyInsta = addHudSection(easyPage, "Insta");
-        addHudCompactGroup(easyInsta, "insta", "Insta", "Turns the automatic Insta suite on or off together");
+        addHudCompactGroup(easyInsta, "insta", "Insta", "One ready-combo planner for automatic attacks and the R hotkey");
         const easyCombat = addHudSection(easyPage, "Combat");
         addHudCompactGroup(easyCombat, "combat", "Combat", "Turns combat assistance and defensive reactions on or off together");
         const easySurvival = addHudSection(easyPage, "Survival");
@@ -4458,9 +4456,9 @@ const KITTY_KLIENT_VERSION = "7.0.38";
         addHudCompactGroup(mediumBasicsSection, "survival", "Survival", "Gear, recovery, trap escape, and reload support");
         addHudCompactToggle(mediumBasicsSection, "spikeGearCounter", "Anti Bull", "Use Spike Gear against a close Bull-helmet enemy");
         const mediumCombatSection = addHudSection(mediumCombat, "Combat");
-        addHudCompactGroup(mediumCombatSection, "insta", "Insta", "The automatic Insta profiles and their timing helpers");
+        addHudCompactGroup(mediumCombatSection, "insta", "Insta", "One ready-combo planner for automatic attacks and the R hotkey");
         addHudCompactGroup(mediumCombatSection, "combat", "Combat", "Combat defenses and tactical reaction helpers");
-        addHudCompactToggle(mediumCombatSection, "autoPushInsta", "Auto Push", "Let the Insta system choose a push setup when it is safe");
+        addHudCompactToggle(mediumCombatSection, "autoPushInsta", "Auto Push", "Push trapped enemies toward spikes when the route is safe");
         const mediumPlacementSection = addHudSection(mediumPlacement, "Placement");
         addHudCompactGroup(mediumPlacementSection, "autoPlace", "Auto Place", "Automatic trap, spike, and combat placement decisions");
         addHudCompactToggle(mediumPlacementSection, "smartAutoReplace", "Trap Replace", "Predict and restore your broken enemy-holding trap");
@@ -4514,7 +4512,6 @@ const KITTY_KLIENT_VERSION = "7.0.38";
         addHudToggle(automationDefense, "autoEnemySpikeBreak", "Auto enemy spike break", "Break a reachable hostile spike with Great Hammer priority. It yields to traps, manual attacks, Instas, and immediate defensive threats.");
         addHudToggle(automationDefense, "antiInsta", "Anti-insta", "Pre-heal a damaged player before a confirmed lethal hit, then defend against the combo window");
         addHudToggle(automationDefense, "antiSync", "Anti Sync", "When two or more hostile hits are predicted to arrive together, pre-heal and hold Shield toward the combined impact");
-        addHudToggle(automationDefense, "antiBoostInsta", "Anti-boost insta", "React to boosted hostile approaches with the defensive combo path");
         addHudToggle(automationDefense, "antiCollision", "Collision guard", "Avoid unsafe close-range collisions");
         addHudToggle(automationDefense, "antiCollisionPauseCombat", "Pause combat for collision", "Let collision safety temporarily take priority over combat output");
         addHudToggle(automationDefense, "shieldDefense", "Shield defense", "Face Polearm and turret pressure with the defensive gear path");
@@ -4743,37 +4740,15 @@ const KITTY_KLIENT_VERSION = "7.0.38";
         const actions = addHudSection(combatPage, "Gear & boost controls");
         addHudToggle(actions, "bullHelmet", "Bull helmet", "Equip Bull and the damage tail on a ready melee swing, including safe nearby-animal farming; it immediately yields to danger and higher-priority gear");
         addHudToggle(actions, "tankRightClick", "Smart Tank breaks", "On either click, queue Tank only for each loaded swing tick when that click's weapon can reach a nearby player-built breakable. Right click keeps Shield defense; left click stays on the main weapon and never uses Tank while an enemy, mob, boss, or Treasure is in its attack path.");
-        addHudToggle(actions, "instaKill", "R insta", "R manually reverses Polearm/Katana + Great Hammer with Turret and Bull; other kits use the combo planner. Without a target, uses mouse aim");
-        addHudToggle(actions, "autoInsta", "Auto Insta", "Continuously watches the nearest enemy and fires at the first lethal tick: shield-safe contact, ready primary/secondary/Turret, and enough full-health damage. Left-click and Shift+click remain available");
+        addHudToggle(actions, "autoInsta", "Insta", "One combo planner: automatically attacks a ready lethal opportunity. R requests a combo manually. Turning this off disables both; normal attacks still work");
         addHudToggle(actions, "autoAim", "Kitty target aim", "While left click is held, aim at the nearer hostile player or active animal without changing out of the main weapon. Accessories follow fixed Kitty's close-target and danger rules.");
         addHudToggle(actions, "autoBarbarian", "Auto Barbarian", "On a confirmed nonlethal enemy main swing, use Barbarian Armor for the retaliation tick. It yields to projectile, sync, Musket, trap, and lethal threats.");
         addHudToggle(actions, "autoSpin", "Auto Spin", "Other players see a continuous rotation while your local player stays aimed at the mouse. Attacks and placements use their exact required angle for one tick, then resume spinning.");
         addHudSlider(actions, "autoSpinSpeed", "Auto Spin speed", "Degrees per second sent to other players");
-        addHudToggle(actions, "soldierPredictInsta", "Soldier Predict Insta", "Account-only: learns each trapped enemy's observed Soldier-off timing and starts a ready Insta on the confirmed predicted release tick");
-        addHudToggle(actions, "autoTrapInsta", "Owned-trap insta", "Full-insta a nearby caught enemy; every Great Hammer Insta attempts a legal spike after the combo, preferring target contact");
-        addHudToggle(actions, "trapKnockbackStrike", "Trap knockback strike", "Swing a ready melee primary when its predicted knockback line lands an enemy in your or an ally's trap; adds a ready Turret shot when possible");
-        addHudToggle(actions, "autoSpikeInsta", "Spike-tick strike", "Ping-timed Turret lead-in, then Bull + Polearm/Katana on predicted allied-spike contact");
-        addHudToggle(actions, "instaSync", "Insta sync", "Fast-syncs valid shots with allied projectiles and freshly fired allied placeable Turrets, leading slightly for timer jitter");
         addHudToggle(actions, "boostBreak", "Shift + F boost-break", "Place and boost forward, snap 180° for each destroy swing, then instantly face forward again");
 
-        const kittyInstas = addHudSection(combatPage, "Kitty Insta library");
-        addHudToggle(kittyInstas, "autoBowUpgradeInsta", "Bow Upgrade Insta", "R prefers a ready close-range normal Insta and chains the upgrade shots only when compatible; otherwise a fully ready Bow → Crossbow → Musket run is the ranged fallback. Friendly and personal-turret shots can trigger it too");
-        addHudToggle(kittyInstas, "reverseInsta", "Reverse R order", "Prefers Turret + secondary before Bull + primary. R always uses reverse for Polearm/Katana + Great Hammer with Turret and Bull, regardless of this toggle; Shift+R uses the Crossbow/Musket boost Insta");
-        addHudToggle(kittyInstas, "oneTickInsta", "One-Tick Insta", "Shift+P toggles the secondary-first one-server-tick combo; projectile timing is prediction-adjusted");
-        addHudToggle(kittyInstas, "sevenShameInsta", "7-Shame Insta", "When the nearest enemy's server-reported Shame count is exactly 7, fire a fully ready lethal Insta. It stays off when that count is unavailable.");
-        addHudToggle(kittyInstas, "appleInsta", "Apple Insta", "Automatically uses Turret + Great Hammer, then Bull + Polearm against a nearby Soldier-helmet target only when the Hammer landing lane has open space");
-        addHudToggle(kittyInstas, "bleedInsta", "Bleed Insta", "Automatically runs the variant-damage secondary-first combo against a vulnerable non-Soldier target");
-        addHudToggle(kittyInstas, "knockbackInsta", "Knockback Insta", "Predicts whether the opening hit pushes a target into an allied spike, then commits the Polearm finisher");
-        addHudToggle(kittyInstas, "primaryKnockbackTick", "Primary Knockback Tick", "On the exact predicted push edge, use Bull + a ready melee primary only when its knockback corridor contacts an allied spike. It skips caught targets, but queues a confirmed final trap break for the predicted release tick.");
-        addHudToggle(kittyInstas, "hammerTurretKnockbackTick", "Hammer → Turret → Primary Tick", "Predict a combined Great Hammer and primary push lane into an allied spike, then run Tank + Hammer, Turret, and Bull + primary as separate server phases");
-        addHudToggle(kittyInstas, "hammerTrapKnockbackTick", "Hammer Trap-Break Tick", "One-hit the trap holding an enemy with Tank + Great Hammer, then use Bull + primary on the release edge to knock them into a hostile spike lane");
-        addHudToggle(kittyInstas, "spikeSync", "Base Spike Sync", "Place every legal contact spike around an in-range enemy, then use Bull + primary and a next-tick Turret follow-up. Does not use Tank gear");
-        addHudToggle(kittyInstas, "spikeSyncHammer", "Spike Sync Hammer", "Find one Great Hammer angle that hits both an enemy and a one-hit breakable, place a legal contact spike, then stack ready Turret and primary damage");
-        addHudToggle(kittyInstas, "velTickInsta", "VelTick Insta", "T watches the predicted 220–245px window, leads with Turret, then sends Bull + Polearm on the next tick");
-        addHudToggle(kittyInstas, "tankPredictInsta", "Tank Vel Predict RevInsta", "Prioritizes Turret → main against a nearby exposed target. Learns Tank timing from any opponent, rejects stale or inconsistent windows, and aligns Bull + main with the predicted Turret arrival. Also uses next-hat signals and fresh movement reversals.");
-        addHudToggle(kittyInstas, "polearmAids", "Polearm Aids", "Against a target in your or an ally's trap: Tank + Great Hammer, then Bull + Polearm and a legal contact spike");
-        addHudToggle(kittyInstas, "autoPushInsta", "Auto Push", "Uses far-point alignment and close-point steering within 250 pixels; pauses while movement keys are held");
-        addHudToggle(kittyInstas, "boostSpikeKill", "Boost + Spike", "G uses x-RedDragon's 80 ms pattern: two side spikes, two close diagonals within 150 units, then a forward Boost Pad. Kitty skips any illegal slot.");
+        addHudToggle(actions, "autoPushInsta", "Auto Push", "Uses far-point alignment and close-point steering within 250 pixels; pauses while movement keys are held");
+        addHudToggle(actions, "boostSpikeKill", "Boost + Spike", "G uses x-RedDragon's 80 ms pattern: two side spikes, two close diagonals within 150 units, then a forward Boost Pad. Kitty skips any illegal slot.");
 
         const combatStatistics = addHudSection(combatPage, "Session combat statistics");
         const combatStatsGrid = document.createElement("div");
@@ -4903,7 +4878,6 @@ const KITTY_KLIENT_VERSION = "7.0.38";
         addHudNumber(tuning, "soldierRange", "Soldier radius", "Pixels");
         addHudNumber(tuning, "combatRange", "Combat radius", "Tail behavior cutoff");
         addHudNumber(tuning, "gearHoldTicks", "Gear restore grace", "Ticks allowed for delayed equipment-state reconciliation");
-        addHudNumber(tuning, "antiBoostRange", "Boost-insta radius", "Pixels");
         addHudNumber(tuning, "antiCollisionRange", "Collision guard radius", "Maximum distance for Teleporter and hostile-spike prediction");
         addHudNumber(tuning, "reactionMs", "Reaction scan", "Milliseconds between live-state checks");
 
@@ -4926,7 +4900,6 @@ const KITTY_KLIENT_VERSION = "7.0.38";
         addHudToggle(messages, "cleanupCompleteChat", "Cleanup completion", "Send Nice and tidy! when cleanup finishes");
         addHudToggle(messages, "boostChat", "Shift + F chat", "Send shuffled speed messages during boost-break");
         addHudToggle(messages, "materialReply", "Material request reply", "Tell teammates and friends your current wood and stone when they ask for materials");
-        addHudToggle(messages, "meowChainInsta", "Meow chain insta", "If a recently attacking Kitty teammate says Meow!, start your own ready in-range insta; completion uses the Insta Meow toggle");
         addHudToggle(messages, "modReplyChat", "Mod-question reply", "Reply with Kitty's fixed version message when another player asks about mods or clients");
         addHudToggle(messages, "enemyTrapChat", "Enemy trapped message", "Send Ha, I have you in my trap! for trapped enemies");
         addHudToggle(messages, "friendTrapChat", "Friend trapped message", "Send Uh oh! let me free you! for trapped friends");
@@ -11349,7 +11322,7 @@ let __mmSoldierRange = 400,
   __mmAutoAcceptTeamRequestsEnabled = !1,
   __mmAutoDeclineTeamRequestsEnabled = !1,
   __mmAntiBoostEnabled = !1,
-  __mmAntiBoostInstaEnabled = !0,
+  __mmAntiBoostInstaEnabled = !1,
   __mmAntiSyncEnabled = !0,
   __mmAntiTrollEnabled = !1,
   __mmAntiCollisionEnabled = !0,
@@ -11368,7 +11341,7 @@ let __mmSoldierRange = 400,
   __mmTrapKnockbackStrikeEnabled = !1,
   __mmTurretStealEnabled = !0,
   __mmSpikeGearCounterEnabled = !0,
-  __mmSevenShameInstaEnabled = !0,
+  __mmSevenShameInstaEnabled = !1,
   __mmDashMovementEnabled = !0,
   __mmMusketRechargeEnabled = !0,
   __mmAutoPurchaseEnabled = !1,
@@ -11426,28 +11399,28 @@ let __mmSoldierRange = 400,
   __mmInstaUiEnabled = !0,
   __mmAutoInstaEnabled = !0,
   __mmAutoAimEnabled = !0,
-  __mmSoldierPredictInstaEnabled = !0,
-  __mmAutoBowUpgradeInstaEnabled = !0,
-  __mmReverseInstaEnabled = !0,
-  __mmOneTickInstaEnabled = !0,
-  __mmAppleInstaEnabled = !0,
-  __mmBleedInstaEnabled = !0,
-  __mmKnockbackInstaEnabled = !0,
-  __mmPrimaryKnockbackTickEnabled = !0,
-  __mmHammerTurretKnockbackTickEnabled = !0,
-  __mmHammerTrapKnockbackTickEnabled = !0,
-  __mmSpikeSyncEnabled = !0,
-  __mmSpikeSyncHammerEnabled = !0,
-  __mmVelTickInstaEnabled = !0,
-  __mmTankPredictInstaEnabled = !0,
+  __mmSoldierPredictInstaEnabled = !1,
+  __mmAutoBowUpgradeInstaEnabled = !1,
+  __mmReverseInstaEnabled = !1,
+  __mmOneTickInstaEnabled = !1,
+  __mmAppleInstaEnabled = !1,
+  __mmBleedInstaEnabled = !1,
+  __mmKnockbackInstaEnabled = !1,
+  __mmPrimaryKnockbackTickEnabled = !1,
+  __mmHammerTurretKnockbackTickEnabled = !1,
+  __mmHammerTrapKnockbackTickEnabled = !1,
+  __mmSpikeSyncEnabled = !1,
+  __mmSpikeSyncHammerEnabled = !1,
+  __mmVelTickInstaEnabled = !1,
+  __mmTankPredictInstaEnabled = !1,
   __mmHammerPolearmInstaEnabled = !1,
-  __mmPolearmAidsEnabled = !0,
+  __mmPolearmAidsEnabled = !1,
   __mmAutoPushInstaEnabled = !0,
-  __mmAutoPushFinisherEnabled = !0,
+  __mmAutoPushFinisherEnabled = !1,
   __mmAutoPushVisualsEnabled = !0,
   __mmBoostSpikeEnabled = !0,
-  __mmAutoTrapInstaEnabled = !0,
-  __mmAutoSpikeInstaEnabled = !0,
+  __mmAutoTrapInstaEnabled = !1,
+  __mmAutoSpikeInstaEnabled = !1,
   __mmSmartAutoPlaceEnabled = window.__KittySmartAutoPlace !== !1,
   __mmSmartPreplaceEnabled = !0,
   __mmSmartMultiPlaceEnabled = !0,
@@ -11473,12 +11446,12 @@ let __mmSoldierRange = 400,
   __mmAutoSpikeKillEnabled = !1,
   __mmAutoStealEnabled = !1,
   __mmAntiInstaEnabled = !0,
-  __mmInstaSyncEnabled = !0,
+  __mmInstaSyncEnabled = !1,
   __mmBoostBreakEnabled = !0,
   __mmBoostChatEnabled = !0,
   __mmKillMessageEnabled = !0,
   __mmMaterialReplyEnabled = !0,
-  __mmMeowChainInstaEnabled = !0,
+  __mmMeowChainInstaEnabled = !1,
   __mmInstaChatEnabled = !0,
   __mmBushChatEnabled = !0,
   __mmFriendAddedChatEnabled = !0,
@@ -14048,11 +14021,11 @@ function __mmPressConfiguredAction(__mmAction, __mmEvent) {
   if (__mmAction === "primaryAttack")
     return __mmStartConfiguredPrimary(__mmEvent, !1);
   if (__mmAction === "clickBoostInsta")
-    return __mmStartConfiguredPrimary(__mmEvent, !0);
+    return __mmStartConfiguredPrimary(__mmEvent, !1);
   if (__mmAction === "secondaryAttack")
     return __mmStartConfiguredSecondary(__mmEvent);
   if (__mmAction === "normalInsta") return __mmHandleInstaHotkey();
-  if (__mmAction === "boostInsta") return __mmBoostInsta.start();
+  if (__mmAction === "boostInsta") return __mmHandleInstaHotkey();
   if (__mmAction === "oneTickInsta") return (__mmToggleOneTickInsta(), !0);
   if (__mmAction === "velTickInsta") return (__mmToggleVelTickInsta(), !0);
   if (__mmAction === "boostSpike") return (__mmStartBoostSpike(), !0);
@@ -14654,21 +14627,11 @@ function __mmRunServerTacticalTick() {
 
 
 
-    __mmOperationStage("tick-priority-reverse", function () {
-      __mmUpdatePriorityReversePolearmInsta();
-    });
-    __mmOperationStage("tick-combat-sync", function () {
-      (__mmUpdateInstaSync(), __mmUpdateAutoSpikeInsta());
-    });
     __mmOperationStage("tick-combat", function () {
-      (__mmUpdateDedicatedKnockbackTicks(),
-        __mmUpdateAutoSteal(),
-        __mmUpdateTrapKnockbackStrike(),
+      (__mmUpdateAutoSteal(),
         __mmUpdateKittyInstas(),
-        __mmSoldierPredictInsta.update(),
-        __mmUpdateAutoTrapInsta(),
-        __mmUpdateAntiBoostInsta(),
-        __mmUpdateSevenShameInsta(),
+        
+        
         __mmUpdateAutoBarbarian(),
         __mmUpdateSpikeGearCounter(),
         __mmUpdateBushMode(),
@@ -14808,37 +14771,17 @@ function __mmRunOperationPipeline() {
 
 
 
-    __mmOperationStageDue(
-      "priority-reverse",
-      __mmActiveCombat ? (__mmPressure >= 2 ? 18 : 12) : 32,
-      __mmNow,
-    ) &&
-      __mmOperationStage("priority-reverse", function () {
-        __mmUpdatePriorityReversePolearmInsta();
-      });
 
 
-    __mmOperationStageDue(
-      "combat-sync",
-      __mmActiveCombat ? (__mmPressure >= 2 ? 18 : 12) : 36,
-      __mmNow,
-    ) &&
-      __mmOperationStage("combat-sync", function () {
-        (__mmUpdateInstaSync(), __mmUpdateAutoSpikeInsta());
-      });
     __mmOperationStageDue(
       "combat-insta",
       __mmActiveCombat ? (__mmPressure >= 2 ? 18 : 12) : 32,
       __mmNow,
     ) &&
       __mmOperationStage("combat-insta", function () {
-        (__mmUpdateDedicatedKnockbackTicks(),
-          __mmUpdateAutoSteal(),
-          __mmUpdateTrapKnockbackStrike(),
+        (__mmUpdateAutoSteal(),
           __mmUpdateKittyInstas(),
-          __mmUpdateAutoTrapInsta(),
-          __mmUpdateAntiBoostInsta(),
-          __mmUpdateSevenShameInsta(),
+          
           __mmUpdateSpikeGearCounter(),
           __mmUpdateBushMode(),
 
@@ -17203,6 +17146,8 @@ const __mmInsta = {
   start(__mmOptions = {}) {
     if (
       __mmInstaTestingModeEnabled ||
+      !__mmInstaUiEnabled ||
+      (!__mmOptions.manualHotkey && !__mmOptions.singlePlanner) ||
       this.state !== "idle" ||
 
 
@@ -32122,8 +32067,11 @@ window.addEventListener("KittyKlientAccountState", function (__mmEvent) {
   __mmEnforceAccountFeatureLocks();
   __mmPublishHudState();
 });
+const __mmRetiredInstaKeys = new Set(["soldierPredictInsta", "autoBowUpgradeInsta", "reverseInsta", "oneTickInsta", "sevenShameInsta", "appleInsta", "bleedInsta", "knockbackInsta", "primaryKnockbackTick", "hammerTurretKnockbackTick", "hammerTrapKnockbackTick", "spikeSync", "spikeSyncHammer", "velTickInsta", "tankPredictInsta", "polearmAids", "autoTrapInsta", "autoSpikeInsta", "instaSync", "antiBoostInsta", "trapKnockbackStrike", "autoPushFinisher", "meowChainInsta"]);
 function __mmSetHudToggle(__mmKey, __mmValue) {
-  let __mmEnabled = !!__mmValue;
+  // Legacy saves, imports and direct commands cannot revive retired planners.
+  if (__mmKey === "instaKill") return;
+  let __mmEnabled = !__mmRetiredInstaKeys.has(__mmKey) && !!__mmValue;
   if (__mmEnabled && !__mmAccountFeatureAllowed(__mmKey))
     __mmEnabled = !1;
   if (__mmKey === "autoHeal") return void __mmSetAutoHeal(__mmEnabled);
@@ -32368,9 +32316,8 @@ function __mmSetHudToggle(__mmKey, __mmValue) {
   }
   else if (__mmKey === "autoInsta") {
     ((__mmAutoInstaEnabled = __mmEnabled),
-      !__mmEnabled &&
-        __mmInsta.automatic &&
-        __mmInsta.cancel("auto-insta-disabled"));
+      (__mmInstaUiEnabled = __mmEnabled),
+      !__mmEnabled && __mmInsta.cancel("insta-disabled"));
   }
   else if (__mmKey === "autoAim") {
     __mmAutoAimEnabled = __mmEnabled;
@@ -37559,24 +37506,6 @@ function __mmHandleInstaHotkey() {
       __mmAutoBowUpgradeInstaEnabled &&
       __mmBowUpgradeBlockReason == null
     );
-  if (__mmBushModeRequested && __mmBushModeEnabled) {
-    const __mmTarget = __mmInsta.nearestEnemy();
-    if (
-      __mmTarget &&
-      __mmBoostInsta.start({
-        targetSid: __mmTarget.sid,
-        ambush: !0,
-        manualBush: !0,
-      })
-    )
-      return !0;
-  }
-
-
-
-
-
-
   const __mmCombatAutoPlan = __mmInstaUiEnabled
     ? __mmInsta.autoPlan(!0)
     : null;
@@ -37664,44 +37593,9 @@ function __mmInstaHotkeyBlockReason(__mmProfile) {
     return "busy with " + String(__mmActionOwner || "another action");
   return String(__mmInsta.reason || "kit validation failed");
 }
-function __mmToggleOneTickInsta() {
-  ((__mmOneTickInstaEnabled = !__mmOneTickInstaEnabled),
-    __mmBushStatus(
-      "One-Tick Insta: " + (__mmOneTickInstaEnabled ? "on" : "off"),
-    ),
-    __mmPublishHudState());
-}
-function __mmToggleVelTickInsta() {
-  ((__mmVelTickInstaEnabled = !__mmVelTickInstaEnabled),
-    !__mmVelTickInstaEnabled && __mmStopVelTickInsta("hotkey disabled"),
-    __mmBushStatus(
-      "VelTick Insta: " + (__mmVelTickInstaEnabled ? "on" : "off"),
-    ),
-    __mmPublishHudState());
-}
-function __mmHandleBushCombatClick(__mmEvent) {
-  if (!__mmBushModeRequested || !__mmBushModeEnabled) return !1;
-  const __mmTarget = __mmInsta.nearestEnemy(),
-    __mmPrimary = __mmInsta.supportedPrimary(),
-    __mmCanAmbush = !!(
-      __mmTarget &&
-      __mmPrimary != null &&
-      __mmInsta.inRange(__mmPrimary, __mmTarget) &&
-      __mmBoostInsta.requirements(__mmTarget, !0) &&
-      __mmActionCanPreempt("boostInsta")
-    );
-  if (__mmCanAmbush)
-    __mmBoostInsta.start({
-      targetSid: __mmTarget.sid,
-      ambush: !0,
-    });
-  else __mmUpdateBushMode();
-
-
-
-  (__mmEvent.preventDefault(), __mmEvent.stopImmediatePropagation());
-  return !0;
-}
+function __mmToggleOneTickInsta() { return false; }
+function __mmToggleVelTickInsta() { return false; }
+function __mmHandleBushCombatClick(__mmEvent) { return false; }
 function __mmTemporaryHatOverlay() {
   return (
     !v ||
@@ -40367,11 +40261,13 @@ function __mmStartAutoHeal() {
   __mmEnsureOperationPipeline();
 }
 function __mmUpdateAutoInsta() {
+  if (__mmInsta.advanceReverse()) return true;
   const __mmPlan = __mmInsta.autoPlan();
   return !!(
     __mmPlan &&
     __mmInsta.start({
       automatic: !0,
+      singlePlanner: !0,
       targetSid: __mmPlan.target.sid,
       profile: __mmPlan.profile,
       profileSource: "Auto Insta " + __mmPlan.profile,
@@ -42687,69 +42583,6 @@ function __mmUpdateKittyInstas() {
     return;
   __mmAutoPushInstaEnabled && __mmUpdateAutoPushWatchVisual();
   __mmStopAutoPushSetup("no trapped auto-push target");
-  const __mmEnemy = __mmNearestEnemy();
-  if (!__mmEnemy) {
-    (__mmStopVelTickInsta("no target"),
-      __mmStopAutoPushSetup("no target"));
-    return;
-  }
-  const __mmNow = Date.now(),
-    __mmPrediction = __mmPredictEnemyNextTick(__mmEnemy, __mmNow),
-    __mmPolearmHammer = __mmKittyPolearmHammerLoadout(),
-    __mmEnemyTrap = __mmAutoSpikeSpamTrapForEnemy(__mmEnemy);
-
-
-
-  if (__mmTankPredictInstaEnabled) {
-    const __mmTankPlan = __mmTankPredictInsta.plan(__mmEnemy, __mmNow);
-    if (__mmTankPlan && __mmTankPredictInsta.launch(__mmEnemy, __mmTankPlan)) return;
-    const __mmExposedPlan = __mmTurretMainSync.plan(__mmEnemy, __mmNow);
-    if (__mmExposedPlan && __mmTurretMainSync.launch(__mmEnemy, __mmExposedPlan)) return;
-  }
-  if (
-    __mmHammerPolearmInstaEnabled &&
-    __mmHammerPolearmInsta.start(__mmEnemy)
-  )
-    return;
-  if (
-    __mmPolearmAidsEnabled &&
-    __mmPolearmHammer &&
-    __mmEnemyTrap &&
-    __mmStartKittyProfile(
-      "polearmAids",
-      __mmEnemy,
-      "enemy caught in allied trap",
-    )
-  )
-    return;
-  if (
-    __mmKnockbackInstaEnabled &&
-    __mmPolearmHammer &&
-    __mmKittyKnockbackContact(__mmEnemy, __mmPrediction) &&
-    __mmStartKittyProfile(
-      "knockback",
-      __mmEnemy,
-      "predicted knockback into allied spike",
-    )
-  )
-    return;
-  if (
-    __mmAppleInstaEnabled &&
-    __mmPolearmHammer &&
-    Number(__mmEnemy.skinIndex) === 6 &&
-    __mmAppleInstaOpenLane(__mmEnemy) &&
-    __mmStartKittyProfile("apple", __mmEnemy, "Soldier-hat Apple Insta")
-  )
-    return;
-  if (
-    __mmBleedInstaEnabled &&
-    __mmKittyBleedReady(__mmEnemy) &&
-    __mmStartKittyProfile("bleed", __mmEnemy, "high-variant Bleed Insta")
-  )
-    return;
-  __mmVelTickInstaEnabled
-    ? __mmUpdateVelTickInsta(__mmEnemy, __mmPrediction)
-    : __mmStopVelTickInsta("VelTick disabled");
 }
 function __mmStartKittyInstas() {
   __mmEnsureOperationPipeline();
