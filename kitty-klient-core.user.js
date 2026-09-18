@@ -2,7 +2,7 @@
 // @name         kitty klient
 // @author       Coder Guy
 // @credits       random4ik — bot script
-// @version      7.0.37
+// @version      7.0.38
 // @icon         https://cdn.discordapp.com/icons/1540876076224356437/ac27c0ce87c4c46b407ebca78e150aeb.webp?size=2048
 // @description  kitty klient — a MooMoo.io client with adaptive zoom, fast autoheal, gear automation, combat tools, predictive placement, visual markers, CC0 background music, manual quick builds, and a fully rebindable keyboard/mouse controls HUD.
 // @match        *://moomoo.io/*
@@ -267,7 +267,7 @@
     const AUTO_PUSH_FINISHER_MIGRATION_KEY = "kitty-klient-auto-push-finisher-v1";
     const ASSASSIN_RANGE_AUTO_MIGRATION_KEY = "kitty-klient-assassin-range-auto-v1";
     const TAB_SYNC_BRIDGE_KEY = "kitty-klient-tab-sync-bridge-v1";
-const KITTY_KLIENT_VERSION = "7.0.37";
+const KITTY_KLIENT_VERSION = "7.0.38";
     const KITTY_SHARED_STORAGE_APPLIED_EVENT = "KittyMooMooSharedStorageApplied";
 
 
@@ -50306,55 +50306,131 @@ function __mmSmartEnemyPlacementPotentials(
   }
   return __mmResult;
 }
+// Bounded, side-effect-free placement forecast. Velocities are world units/ms.
+// Damage is credited once per structure: repeated contact without a server
+// damage acknowledgement must not manufacture a lethal chain.
+function __mmSimulateSpikeChain(start, obstacles, options = {}) {
+  let x = Number(start.x), y = Number(start.y),
+    vx = Number(start.vx) || 0, vy = Number(start.vy) || 0;
+  const radius = Math.max(1, Number(start.scale) || 35),
+    decel = Number(options.decel) > 0 && Number(options.decel) < 1
+      ? Number(options.decel) : 0.993,
+    contacts = [], credited = new Set(),
+    result = { contacts, rawDamage: Math.max(0, Number(start.damage) || 0),
+      trapped: false, stopped: false, truncated: false, x, y, elapsedMs: 0 };
+  if (![x, y, vx, vy].every(Number.isFinite)) return null;
+  // Fail closed instead of ignoring a blocker in a crowded scene.
+  if (obstacles.length > 96) return null;
+  for (let step = 0; step < 80; step++) {
+    const dt = 8, dx = vx * dt, dy = vy * dt, length2 = dx * dx + dy * dy;
+    let first = null, firstT = Infinity;
+    for (const obstacle of obstacles) {
+      const ox = Number(obstacle.x), oy = Number(obstacle.y),
+        r = radius + Number(obstacle.scale),
+        rx = x - ox, ry = y - oy, c = rx * rx + ry * ry - r * r,
+        dot = rx * dx + ry * dy;
+      if (![ox, oy, r].every(Number.isFinite) || r <= radius) continue;
+      let t;
+      if (c <= 0) {
+        // Already separating from a resolved surface is not a fresh impact.
+        if (dot >= 0 && !obstacle.trap) continue;
+        t = 0;
+      } else {
+        if (length2 <= 1e-12 || dot >= 0) continue;
+        const discriminant = dot * dot - length2 * c;
+        if (discriminant < 0) continue;
+        t = (-dot - Math.sqrt(discriminant)) / length2;
+        if (t < 0 || t > 1) continue;
+      }
+      if (t < firstT || (t === firstT && obstacle.trap)) {
+        first = obstacle; firstT = t;
+      }
+    }
+    if (!first) { x += dx; y += dy; }
+    else {
+      x += dx * firstT; y += dy * firstT;
+      const angle = Math.atan2(y - first.y, x - first.x),
+        nx = Math.cos(angle), ny = Math.sin(angle),
+        distance = radius + first.scale + 0.01;
+      x = first.x + nx * distance; y = first.y + ny * distance;
+      if (!credited.has(first)) {
+        credited.add(first);
+        result.rawDamage += Math.max(0, Number(first.damage) || 0);
+        contacts.push({ obstacle: first, atMs: step * dt + dt * firstT });
+      }
+      if (first.trap || first.teleport) {
+        result.trapped = !!first.trap; result.stopped = true;
+        vx = vy = 0;
+      } else {
+        vx *= 0.75; vy *= 0.75;
+        // Remove velocity into a solid surface; preserve tangential sliding.
+        const inward = Math.min(0, vx * nx + vy * ny);
+        vx -= inward * nx; vy -= inward * ny;
+        if (first.spike || first.damage > 0) { vx += nx * 1.5; vy += ny * 1.5; }
+      }
+    }
+    const friction = Math.pow(decel, dt);
+    vx *= friction; vy *= friction;
+    result.elapsedMs = (step + 1) * dt;
+    if (result.stopped || Math.hypot(vx, vy) < 0.01) {
+      result.stopped = true; break;
+    }
+    if (step === 79) result.truncated = true;
+  }
+  result.x = x; result.y = y;
+  return result;
+}
 function __mmSmartKnockIntoHazard(
   __mmCandidate,
   __mmPrediction,
   __mmEnemyScale,
   __mmHazards,
+  __mmEnemy,
 ) {
-  const __mmDirection = Math.atan2(
-      __mmPrediction.futureY - __mmCandidate.y,
-      __mmPrediction.futureX - __mmCandidate.x,
-    ),
-    __mmEndX = __mmPrediction.futureX + Math.cos(__mmDirection) * 170,
-    __mmEndY = __mmPrediction.futureY + Math.sin(__mmDirection) * 170;
-  let __mmBest = null,
-    __mmBestAlong = Infinity;
-  for (
-    let __mmHazardIndex = 0;
-    __mmHazardIndex < __mmHazards.length;
-    __mmHazardIndex++
-  ) {
-    const __mmHazard = __mmHazards[__mmHazardIndex],
-      __mmDx = Number(__mmHazard.object.x) - __mmPrediction.futureX,
-      __mmDy = Number(__mmHazard.object.y) - __mmPrediction.futureY,
-      __mmAlong =
-        __mmDx * Math.cos(__mmDirection) +
-        __mmDy * Math.sin(__mmDirection),
-      __mmRadius = __mmEnemyScale + __mmHazard.scale + 3;
-    if (
-      __mmAlong < 0 ||
-      __mmAlong > 180 ||
-      __mmSegmentDistanceSquared(
-        __mmPrediction.futureX,
-        __mmPrediction.futureY,
-        __mmEndX,
-        __mmEndY,
-        Number(__mmHazard.object.x),
-        Number(__mmHazard.object.y),
-      ) >
-        __mmRadius * __mmRadius ||
-      __mmAlong >= __mmBestAlong
-    )
-      continue;
-    ((__mmBestAlong = __mmAlong),
-      (__mmBest = {
-        hazard: __mmHazard,
-        along: __mmAlong,
-        bounce: !!(__mmHazard.spike && __mmAlong >= 50 && __mmAlong <= 150),
-      }));
+  const x = Number(__mmPrediction.x), yPos = Number(__mmPrediction.y),
+    angle = Math.atan2(yPos - __mmCandidate.y, x - __mmCandidate.x),
+    radius = __mmEnemyScale + __mmCandidate.scale,
+    nx = Math.cos(angle), ny = Math.sin(angle);
+  if (!Number.isFinite(radius) || Math.hypot(x - __mmCandidate.x, yPos - __mmCandidate.y) > radius + 5)
+    return null;
+  const obstacles = [], seen = new Set();
+  for (const object of __mmObjectsNear(x, yPos, 800)) {
+    if (!object || !object.active || seen.has(object)) continue;
+    seen.add(object);
+    const data = b && b.list && b.list[object.id],
+      hostile = __mmSpikeHostileToEnemy(object, __mmEnemy),
+      trap = !!(object.trap || (data && data.trap)),
+      cactus = !!(object.isCactus || /cactus/i.test(String(data && data.name || ""))),
+      damage = hostile || cactus ? __mmAutoSpikeKillDamage(object) : 0;
+    if (trap && !hostile) continue;
+    if (!trap && !damage && !object.teleport &&
+        (object.ignoreCollision || (data && data.ignoreCollision))) continue;
+    obstacles.push({ x: Number(object.x), y: Number(object.y),
+      scale: __mmThreatObjectScale(object), damage, trap,
+      teleport: !!object.teleport,
+      hazard: { object, trap, spike: damage > 0, scale: __mmThreatObjectScale(object) } });
   }
-  return __mmBest;
+  // Include the new spike as a collision surface but do not credit its damage
+  // twice if another spike pushes the target back onto it.
+  obstacles.push({ x: __mmCandidate.x, y: __mmCandidate.y,
+    scale: __mmCandidate.scale, damage: 0, spike: true, trap: false });
+  const forecast = __mmSimulateSpikeChain({
+    x: __mmCandidate.x + nx * (radius + 0.01),
+    y: __mmCandidate.y + ny * (radius + 0.01), scale: __mmEnemyScale,
+    vx: (Number(__mmPrediction.vx) || 0) * 0.75 + nx * 1.5,
+    vy: (Number(__mmPrediction.vy) || 0) * 0.75 + ny * 1.5,
+    damage: Number(__mmCandidate.data.dmg) || 0,
+  }, obstacles, { decel: y && y.playerDecel });
+  if (!forecast) return null;
+  const useful = forecast.contacts.filter(contact => contact.obstacle.hazard &&
+    (contact.obstacle.trap || contact.obstacle.damage > 0));
+  if (!useful.length) return null;
+  const damage = forecast.rawDamage * __mmAutoPushTargetDamageMultiplier(__mmEnemy),
+    health = Number(__mmEnemy && __mmEnemy.health),
+    lethal = Number.isFinite(health) && health > 0 && damage >= health;
+  return { ...forecast, hazard: useful[0].obstacle.hazard,
+    bounce: useful.some(contact => contact.obstacle.damage > 0),
+    damage, lethal, escaped: !forecast.trapped && !lethal };
 }
 function __mmSmartScoreCandidate(
   __mmCandidate,
@@ -50497,6 +50573,7 @@ function __mmSmartScoreCandidate(
     if (
       __mmIsSpike &&
       __mmSmartKnockbackChainEnabled &&
+      !__mmTrap &&
       __mmCurrentDistance <= __mmTouch + 5
     ) {
       const __mmKnock = __mmSmartKnockIntoHazard(
@@ -50504,21 +50581,22 @@ function __mmSmartScoreCandidate(
         __mmPrediction,
         __mmEnemyScale,
         __mmHazards,
+        __mmEnemy,
       );
       if (__mmKnock) {
-        ((__mmCandidate.points += __mmKnock.hazard.trap
-          ? 2.5
-          : __mmKnock.bounce
-            ? 5
-            : 3),
+        ((__mmCandidate.points += __mmKnock.lethal
+          ? 6
+          : __mmKnock.trapped
+            ? 2.5
+            : 1),
           (__mmCandidate.priority = !0),
           (__mmCandidate.knockInto = __mmKnock),
           __mmCandidate.reasons.push(
-            __mmKnock.hazard.trap
-              ? "knock into trap"
-              : __mmKnock.bounce
-                ? "spike bounce chain"
-                : "spike chain",
+            __mmKnock.lethal
+              ? "predicted lethal spike chain"
+              : __mmKnock.trapped
+                ? "knock into trap"
+                : "nonlethal spike chain; escape possible",
           ));
       }
     }
@@ -60565,6 +60643,10 @@ window.__KittyGameRuntime = {
           : null,
         bushMode: __mmBushModeEnabled === !0,
         assassinAutomation: __mmAssassinAutomationEnabled === !0,
+        movementGear: __mmMovementGearEnabled === !0,
+        soldierAuto: __mmSoldierAutoEnabled === !0,
+        passiveSpikeAvoidance: __mmPassiveSpikeAvoidanceEnabled === !0,
+        combatRange: Number(__mmCombatRange),
       };
     } catch (__mmGearContextError) {
       return null;
