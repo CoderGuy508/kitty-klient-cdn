@@ -2,7 +2,7 @@
 // @name         kitty klient
 // @author       Coder Guy
 // @credits       random4ik — bot script
-// @version      7.0.39
+// @version      7.0.40
 // @icon         https://cdn.discordapp.com/icons/1540876076224356437/ac27c0ce87c4c46b407ebca78e150aeb.webp?size=2048
 // @description  kitty klient — a MooMoo.io client with adaptive zoom, fast autoheal, gear automation, combat tools, predictive placement, visual markers, CC0 background music, manual quick builds, and a fully rebindable keyboard/mouse controls HUD.
 // @match        *://moomoo.io/*
@@ -267,7 +267,7 @@
     const AUTO_PUSH_FINISHER_MIGRATION_KEY = "kitty-klient-auto-push-finisher-v1";
     const ASSASSIN_RANGE_AUTO_MIGRATION_KEY = "kitty-klient-assassin-range-auto-v1";
     const TAB_SYNC_BRIDGE_KEY = "kitty-klient-tab-sync-bridge-v1";
-const KITTY_KLIENT_VERSION = "7.0.39";
+const KITTY_KLIENT_VERSION = "7.0.40";
     const KITTY_SHARED_STORAGE_APPLIED_EVENT = "KittyMooMooSharedStorageApplied";
 
 
@@ -1610,11 +1610,21 @@ const KITTY_KLIENT_VERSION = "7.0.39";
             kittyCompanionMainSocketClose(reason);
         } catch (_) {}
     }
+    function kittyCompanionBotAccountRequest(path) {
+        if (path !== "/v1/bots/config" && path !== "/v1/bots/relay-ticket")
+            return Promise.reject(new Error("Unsupported bot account request"));
+        // Use the same tab account as Kitty; never hand its session token to
+        // the companion or fall back to another account's shared cookie.
+        return kittyAccountRequest(path, {}, {
+            timeoutMs: path === "/v1/bots/relay-ticket" ? 70000 : 8000
+        });
+    }
     function publishKittyCompanionBridge() {
         const bridge = {
             protocol: KITTY_COMPANION_BRIDGE_PROTOCOL,
             version: "1.0.0",
             kittyVersion: KITTY_KLIENT_VERSION,
+            requestBotAccount: kittyCompanionBotAccountRequest,
             getGameRuntime() {
                 return window.__KittyGameRuntime || null;
             },
@@ -5803,12 +5813,13 @@ const KITTY_KLIENT_VERSION = "7.0.39";
         updateKittyAccountPanel();
     }
 
-    async function kittyAccountRequest(path, body) {
+    async function kittyAccountRequest(path, body, options = {}) {
         const base = kittyAccountApiBase();
         if (!base) throw new Error("Kitty accounts are not connected to their secure service yet.");
         const token = kittyAccountAccessToken(readKittyAccountSession());
         const controller = typeof AbortController === "function" ? new AbortController() : null;
-        const timeout = window.setTimeout(() => controller && controller.abort(), 8000);
+        const timeoutMs = Math.max(1000, Math.min(70000, Number(options.timeoutMs) || 8000));
+        const timeout = window.setTimeout(() => controller && controller.abort(), timeoutMs);
         try {
             const response = await fetch(base + path, {
                 method: "POST",
