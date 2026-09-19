@@ -2,7 +2,7 @@
 // @name         kitty klient
 // @author       Coder Guy
 // @credits       random4ik — bot script
-// @version      7.0.38
+// @version      7.0.39
 // @icon         https://cdn.discordapp.com/icons/1540876076224356437/ac27c0ce87c4c46b407ebca78e150aeb.webp?size=2048
 // @description  kitty klient — a MooMoo.io client with adaptive zoom, fast autoheal, gear automation, combat tools, predictive placement, visual markers, CC0 background music, manual quick builds, and a fully rebindable keyboard/mouse controls HUD.
 // @match        *://moomoo.io/*
@@ -267,7 +267,7 @@
     const AUTO_PUSH_FINISHER_MIGRATION_KEY = "kitty-klient-auto-push-finisher-v1";
     const ASSASSIN_RANGE_AUTO_MIGRATION_KEY = "kitty-klient-assassin-range-auto-v1";
     const TAB_SYNC_BRIDGE_KEY = "kitty-klient-tab-sync-bridge-v1";
-const KITTY_KLIENT_VERSION = "7.0.38";
+const KITTY_KLIENT_VERSION = "7.0.39";
     const KITTY_SHARED_STORAGE_APPLIED_EVENT = "KittyMooMooSharedStorageApplied";
 
 
@@ -12476,6 +12476,9 @@ let __mmTacticalTickRunning = !1,
   __mmTacticalTickLastAt = 0,
   __mmTacticalTickFallbackAt = 0,
   __mmTacticalChannelTick = -1;
+let __mmTacticalCollecting = false, __mmTacticalCommitting = false,
+  __mmTacticalCurrentAction = null;
+const __mmPendingTacticalActions = [];
 const __mmTacticalChannels = Object.create(null),
   __mmTacticalPlacementKeys = new Set();
 const __mmOperationPipelineOrder = Object.freeze([
@@ -13354,17 +13357,11 @@ let __mmMouseAimReturnTimer = 0,
   __mmStateRepairLastReason = "watching",
   __mmStateRepairCount = 0;
 const __mmBreakableHealth = new WeakMap(),
-
-
-
-  __mmBreakableHealthByKey = new Map(),
   __mmRecentPlayerSwings = Object.create(null),
   __mmPlayerToolCooldowns = Object.create(null),
   __mmHatDataById = Object.create(null);
 const __mmRecentLocalBreakableAttacks = [];
-const __mmConfirmedStructureSwings = [], __mmPendingStructureHits = [], __mmStructureSwingPackets = [];
-let __mmStructureSwingSequence = 0;
-let __mmBreakableHealthLastPruneAt = 0;
+const __mmBuildingHits = [], __mmStructureDamageBatches = [];
 const __mmProjectileCooldownStates = new WeakMap();
 let __mmProjectileCooldownLastScanAt = 0;
 const __mmCombatDeltaStacks = Object.create(null);
@@ -13677,24 +13674,91 @@ function __mmResetTacticalChannels(__mmTick = __mmCurrentTacticalTick()) {
     delete __mmTacticalChannels[__mmChannel];
   __mmTacticalPlacementKeys.clear();
 }
+// Resolve whole feature callbacks before they can change gear, select a weapon,
+// aim or attack. A no-op candidate leaves the next candidate free to run.
+function __mmQueueTacticalAction(owner, callback, options = {}) {
+  if (!__mmTacticalCollecting) return callback();
+  __mmPendingTacticalActions.push({ owner, callback,
+    priority: options.priority == null ? __mmActionPriority(owner) : options.priority,
+    emergency: !!options.emergency, maintenance: !!options.maintenance,
+    stage: __mmOperationPipelineStage, order: __mmPendingTacticalActions.length });
+}
+function __mmTacticalMayReplace(current, owner, priority, emergency = false) {
+  if (!current || current.owner === owner) return true;
+  // Routine work may replace only an uncommitted reservation. Emergency
+  // interruption remains available after packets have already left the client.
+  return emergency || (!current.committed && priority > current.priority);
+}
+function __mmFlushTacticalActions() {
+  if (__mmTacticalCommitting) return;
+  __mmTacticalCollecting = false;
+  __mmTacticalCommitting = true;
+  const actions = __mmPendingTacticalActions.splice(0).sort((a, b) =>
+    Number(b.emergency) - Number(a.emergency) ||
+    b.priority - a.priority || a.order - b.order);
+  try {
+    for (const action of actions) {
+      if (!v || !v.alive) break;
+      const winner = __mmTacticalChannels.sequence;
+      if (!action.maintenance && !__mmTacticalMayReplace(winner,
+          action.owner, action.priority, action.emergency)) {
+        __mmActionLastDecision = action.owner + ": deferred to " + winner.owner;
+        continue;
+      }
+      __mmTacticalCurrentAction = action;
+      try { __mmOperationStage(action.stage, action.callback); }
+      finally {
+        // Reservations made by a candidate which emitted no action must not
+        // waste the tick (e.g. a placement became illegal during validation).
+        for (const channel in __mmTacticalChannels) {
+          const reservation = __mmTacticalChannels[channel];
+          if (reservation.action === action && !reservation.committed)
+            delete __mmTacticalChannels[channel];
+        }
+        __mmTacticalCurrentAction = null;
+      }
+    }
+  } finally {
+    __mmTacticalCurrentAction = null;
+    __mmTacticalCommitting = false;
+  }
+}
+function __mmBeforeTacticalPacket(type, value) {
+  if (type !== "z" && type !== "D" && type !== "F" &&
+      !(type === "c" && Number(value) === 0)) return;
+  // Flush the selected action's gear before its weapon/aim/attack packets.
+  // Gear packets do not recurse into commit().
+  if (__mmTacticalCurrentAction && (type === "z" || type === "D" || type === "F"))
+    __mmGearArbiter.commit();
+  __mmNoteTacticalCommit();
+}
+function __mmNoteTacticalCommit() {
+  const action = __mmTacticalCurrentAction;
+  if (action && !action.maintenance) {
+    __mmTacticalChannels.sequence = { owner: action.owner,
+      priority: action.priority, committed: true, at: Date.now(), action };
+  }
+  for (const channel in __mmTacticalChannels) {
+    const reservation = __mmTacticalChannels[channel];
+    if (action ? reservation.action === action : !reservation.action)
+      reservation.committed = true;
+  }
+}
 function __mmReserveTacticalChannel(
   __mmChannel,
   __mmOwner,
   __mmPriority = __mmActionPriority(__mmOwner),
 ) {
   __mmResetTacticalChannels();
-  const __mmCurrent = __mmTacticalChannels[__mmChannel];
-  if (!__mmCurrent) {
-    __mmTacticalChannels[__mmChannel] = {
-      owner: __mmOwner,
-      priority: Number(__mmPriority) || 0,
-      at: Date.now(),
-    };
-    return !0;
-  }
-
-
-  return __mmCurrent.owner === __mmOwner;
+  const current = __mmTacticalChannels[__mmChannel],
+    priority = Number(__mmPriority) || 0,
+    emergency = __mmOwner === "trapEscape" ||
+      (__mmTacticalCurrentAction && __mmTacticalCurrentAction.emergency);
+  if (!__mmTacticalMayReplace(current, __mmOwner, priority, emergency)) return false;
+  if (!current || current.owner !== __mmOwner)
+    __mmTacticalChannels[__mmChannel] = { owner: __mmOwner, priority,
+      at: Date.now(), committed: false, action: __mmTacticalCurrentAction };
+  return true;
 }
 function __mmTacticalPlacementKey(__mmOwner, __mmCandidate) {
   if (!__mmCandidate) return !1;
@@ -14582,7 +14646,8 @@ function __mmRunServerTacticalTick() {
   (__mmTacticalTickRunning = !0,
     (__mmTacticalTickLast = __mmCombatServerTick),
     (__mmTacticalTickLastAt = __mmNow),
-    __mmResetTacticalChannels(__mmCombatServerTick));
+    __mmResetTacticalChannels(__mmCombatServerTick),
+    (__mmTacticalCollecting = true));
   let __mmThreat = null;
   try {
     __mmOperationStage("tick-snapshot", function () {
@@ -14593,7 +14658,7 @@ function __mmRunServerTacticalTick() {
     });
     if (__mmInstaTestingModeEnabled) {
       __mmOperationStage("tick-heal-only", function () {
-        __mmAutoHeal();
+        __mmQueueTacticalAction("autoHeal", () => __mmAutoHeal(), { emergency: true });
       });
       return;
     }
@@ -14605,77 +14670,81 @@ function __mmRunServerTacticalTick() {
         __mmUpdateAutoPurchase();
       });
     __mmOperationStage("tick-trap", function () {
-      (__mmTrapEscapeEnabled || __mmTrapAttackActive) && __mmBreakTrap();
+      (__mmTrapEscapeEnabled || __mmTrapAttackActive) && __mmQueueTacticalAction("trapEscape", () => __mmBreakTrap(), { emergency: true });
     });
     __mmOperationStage("tick-trap-replace", function () {
-      __mmUpdatePriorityTrapReplacement();
+      __mmQueueTacticalAction("trapReplace", () => __mmUpdatePriorityTrapReplacement());
     });
     __mmOperationStage("tick-defense", function () {
-      (__mmUpdateAntiSync(),
-        __mmUpdateAntiInsta(),
-        __mmUpdateProjectileShield(),
-        __mmUpdateAutoEnemySpikeBreak(),
-        __mmUpdateAutoPushPressure(),
-        __mmUpdatePlacementStep(),
-        __mmUpdatePlacementDefense(),
-        __mmUpdateTeammateTrapRescue(),
-        __mmUpdateAntiCollision());
+      (__mmQueueTacticalAction("antiInsta", () => __mmUpdateAntiSync(), { emergency: true }),
+        __mmQueueTacticalAction("antiInsta", () => __mmUpdateAntiInsta(), { emergency: true }),
+        __mmQueueTacticalAction("shieldDefense", () => __mmUpdateProjectileShield()),
+        __mmQueueTacticalAction("enemySpikeBreak", () => __mmUpdateAutoEnemySpikeBreak()),
+        __mmQueueTacticalAction("autoPushSetup", () => __mmUpdateAutoPushPressure()),
+        __mmQueueTacticalAction("placementStep", () => __mmUpdatePlacementStep()),
+        __mmQueueTacticalAction("placementDefense", () => __mmUpdatePlacementDefense(), { emergency: true }),
+        __mmQueueTacticalAction("teammateRescue", () => __mmUpdateTeammateTrapRescue()),
+        __mmQueueTacticalAction("antiTroll", () => __mmUpdateAntiCollision()));
     });
     __mmOperationStage("tick-manual", function () {
-      __mmRunManualCombatGearTick();
+      __mmQueueTacticalAction("manualAttack", () => __mmRunManualCombatGearTick());
     });
 
 
 
     __mmOperationStage("tick-combat", function () {
-      (__mmUpdateAutoSteal(),
-        __mmUpdateKittyInstas(),
+      (__mmQueueTacticalAction("autoSteal", () => __mmUpdateAutoSteal()),
+        __mmQueueTacticalAction("autoPushSetup", () => __mmUpdateKittyInstas()),
         
         
-        __mmUpdateAutoBarbarian(),
-        __mmUpdateSpikeGearCounter(),
-        __mmUpdateBushMode(),
-        __mmUpdateAutoInsta());
+        __mmQueueTacticalAction("manualAttack", () => __mmUpdateAutoBarbarian()),
+        __mmQueueTacticalAction("spikeGearCounter", () => __mmUpdateSpikeGearCounter()),
+        __mmQueueTacticalAction("movementGear", () => __mmUpdateBushMode()),
+        __mmQueueTacticalAction("insta", () => __mmUpdateAutoInsta()));
     });
     __mmOperationStage("tick-shame-reset", function () {
-      __mmUpdateAutoHealBullShameReset(__mmThreat);
+      __mmQueueTacticalAction("autoHeal", () => __mmUpdateAutoHealBullShameReset(__mmThreat), { emergency: true });
     });
     __mmOperationStage("tick-heal", function () {
-      __mmAutoHeal();
+      __mmQueueTacticalAction("autoHeal", () => __mmAutoHeal(), { emergency: true });
     });
     __mmOperationStage("tick-placement", function () {
-      (__mmUpdateAutoEnemySpikeBreakReplacement(),
-        __mmUpdateSmartPlacement(),
-        __mmUpdateAutoSpikeSpam(),
-        __mmPlaceThreatTrap(),
+      (__mmQueueTacticalAction("smartAutoPlace", () => __mmUpdateAutoEnemySpikeBreakReplacement()),
+        __mmQueueTacticalAction("smartAutoPlace", () => __mmUpdateSmartPlacement()),
+        __mmQueueTacticalAction("spikeSpam", () => __mmUpdateAutoSpikeSpam()),
+        __mmQueueTacticalAction("threatTrap", () => __mmPlaceThreatTrap()),
         __mmSmartMovingMillsEnabled &&
           !__mmTacticalChannels.placement &&
-          __mmSmartUpdateMovingMills(__mmNow));
+          __mmQueueTacticalAction("smartAutoPlace", () => __mmSmartUpdateMovingMills(__mmNow)));
     });
     __mmOperationStage("tick-utility", function () {
-      (__mmCleanupActive && __mmUpdateCleanup(),
-        __mmWeaponGrindEnabled && __mmUpdateWeaponGrind(),
-        __mmUpdateTurretSteal(),
-        __mmUpdateMobSteal(),
-        __mmUpdateMatThief(),
-        __mmMusketRechargeEnabled && __mmUpdateWeaponRecharge(),
-        __mmUpdateMultiBreakAim());
+      (__mmCleanupActive && __mmQueueTacticalAction("cleanup", () => __mmUpdateCleanup()),
+        __mmWeaponGrindEnabled && __mmQueueTacticalAction("weaponGrind", () => __mmUpdateWeaponGrind()),
+        __mmQueueTacticalAction("turretSteal", () => __mmUpdateTurretSteal()),
+        __mmQueueTacticalAction("mobSteal", () => __mmUpdateMobSteal()),
+        __mmQueueTacticalAction("matThief", () => __mmUpdateMatThief()),
+        __mmMusketRechargeEnabled && __mmQueueTacticalAction("weaponRecharge", () => __mmUpdateWeaponRecharge()),
+        __mmQueueTacticalAction("manualAttack", () => __mmUpdateMultiBreakAim()));
     });
     __mmOperationStage("tick-gear", function () {
-      (__mmUpdateAssassinAutomation(),
-        __mmUpdateDefaultTailMacro(),
-        __mmUpdateMovementGear(),
-        __mmUpdateSoldier());
+      (__mmQueueTacticalAction("movementGear", () => __mmUpdateAssassinAutomation()),
+        __mmQueueTacticalAction("movementGear", () => __mmUpdateDefaultTailMacro()),
+        __mmQueueTacticalAction("movementGear", () => __mmUpdateMovementGear()),
+        __mmQueueTacticalAction("movementGear", () => __mmUpdateSoldier()));
     });
     __mmOperationStage("tick-restore", function () {
-      (__mmUpdateAutomaticStateRepair(),
-        __mmRecoverStrayCombatHat(),
-        __mmUpdateIdleHeldWeapon());
+      (__mmQueueTacticalAction("maintenance", () => __mmUpdateAutomaticStateRepair(), { maintenance: true, priority: -1 }),
+        __mmQueueTacticalAction("maintenance", () => __mmRecoverStrayCombatHat(), { maintenance: true, priority: -1 }),
+        __mmQueueTacticalAction("maintenance", () => __mmUpdateIdleHeldWeapon(), { maintenance: true, priority: -1 }));
     });
   } finally {
-    (__mmGearArbiter.commit(),
-      (__mmOperationPipelineStage = "idle"),
-      (__mmTacticalTickRunning = !1));
+    try {
+      __mmFlushTacticalActions();
+      __mmGearArbiter.commit();
+    } finally {
+      __mmOperationPipelineStage = "idle";
+      __mmTacticalTickRunning = false;
+    }
   }
 }
 function __mmRunOperationPipeline() {
@@ -14699,7 +14768,7 @@ function __mmRunOperationPipeline() {
 
 
       __mmOperationStage("heal-only", function () {
-        __mmAutoHeal();
+        __mmQueueTacticalAction("autoHeal", () => __mmAutoHeal(), { emergency: true });
       });
       return;
     }
@@ -14707,7 +14776,7 @@ function __mmRunOperationPipeline() {
 
 
     if (__mmAuthoritativeFresh) {
-      (__mmAutoHeal(),
+      (__mmQueueTacticalAction("autoHeal", () => __mmAutoHeal(), { emergency: true }),
         __mmOperationStageDue("fresh-animal-soldier", 22, __mmNow) &&
           __mmUpdateFreeAnimalSoldierCheck(),
         __mmOperationStageDue("fresh-housekeeping", 180, __mmNow) &&
@@ -14716,7 +14785,8 @@ function __mmRunOperationPipeline() {
     }
     if (__mmNow - __mmTacticalTickFallbackAt < __mmServerTickMs()) return;
     (__mmTacticalTickFallbackAt = __mmNow,
-      __mmResetTacticalChannels(__mmCurrentTacticalTick(__mmNow)));
+      __mmResetTacticalChannels(__mmCurrentTacticalTick(__mmNow)),
+      (__mmTacticalCollecting = true));
     const __mmFps = Number(__mmMetricFps),
       __mmPressure =
         __mmFpsBoostEnabled && Number.isFinite(__mmFps) && __mmFps > 0
@@ -14743,12 +14813,12 @@ function __mmRunOperationPipeline() {
       });
 
     __mmOperationStage("trap", function () {
-      (__mmTrapEscapeEnabled || __mmTrapAttackActive) && __mmBreakTrap();
+      (__mmTrapEscapeEnabled || __mmTrapAttackActive) && __mmQueueTacticalAction("trapEscape", () => __mmBreakTrap(), { emergency: true });
     });
 
 
     __mmOperationStage("trap-replace", function () {
-      __mmUpdatePriorityTrapReplacement();
+      __mmQueueTacticalAction("trapReplace", () => __mmUpdatePriorityTrapReplacement());
     });
 
 
@@ -14758,15 +14828,15 @@ function __mmRunOperationPipeline() {
       __mmNow,
     ) &&
       __mmOperationStage("defense", function () {
-        (__mmUpdateAntiSync(),
-          __mmUpdateAntiInsta(),
-          __mmUpdateProjectileShield(),
-          __mmUpdateAutoEnemySpikeBreak(),
-          __mmUpdateAutoPushPressure(),
-          __mmUpdatePlacementStep(),
-          __mmUpdatePlacementDefense(),
-          __mmUpdateTeammateTrapRescue(),
-          __mmUpdateAntiCollision());
+        (__mmQueueTacticalAction("antiInsta", () => __mmUpdateAntiSync(), { emergency: true }),
+          __mmQueueTacticalAction("antiInsta", () => __mmUpdateAntiInsta(), { emergency: true }),
+          __mmQueueTacticalAction("shieldDefense", () => __mmUpdateProjectileShield()),
+          __mmQueueTacticalAction("enemySpikeBreak", () => __mmUpdateAutoEnemySpikeBreak()),
+          __mmQueueTacticalAction("autoPushSetup", () => __mmUpdateAutoPushPressure()),
+          __mmQueueTacticalAction("placementStep", () => __mmUpdatePlacementStep()),
+          __mmQueueTacticalAction("placementDefense", () => __mmUpdatePlacementDefense(), { emergency: true }),
+          __mmQueueTacticalAction("teammateRescue", () => __mmUpdateTeammateTrapRescue()),
+          __mmQueueTacticalAction("antiTroll", () => __mmUpdateAntiCollision()));
       });
 
 
@@ -14779,19 +14849,19 @@ function __mmRunOperationPipeline() {
       __mmNow,
     ) &&
       __mmOperationStage("combat-insta", function () {
-        (__mmUpdateAutoSteal(),
-          __mmUpdateKittyInstas(),
+        (__mmQueueTacticalAction("autoSteal", () => __mmUpdateAutoSteal()),
+          __mmQueueTacticalAction("autoPushSetup", () => __mmUpdateKittyInstas()),
           
-          __mmUpdateSpikeGearCounter(),
-          __mmUpdateBushMode(),
+          __mmQueueTacticalAction("spikeGearCounter", () => __mmUpdateSpikeGearCounter()),
+          __mmQueueTacticalAction("movementGear", () => __mmUpdateBushMode()),
 
 
-          __mmUpdateAutoInsta());
+          __mmQueueTacticalAction("insta", () => __mmUpdateAutoInsta()));
       });
 
 
     __mmOperationStage("heal", function () {
-      __mmAutoHeal();
+      __mmQueueTacticalAction("autoHeal", () => __mmAutoHeal(), { emergency: true });
     });
     __mmOperationStageDue(
       "placement",
@@ -14799,41 +14869,46 @@ function __mmRunOperationPipeline() {
       __mmNow,
     ) &&
       __mmOperationStage("placement", function () {
-        (__mmUpdateAutoEnemySpikeBreakReplacement(),
-          __mmUpdateSmartPlacement(),
-          __mmUpdateAutoSpikeSpam(),
-          __mmPlaceThreatTrap(),
+        (__mmQueueTacticalAction("smartAutoPlace", () => __mmUpdateAutoEnemySpikeBreakReplacement()),
+          __mmQueueTacticalAction("smartAutoPlace", () => __mmUpdateSmartPlacement()),
+          __mmQueueTacticalAction("spikeSpam", () => __mmUpdateAutoSpikeSpam()),
+          __mmQueueTacticalAction("threatTrap", () => __mmPlaceThreatTrap()),
           __mmSmartMovingMillsEnabled &&
             !__mmTacticalChannels.placement &&
-            __mmSmartUpdateMovingMills(__mmNow),
+            __mmQueueTacticalAction("smartAutoPlace", () => __mmSmartUpdateMovingMills(__mmNow)),
           void 0);
       });
     __mmOperationStageDue("utility", __mmActiveCombat ? 38 : 55, __mmNow) &&
       __mmOperationStage("utility", function () {
-        (__mmCleanupActive && __mmUpdateCleanup(),
-          __mmWeaponGrindEnabled && __mmUpdateWeaponGrind(),
-          __mmUpdateTurretSteal(),
-          __mmUpdateMobSteal(),
-          __mmUpdateMatThief(),
-          __mmMusketRechargeEnabled && __mmUpdateWeaponRecharge(),
-          __mmUpdateMultiBreakAim());
+        (__mmCleanupActive && __mmQueueTacticalAction("cleanup", () => __mmUpdateCleanup()),
+          __mmWeaponGrindEnabled && __mmQueueTacticalAction("weaponGrind", () => __mmUpdateWeaponGrind()),
+          __mmQueueTacticalAction("turretSteal", () => __mmUpdateTurretSteal()),
+          __mmQueueTacticalAction("mobSteal", () => __mmUpdateMobSteal()),
+          __mmQueueTacticalAction("matThief", () => __mmUpdateMatThief()),
+          __mmMusketRechargeEnabled && __mmQueueTacticalAction("weaponRecharge", () => __mmUpdateWeaponRecharge()),
+          __mmQueueTacticalAction("manualAttack", () => __mmUpdateMultiBreakAim()));
       });
     __mmOperationStageDue("gear", __mmActiveCombat ? 22 : 35, __mmNow) &&
       __mmOperationStage("gear", function () {
-        (__mmUpdateAssassinAutomation(),
-          __mmUpdateDefaultTailMacro(),
-          __mmUpdateMovementGear(),
-          __mmUpdateSoldier());
+        (__mmQueueTacticalAction("movementGear", () => __mmUpdateAssassinAutomation()),
+          __mmQueueTacticalAction("movementGear", () => __mmUpdateDefaultTailMacro()),
+          __mmQueueTacticalAction("movementGear", () => __mmUpdateMovementGear()),
+          __mmQueueTacticalAction("movementGear", () => __mmUpdateSoldier()));
       });
     __mmOperationStageDue("restore", __mmActiveCombat ? 24 : 40, __mmNow) &&
       __mmOperationStage("restore", function () {
-        (__mmUpdateAutomaticStateRepair(),
-          __mmRecoverStrayCombatHat(),
-          __mmUpdateIdleHeldWeapon());
+        (__mmQueueTacticalAction("maintenance", () => __mmUpdateAutomaticStateRepair(), { maintenance: true, priority: -1 }),
+          __mmQueueTacticalAction("maintenance", () => __mmRecoverStrayCombatHat(), { maintenance: true, priority: -1 }),
+          __mmQueueTacticalAction("maintenance", () => __mmUpdateIdleHeldWeapon(), { maintenance: true, priority: -1 }));
       });
   } finally {
-    ((__mmOperationPipelineStage = "idle"),
-      (__mmOperationPipelineRunning = !1));
+    try {
+      __mmFlushTacticalActions();
+      __mmGearArbiter.commit();
+    } finally {
+      __mmOperationPipelineStage = "idle";
+      __mmOperationPipelineRunning = false;
+    }
   }
 }
 function __mmScheduleOperationPipeline() {
@@ -15078,6 +15153,7 @@ O.send = function () {
     Number.isFinite(__mmManualActionAngle) && (arguments[2] = __mmManualActionAngle);
   }
   __mmProtectTrapBreakDirection(arguments);
+  __mmBeforeTacticalPacket(arguments[0], arguments[1]);
   const __mmResult = __mmOriginalSocketSend.apply(this, arguments);
 
 
@@ -15112,6 +15188,11 @@ const __mmOriginalChatDisplay = dl;
 const __mmOriginalUpgradeDisplay = Un;
 const __mmOriginalObjectRender = Ge;
 const __mmOriginalObjectHit = Wl;
+const __mmOriginalObjectLoad = Vl;
+const __mmOriginalObjectRemove = Il;
+const __mmOriginalOwnerObjectsRemove = Ml;
+const __mmOriginalProjectileRemove = ql;
+const __mmOriginalAnimalAnimation = Fl;
 const __mmOriginalAimDirection = Ci;
 const __mmOriginalRender = Cl;
 const __mmOriginalMinimapRender = nl;
@@ -24801,181 +24882,52 @@ function __mmBreakableStateKey(__mmObject) {
     ? "object:" + __mmId + ":" + String(__mmOwner || "world") + ":" + __mmX + ":" + __mmY
     : null;
 }
-function __mmBreakablePruneHealthStates(__mmNow = Date.now()) {
-  if (__mmNow - __mmBreakableHealthLastPruneAt < 3500) return;
-  __mmBreakableHealthLastPruneAt = __mmNow;
-  for (const [__mmKey, __mmState] of __mmBreakableHealthByKey) {
-    if (
-      !__mmState ||
-      __mmNow - Number(__mmState.lastSeenAt || 0) > 15000
-    )
-      __mmBreakableHealthByKey.delete(__mmKey);
-  }
+// Chicken v4.8.1's placeable model: health is the initial maximum;
+// currentHealth is reduced by server-reported wiggle/attack batches next tick.
+// Keep Kitty's state interface so labels, replacement and break planners agree.
+function __mmResetBreakableHealth(object) {
+  if (!object) return;
+  __mmBreakableHealth.delete(object);
+  const maximum = Number(object.health);
+  object.currentHealth = Number.isFinite(maximum) ? Math.max(0, maximum) : undefined;
+  object.lastHitTime = 0;
 }
-function __mmBreakablePendingDamage(__mmState, __mmNow = Date.now()) {
-  if (!__mmState || !Array.isArray(__mmState.pending)) return 0;
-
-
-  const __mmLifetime = Math.max(1200, __mmServerTickMs() * 10);
-  for (let __mmIndex = __mmState.pending.length - 1; __mmIndex >= 0; __mmIndex--) {
-    const __mmHit = __mmState.pending[__mmIndex];
-    if (
-      !__mmHit ||
-      !Number.isFinite(Number(__mmHit.damage)) ||
-      Number(__mmHit.damage) <= 0 ||
-      __mmNow - Number(__mmHit.at || 0) > __mmLifetime
-    )
-      __mmState.pending.splice(__mmIndex, 1);
+function __mmBreakableState(object) {
+  if (!object || object.active === false) return null;
+  const maximum = Number(object.health);
+  if (!Number.isFinite(maximum) || maximum <= 0) return null;
+  const key = __mmBreakableStateKey(object);
+  let state = __mmBreakableHealth.get(object);
+  if (!state || state.key !== key) {
+    // Recycled native objects must not inherit another structure's health.
+    if (state || !Number.isFinite(Number(object.currentHealth)))
+      object.currentHealth = maximum;
+    state = { key, sid: object.sid, health: Math.max(0, Number(object.currentHealth)),
+      maxHealth: maximum, lastPredictionAt: 0, lastSeenAt: Date.now(),
+      confidence: "initial" };
+    __mmBreakableHealth.set(object, state);
   }
-  return __mmState.pending.reduce(
-    (__mmTotal, __mmHit) => __mmTotal + Math.max(0, Number(__mmHit.damage) || 0),
-    0,
-  );
+  state.health = Math.max(0, Number(object.currentHealth) || 0);
+  state.lastSeenAt = Date.now();
+  return state;
 }
-function __mmBreakableState(__mmObject) {
-  if (!__mmObject || !Number.isFinite(Number(__mmObject.health))) return null;
-  const __mmLiveHealth = Math.max(0, Number(__mmObject.health)),
-    __mmNow = Date.now(),
-    __mmKey = __mmBreakableStateKey(__mmObject),
-    __mmData = b && b.list && b.list[__mmObject.id];
-
-
-  if (__mmLiveHealth <= 0) {
-    const __mmDeadState = __mmBreakableHealth.get(__mmObject);
-    if (__mmDeadState) {
-      ((__mmDeadState.health = 0),
-        (__mmDeadState.liveHealth = 0),
-        (__mmDeadState.pending.length = 0),
-        (__mmDeadState.pendingDamage = 0),
-        (__mmDeadState.confidence = "live"));
-      __mmDeadState.key && __mmBreakableHealthByKey.delete(__mmDeadState.key);
-    }
-    return null;
-  }
-  let __mmState = __mmBreakableHealth.get(__mmObject);
-  if (!__mmState || __mmState.key !== __mmKey) {
-    __mmState = __mmKey ? __mmBreakableHealthByKey.get(__mmKey) : null;
-    if (!__mmState) {
-      __mmState = {
-        key: __mmKey,
-        sid: __mmObject.sid,
-        health: __mmLiveHealth,
-        liveHealth: __mmLiveHealth,
-        maxHealth: __mmLiveHealth,
-        pending: [],
-        pendingDamage: 0,
-        lastAuthoritativeAt: __mmNow,
-        lastLiveChangeAt: 0,
-        lastPredictionAt: 0,
-        lastSeenAt: __mmNow,
-        confidence: "live",
-      };
-      __mmKey && __mmBreakableHealthByKey.set(__mmKey, __mmState);
-    }
-    __mmBreakableHealth.set(__mmObject, __mmState);
-  }
-  const __mmDataMax = Number(__mmData && __mmData.health),
-    __mmPreviousLive = Number(__mmState.liveHealth),
-    __mmPreviousHealth = Number(__mmState.health),
-    __mmLiveChanged =
-      Number.isFinite(__mmPreviousLive) &&
-      Math.abs(__mmPreviousLive - __mmLiveHealth) > 0.001,
-    __mmIsPlaceable = !!(
-      __mmObject.isItem &&
-      (__mmStructureOwnerSid(__mmObject) != null ||
-        (__mmData && __mmData.group && __mmData.group.place))
-    ),
-
-
-
-    __mmStalePlaceableHealthIncrease = !!(
-      __mmIsPlaceable &&
-      Number.isFinite(__mmPreviousLive) &&
-      __mmPreviousLive > 0 &&
-      __mmLiveHealth > __mmPreviousLive + 0.001
-    );
-  ((__mmState.sid = __mmObject.sid),
-    (__mmState.key = __mmKey),
-    (__mmState.lastSeenAt = __mmNow),
-    (__mmState.maxHealth = Math.max(
-      __mmLiveHealth,
-      Number(__mmState.maxHealth) || 0,
-      Number.isFinite(__mmDataMax) ? __mmDataMax : 0,
-    )));
-  const __mmPending = __mmBreakablePendingDamage(__mmState, __mmNow);
-  if (__mmStalePlaceableHealthIncrease) {
-
-
-    ((__mmState.pendingDamage = __mmPending),
-      (__mmState.health = Math.max(
-        0,
-        Number.isFinite(__mmPreviousHealth)
-          ? __mmPreviousHealth
-          : __mmPreviousLive,
-      )),
-      (__mmState.confidence = "confirmed"));
-  } else if (__mmLiveChanged) {
-
-
-    ((__mmState.liveHealth = __mmLiveHealth),
-      (__mmState.pendingDamage = __mmPending),
-      (__mmState.lastAuthoritativeAt = __mmNow),
-      (__mmState.lastLiveChangeAt = __mmNow));
-    if (__mmLiveHealth < __mmPreviousLive - 0.001) {
-      ((__mmState.health = __mmLiveHealth),
-        (__mmState.pending.length = 0),
-        (__mmState.pendingDamage = 0),
-        (__mmState.confidence = "live"));
-    } else if (!__mmIsPlaceable) {
-      ((__mmState.health = __mmLiveHealth),
-        (__mmState.pending.length = 0),
-        (__mmState.pendingDamage = 0),
-        (__mmState.confidence = "live"));
-    } else {
-      __mmState.confidence = "confirmed";
-    }
-  } else {
-    ((__mmState.pendingDamage = __mmPending),
-      (__mmState.health = Math.max(
-        0,
-        Number.isFinite(__mmPreviousHealth)
-          ? __mmPreviousHealth
-          : __mmLiveHealth,
-      )),
-      (__mmState.confidence =
-        __mmPending > 0.001 ? "confirmed" : __mmState.confidence || "live"));
-  }
-  (__mmKey && __mmBreakableHealthByKey.set(__mmKey, __mmState),
-    __mmBreakablePruneHealthStates(__mmNow));
-  return __mmState;
+function __mmApplyBuildingDamage(entry, damage) {
+  const object = entry && entry.object, amount = Number(damage);
+  if (!object || object.active === false || !Number.isFinite(amount) || amount <= 0 ||
+      __mmBreakableHealth.get(object) !== entry.state) return false;
+  object.currentHealth = Math.max(0, Number(object.currentHealth) - amount);
+  object.lastHitTime = Date.now();
+  entry.state.health = object.currentHealth;
+  entry.state.lastPredictionAt = object.lastHitTime;
+  entry.state.confidence = "observed";
+  return true;
 }
-function __mmPredictBreakableHit(__mmState, __mmDamage, __mmSource) {
-  if (!__mmState || !Number.isFinite(Number(__mmDamage))) return !1;
-  const __mmNow = Date.now(),
-    __mmHitDamage = Math.max(0, Number(__mmDamage));
-  if (!(__mmHitDamage > 0)) return !1;
-  const __mmDedupeKey = String(__mmSource || "unknown");
-  __mmBreakablePendingDamage(__mmState, __mmNow);
-  if (__mmState.pending.some((hit) => hit.source === __mmDedupeKey)) return !1;
-  (__mmState.pending.push({
-    damage: __mmHitDamage,
-    at: __mmNow,
-    source: __mmDedupeKey,
-  }),
-    (__mmState.lastPredicted = { key: __mmDedupeKey, at: __mmNow }),
-    (__mmState.lastPredictionAt = __mmNow));
-  const __mmPending = __mmBreakablePendingDamage(__mmState, __mmNow),
-    __mmPreviousHealth = Number(__mmState.health),
-    __mmBaseHealth = Number.isFinite(__mmPreviousHealth)
-      ? __mmPreviousHealth
-      : Number(__mmState.liveHealth);
-
-
-
-  ((__mmState.pendingDamage = __mmPending),
-    (__mmState.health = Math.max(0, __mmBaseHealth - __mmHitDamage)),
-    (__mmState.confidence = "confirmed"));
-  return !0;
+function __mmForgetBreakableHealth(object) {
+  if (!object) return;
+  object.currentHealth = 0;
+  const state = __mmBreakableHealth.get(object);
+  if (state) { state.health = 0; state.lastPredictionAt = 0; }
+  __mmBreakableHealth.delete(object);
 }
 function __mmPlayerHatData(__mmPlayer) {
   if (!__mmPlayer || !Array.isArray(Ze)) return null;
@@ -28925,87 +28877,68 @@ function __mmRecordPlayerSwing(__mmPlayerSid, __mmWeapon) {
   };
   __mmAnalyzeSwing(__mmPlayerSid, __mmWeapon);
 }
-function __mmBreakableAngleDifference(__mmFirst, __mmSecond) {
-  return Math.abs(
-    Math.atan2(
-      Math.sin(Number(__mmFirst) - Number(__mmSecond)),
-      Math.cos(Number(__mmFirst) - Number(__mmSecond)),
-    ),
-  );
+// Like Chicken's buildingsHit queue, each damage event consumes only the
+// wiggles preceding it. Do not guess an attacker from facing, range or time.
+function __mmTakeBuildingHits() {
+  return __mmBuildingHits.splice(0);
 }
-
-
-function __mmMatchConfirmedStructureHits() {
-  const now = Date.now(), lifetime = Math.max(160, Math.min(450, __mmServerTickMs() * 2));
-  for (const queue of [__mmConfirmedStructureSwings, __mmPendingStructureHits]) {
-    while (queue.length && now - queue[0].at > lifetime) queue.shift();
-  }
-  for (let index = __mmPendingStructureHits.length - 1; index >= 0; index--) {
-    const hit = __mmPendingStructureHits[index], object = hit.object;
-    if (!object || object.active === false || (typeof ns === "function" && ns(object.sid) !== object)) {
-      __mmPendingStructureHits.splice(index, 1);
-      continue;
-    }
-    let best = null, bestScore = Infinity;
-    for (const swing of __mmConfirmedStructureSwings) {
-      if (swing.objects.has(object)) continue;
-      const weapon = b && b.weapons && b.weapons[swing.weapon];
-      if (!weapon || weapon.projectile != null || weapon.shield) continue;
-      const dx = Number(object.x) - swing.x, dy = Number(object.y) - swing.y,
-        distance = Math.hypot(dx, dy), direction = Math.atan2(dy, dx),
-        tolerance = Number(y && y.gatherAngle) || Math.PI / 2.6;
-      if (!Number.isFinite(distance) || distance > (Number(weapon.range) || 0) + __mmCleanupObjectScale(object) ||
-          __mmBreakableAngleDifference(direction, swing.angle) > tolerance ||
-          __mmBreakableAngleDifference(hit.angle, swing.angle) > 1.25) continue;
-      const score = Math.abs(hit.at - swing.at) + __mmBreakableAngleDifference(hit.angle, swing.angle) * 100;
-      if (score < bestScore) { best = swing; bestScore = score; }
-    }
-    if (!best) continue;
-    best.objects.add(object);
-    __mmPendingStructureHits.splice(index, 1);
-    const state = __mmBreakableState(object);
-    if (!state) continue;
-
-    if (state.lastLiveChangeAt >= hit.at && state.lastLiveChangeAt > 0) continue;
-    __mmPredictBreakableHit(state, __mmWeaponStructureDamage(best, best.weapon, object), best.id);
-  }
+function __mmQueueBuildingDamage(batch) {
+  if (!batch.hits.length) return;
+  __mmStructureDamageBatches.push(batch);
+  if (__mmStructureDamageBatches.length > 128) __mmStructureDamageBatches.shift();
 }
 function __mmQueueStructureSwing(sid, didHit, weapon) {
   if (Number(didHit) !== 1) return;
-  __mmStructureSwingPackets.push({sid, didHit, weapon, at: Date.now()});
-  if (__mmStructureSwingPackets.length > 128) __mmStructureSwingPackets.shift();
+  const player = typeof Rt === "function" ? Rt(sid) : null;
+  if (!player) return;
+  __mmQueueBuildingDamage({ kind: "melee", player, weapon: Number(weapon),
+    hits: __mmTakeBuildingHits() });
+}
+function __mmQueueStructureProjectile(sid) {
+  const projectile = Array.isArray(Ve) ? Ve.find(entry => entry && entry.sid == sid) : null;
+  if (!projectile) return;
+  __mmQueueBuildingDamage({ kind: "projectile", damage: Number(projectile.dmg),
+    hits: __mmTakeBuildingHits() });
+}
+function __mmQueueStructureAnimal(sid) {
+  const animal = Array.isArray(N) ? N.find(entry => entry && entry.sid == sid) : null;
+  if (!animal || animal.name !== "MOOSTAFA") return;
+  __mmQueueBuildingDamage({ kind: "animal", damage: 232, hits: __mmTakeBuildingHits() });
+}
+function __mmChickenMeleeStructureDamage(player, weaponId) {
+  const weapon = b && b.weapons && b.weapons[weaponId];
+  if (!weapon || weapon.projectile != null) return 0;
+  const variant = y && y.weaponVariants && y.weaponVariants[player.weaponVariant];
+  return Math.max(0, (Number(weapon.dmg) || 0) *
+    (Number(variant && variant.val) || 1) * (Number(weapon.sDmg) || 1) *
+    (Number(player.skinIndex) === 40 ? 3.3 : 1));
 }
 function __mmFlushStructureSwings() {
-
-
-  const packets = __mmStructureSwingPackets.splice(0);
-  for (const packet of packets) {
-    if (Date.now() - packet.at > Math.max(160, Math.min(450, __mmServerTickMs() * 2))) continue;
-    __mmObserveConfirmedStructureSwing(packet.sid, packet.didHit, packet.weapon);
+  // Jl has already applied the next player update, so variant/Tank state is
+  // read at the same phase as Chicken's game.nextTick damage callbacks.
+  const batches = __mmStructureDamageBatches.splice(0);
+  for (const batch of batches) {
+    const damage = batch.kind === "melee"
+      ? __mmChickenMeleeStructureDamage(batch.player, batch.weapon)
+      : batch.damage;
+    for (const hit of batch.hits) {
+      if (batch.kind === "projectile" && !hit.object.projDmg) continue;
+      __mmApplyBuildingDamage(hit, damage);
+    }
   }
-}
-function __mmObserveConfirmedStructureSwing(sid, didHit, weaponId) {
-  if (Number(didHit) !== 1) return;
-  const player = typeof Rt === "function" ? Rt(sid) : null;
-  if (!player || !player.alive) return;
-  const position = __mmServerEntityPosition(player), weapon = Number(weaponId),
-    angle = Number(player.dir);
-  if (!position || !Number.isFinite(angle)) return;
-  __mmConfirmedStructureSwings.push({
-    at: Date.now(), id: "confirmed:" + (++__mmStructureSwingSequence), weapon,
-    x: position.x, y: position.y, angle,
-    skinIndex: player.skinIndex, weaponVariant: player.weaponVariant,
-    objects: new Set()
-  });
-  if (__mmConfirmedStructureSwings.length > 128) __mmConfirmedStructureSwings.shift();
-  __mmMatchConfirmedStructureHits();
+  // Chicken clears unclaimed wiggles at each player update.
+  __mmBuildingHits.length = 0;
 }
 function __mmObserveObjectHit(angle, sid) {
-  const object = typeof ns === "function" ? ns(sid) : null;
-  if (!object || !Number.isFinite(Number(angle)) || !__mmBreakableState(object)) return;
-  __mmPendingStructureHits.push({object, angle: Number(angle), at: Date.now()});
-  if (__mmPendingStructureHits.length > 256) __mmPendingStructureHits.shift();
-  __mmMatchConfirmedStructureHits();
+  const object = typeof ns === "function" ? ns(sid) : null,
+    state = __mmBreakableState(object);
+  if (!state || !(object.currentHealth > 0)) return;
+  __mmBuildingHits.push({ object, state });
+  if (__mmBuildingHits.length > 256) __mmBuildingHits.shift();
+}
+function __mmClearBuildingDamageQueues() {
+  __mmBuildingHits.length = 0;
+  __mmStructureDamageBatches.length = 0;
 }
 function __mmBreakableOverlayInfo(__mmObject) {
   const __mmState = __mmBreakableState(__mmObject);
@@ -29517,6 +29450,34 @@ Wl = function (__mmAngle, __mmObjectSid) {
   __mmObserveObjectHit(__mmAngle, __mmObjectSid);
   return __mmOriginalObjectHit.apply(this, arguments);
 };
+// Mirror Chicken's object initialization and its projectile/AI damage events.
+Vl = function (data) {
+  const result = __mmOriginalObjectLoad.apply(this, arguments);
+  if (Array.isArray(data))
+    for (let index = 0; index < data.length; index += 8)
+      __mmResetBreakableHealth(ns(data[index]));
+  return result;
+};
+Il = function (sid) {
+  __mmForgetBreakableHealth(ns(sid));
+  return __mmOriginalObjectRemove.apply(this, arguments);
+};
+Ml = function (sid) {
+  if (Array.isArray(ge))
+    for (const object of ge)
+      if (object && String(__mmStructureOwnerSid(object)) === String(sid))
+        __mmForgetBreakableHealth(object);
+  return __mmOriginalOwnerObjectsRemove.apply(this, arguments);
+};
+ql = function (sid, range) {
+  __mmQueueStructureProjectile(sid);
+  return __mmOriginalProjectileRemove.apply(this, arguments);
+};
+Fl = function (sid) {
+  __mmQueueStructureAnimal(sid);
+  return __mmOriginalAnimalAnimation.apply(this, arguments);
+};
+window.addEventListener("MooMooKittyGameLeft", __mmClearBuildingDamageQueues);
 function __mmSmartDepthCeiling() {
   return Math.max(1, Math.min(10, Math.round(Number(__mmSmartDepth) || 1)));
 }
@@ -33975,6 +33936,7 @@ const __mmGearArbiter = {
     };
     if (__mmIntent.hat == null && __mmIntent.tail == null) return !1;
     this.intents.set(__mmSource, __mmIntent);
+    if (__mmTacticalCurrentAction) __mmNoteTacticalCommit();
     if (!__mmTacticalTickRunning && !this.timer)
       this.timer = setTimeout(() => {
         this.timer = 0;
@@ -60921,6 +60883,12 @@ __mmAdaptiveZoomFrame = requestAnimationFrame(__mmAdaptiveZoomLoop);
             ["chat display", CHAT_DISPLAY_MARKER],
             ["insta player lookup", INSTA_PLAYER_LOOKUP_MARKER],
             ["insta player attack", INSTA_PLAYER_ATTACK_MARKER],
+            ["placeable load", "function Vl("],
+            ["placeable wiggle", "function Wl("],
+            ["placeable removal", "function Il("],
+            ["owner placeable removal", "function Ml("],
+            ["projectile removal", "function ql("],
+            ["animal animation", "function Fl("],
             ["full-server direct connect", FORCE_FULL_DIRECT_MARKER],
             ["full-server browser filter", FORCE_FULL_FILTER_MARKER],
             ["full-server automatic filter", FORCE_FULL_AUTO_MARKER],
