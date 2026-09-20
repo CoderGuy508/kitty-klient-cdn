@@ -2,7 +2,7 @@
 // @name         kitty klient
 // @author       Coder Guy
 // @credits       random4ik — bot script
-// @version      7.0.40
+// @version      7.0.41
 // @icon         https://cdn.discordapp.com/icons/1540876076224356437/ac27c0ce87c4c46b407ebca78e150aeb.webp?size=2048
 // @description  kitty klient — a MooMoo.io client with adaptive zoom, fast autoheal, gear automation, combat tools, predictive placement, visual markers, CC0 background music, manual quick builds, and a fully rebindable keyboard/mouse controls HUD.
 // @match        *://moomoo.io/*
@@ -267,7 +267,7 @@
     const AUTO_PUSH_FINISHER_MIGRATION_KEY = "kitty-klient-auto-push-finisher-v1";
     const ASSASSIN_RANGE_AUTO_MIGRATION_KEY = "kitty-klient-assassin-range-auto-v1";
     const TAB_SYNC_BRIDGE_KEY = "kitty-klient-tab-sync-bridge-v1";
-const KITTY_KLIENT_VERSION = "7.0.40";
+const KITTY_KLIENT_VERSION = "7.0.41";
     const KITTY_SHARED_STORAGE_APPLIED_EVENT = "KittyMooMooSharedStorageApplied";
 
 
@@ -4749,7 +4749,7 @@ const KITTY_KLIENT_VERSION = "7.0.40";
 
         const actions = addHudSection(combatPage, "Gear & boost controls");
         addHudToggle(actions, "bullHelmet", "Bull helmet", "Equip Bull and the damage tail on a ready melee swing, including safe nearby-animal farming; it immediately yields to danger and higher-priority gear");
-        addHudToggle(actions, "tankRightClick", "Smart Tank breaks", "On either click, queue Tank only for each loaded swing tick when that click's weapon can reach a nearby player-built breakable. Right click keeps Shield defense; left click stays on the main weapon and never uses Tank while an enemy, mob, boss, or Treasure is in its attack path.");
+        addHudToggle(actions, "tankRightClick", "Glotus-style Tank breaks", "Uses Glotus' AutoBreak decision path: prioritize a reachable enemy spike/trap, prefer the current primary or Great Hammer by range and reload state, and equip Tank only when the normal hit will not finish the structure.");
         addHudToggle(actions, "autoInsta", "Insta", "One combo planner: automatically attacks a ready lethal opportunity. R requests a combo manually. Turning this off disables both; normal attacks still work");
         addHudToggle(actions, "autoAim", "Kitty target aim", "While left click is held, aim at the nearer hostile player or active animal without changing out of the main weapon. Accessories follow fixed Kitty's close-target and danger rules.");
         addHudToggle(actions, "autoBarbarian", "Auto Barbarian", "On a confirmed nonlethal enemy main swing, use Barbarian Armor for the retaliation tick. It yields to projectile, sync, Musket, trap, and lethal threats.");
@@ -57772,6 +57772,8 @@ function __mmKittyManualBreakTargetAllowed(__mmObject) {
     __mmData &&
     Number.isFinite(__mmDeclaredHealth) &&
     __mmDeclaredHealth > 0 &&
+    __mmStructureOwnerSid(__mmObject) != null &&
+    __mmStructureRelationship(__mmObject) === "enemy" &&
     __mmKittyManualBreakHealth(__mmObject) > 0
   );
 }
@@ -57789,7 +57791,13 @@ function __mmKittyManualBreakRange(__mmWeapon, __mmTarget) {
 
 
 
-  if (!__mmData || !Number.isFinite(__mmDamage)) return 0;
+  if (
+    !__mmData ||
+    !Number.isFinite(__mmDamage) ||
+    __mmData.projectile != null ||
+    __mmData.shield
+  )
+    return 0;
   const __mmTargetScale = Math.max(
     0,
     Number(__mmTarget && __mmTarget.hitScale) ||
@@ -57900,12 +57908,16 @@ function __mmKittyManualBreakTarget() {
     const __mmSpikeDistance = __mmKittyManualBreakDistance(__mmSpike),
       __mmPrimaryCanReach =
         __mmSpikeDistance <=
-          __mmKittyManualBreakRange(__mmPrimary, __mmSpike);
+          __mmKittyManualBreakRange(__mmPrimary, __mmSpike),
+      __mmSecondary = Number(v.weapons[1]),
+      __mmSecondaryCanReach =
+        __mmSpikeDistance <=
+          __mmKittyManualBreakRange(__mmSecondary, __mmSpike);
     if (__mmTrap) {
-      if (__mmPrimaryCanReach) return __mmSpike;
+      if (__mmPrimaryCanReach || __mmSecondaryCanReach) return __mmSpike;
       return __mmTrap;
     }
-    if (__mmPrimaryCanReach) return __mmSpike;
+    if (__mmPrimaryCanReach || __mmSecondaryCanReach) return __mmSpike;
   }
   return __mmTrap;
 }
@@ -58838,69 +58850,77 @@ function __mmFastCheckMs() {
     __mmServerTickMs(),
   );
 }
-function __mmKittyTankTarget(__mmWeapon) {
-  const __mmWeaponData = b && b.weapons && b.weapons[__mmWeapon];
+function __mmGlotusAutoBreakPlan() {
   if (
     !v ||
     !v.alive ||
-    !__mmWeaponData ||
-    __mmWeaponData.projectile != null ||
-    __mmWeaponData.shield ||
-    Number(__mmWeaponData.dmg) <= 1
+    !Array.isArray(v.weapons) ||
+    __mmKittyManualBreakShouldIgnore()
   )
     return null;
-
-
-
-
-  const __mmRange = Math.max(0, Number(__mmWeaponData.range) || 0),
-    __mmSelfPosition = __mmServerEntityPosition(v) || v,
-    __mmVelocity = __mmSyncPlayerVelocity(v),
-    __mmLeadMs = Math.max(
-      __mmFastCheckMs(),
-      Math.min(125, __mmServerTickMs()),
+  const __mmTarget = __mmKittyManualBreakTarget();
+  if (!__mmTarget) return null;
+  const __mmPrimary = Number(v.weapons[0]),
+    __mmSecondary = Number(v.weapons[1]),
+    __mmDistance = __mmKittyManualBreakDistance(__mmTarget),
+    __mmPrimaryInRange =
+      __mmDistance <= __mmKittyManualBreakRange(__mmPrimary, __mmTarget),
+    __mmSecondaryInRange =
+      __mmDistance <= __mmKittyManualBreakRange(__mmSecondary, __mmTarget),
+    __mmIsHammer = __mmSecondary === Number(__mmGreatHammer),
+    __mmNotStick = __mmPrimary !== 8,
+    __mmNotPolearm = __mmPrimary !== 5,
+    __mmHealth = __mmKittyManualBreakHealth(__mmTarget),
+    __mmPrimaryDamage = __mmKittyManualBreakNormalDamage(
+      __mmPrimary,
+      __mmTarget,
     ),
-    __mmPredictedSelfX = Number(__mmSelfPosition.x) +
-      Number(__mmVelocity.x || 0) * __mmLeadMs,
-    __mmPredictedSelfY = Number(__mmSelfPosition.y) +
-      Number(__mmVelocity.y || 0) * __mmLeadMs,
-    __mmObjects = __mmActiveObjectSnapshot().all;
-  if (!Number.isFinite(__mmPredictedSelfX) || !Number.isFinite(__mmPredictedSelfY))
-    return null;
-  let __mmNearest = null,
-    __mmNearestDistance = Infinity;
+    __mmSecondaryDamage = __mmKittyManualBreakNormalDamage(
+      __mmSecondary,
+      __mmTarget,
+    ),
+    __mmPrimaryReload = __mmKittyManualBreakReloadRemaining(__mmPrimary),
+    __mmSecondaryReload = __mmKittyManualBreakReloadRemaining(__mmSecondary),
+    __mmPrimaryFasterThanSecondary =
+      !__mmWeaponReady(__mmSecondary) ||
+      __mmPrimaryReload <= __mmSecondaryReload;
 
-
-
-  for (let __mmIndex = 0; __mmIndex < __mmObjects.length; __mmIndex++) {
-    const __mmObject = __mmObjects[__mmIndex];
-    if (
-      !__mmObject ||
-      !__mmObject.active ||
-      !__mmObject.isItem ||
-      __mmStructureOwnerSid(__mmObject) == null ||
-      !Number.isFinite(Number(__mmObject.health)) ||
-      Number(__mmObject.health) <= 0
-    )
-      continue;
-    const __mmScale = Math.max(
-        0,
-        Number(__mmObject.scale) ||
-          Number(b && b.list && b.list[__mmObject.id] && b.list[__mmObject.id].scale) ||
-          0,
-      ),
-      __mmDistance = Math.hypot(
-        Number(__mmObject.x) - __mmPredictedSelfX,
-        Number(__mmObject.y) - __mmPredictedSelfY,
-      );
-    if (
-      Number.isFinite(__mmDistance) &&
-      __mmDistance <= __mmRange + __mmScale &&
-      __mmDistance < __mmNearestDistance
-    )
-      ((__mmNearest = __mmObject), (__mmNearestDistance = __mmDistance));
-  }
-  return __mmNearest;
+  // Glotus AutoBreak ordering: take a lethal primary break when it is the
+  // better-loaded option, otherwise prefer the Great Hammer, then primary.
+  if (
+    __mmPrimaryInRange &&
+    __mmIsHammer &&
+    __mmNotStick &&
+    __mmNotPolearm &&
+    __mmPrimaryFasterThanSecondary &&
+    __mmPrimaryDamage >= __mmHealth
+  )
+    return {
+      target: __mmTarget,
+      weapon: __mmPrimary,
+      useTank: __mmPrimaryDamage < __mmHealth,
+    };
+  if (__mmIsHammer && __mmSecondaryInRange)
+    return {
+      target: __mmTarget,
+      weapon: __mmSecondary,
+      useTank: __mmSecondaryDamage < __mmHealth,
+    };
+  if (__mmNotStick && (__mmNotPolearm || !__mmIsHammer) && __mmPrimaryInRange)
+    return {
+      target: __mmTarget,
+      weapon: __mmPrimary,
+      useTank: __mmPrimaryDamage < __mmHealth,
+    };
+  return null;
+}
+function __mmKittyTankTarget(__mmWeapon) {
+  if (!v || !v.alive || !v.skins || !v.skins[40]) return null;
+  const __mmPlan = __mmGlotusAutoBreakPlan();
+  return __mmPlan && __mmPlan.useTank &&
+    Number(__mmPlan.weapon) === Number(__mmWeapon)
+    ? __mmPlan.target
+    : null;
 }
 function __mmTankSecondaryPreferred(__mmWeapon = __mmRightClickWeapon()) {
   if (
@@ -58914,13 +58934,7 @@ function __mmTankSecondaryPreferred(__mmWeapon = __mmRightClickWeapon()) {
   return !!__mmKittyTankTarget(__mmWeapon);
 }
 function __mmPrimaryTankCombatBlocked() {
-
-  if (__mmEnemyWithinCombatRange()) return !0;
-  const __mmThreat = __mmCombatThreatSnapshot();
-  return !!(__mmThreat &&
-    (Number(__mmThreat.nearbyEnemies) > 0 ||
-      Number(__mmThreat.damage) > 0 ||
-      Number(__mmThreat.potentialDamage) > 0));
+  return __mmKittyManualBreakShouldIgnore();
 }
 function __mmTankPrimaryTarget(__mmWeapon = v && v.weapons && v.weapons[0]) {
 
@@ -58937,7 +58951,6 @@ function __mmTankPrimaryTarget(__mmWeapon = v && v.weapons && v.weapons[0]) {
     __mmPrimaryTankCombatBlocked()
   )
     return null;
-  if (__mmAnimalInWeaponPath(Number(__mmWeapon), !0)) return null;
   return __mmKittyTankTarget(Number(__mmWeapon));
 }
 function __mmTankPrimaryPreferred(__mmWeapon = v && v.weapons && v.weapons[0]) {
