@@ -2,7 +2,7 @@
 // @name         kitty klient
 // @author       Coder Guy
 // @credits       random4ik — bot script
-// @version      7.0.46
+// @version      7.0.47
 // @icon         https://cdn.discordapp.com/icons/1540876076224356437/ac27c0ce87c4c46b407ebca78e150aeb.webp?size=2048
 // @description  kitty klient — a MooMoo.io client with adaptive zoom, fast autoheal, gear automation, combat tools, predictive placement, visual markers, CC0 background music, manual quick builds, and a fully rebindable keyboard/mouse controls HUD.
 // @match        *://moomoo.io/*
@@ -269,7 +269,7 @@
     const AUTO_PUSH_FINISHER_MIGRATION_KEY = "kitty-klient-auto-push-finisher-v1";
     const ASSASSIN_RANGE_AUTO_MIGRATION_KEY = "kitty-klient-assassin-range-auto-v1";
     const TAB_SYNC_BRIDGE_KEY = "kitty-klient-tab-sync-bridge-v1";
-    const KITTY_KLIENT_VERSION = "7.0.46";
+const KITTY_KLIENT_VERSION = "7.0.47";
     const KITTY_SHARED_STORAGE_APPLIED_EVENT = "KittyMooMooSharedStorageApplied";
 
 
@@ -4751,7 +4751,7 @@
 
         const actions = addHudSection(combatPage, "Gear & boost controls");
         addHudToggle(actions, "bullHelmet", "Bull helmet", "Equip Bull and the damage tail on a ready melee swing, including safe nearby-animal farming; it immediately yields to danger and higher-priority gear");
-        addHudToggle(actions, "tankRightClick", "Glotus-style Tank breaks", "Uses Glotus' AutoBreak decision path: prioritize a reachable enemy spike/trap, prefer the current primary or Great Hammer by range and reload state, and equip Tank only when the normal hit will not finish the structure.");
+        addHudToggle(actions, "tankRightClick", "Tank on normal clicks", "Arms owned Tank Gear for each loaded left- or right-click swing. Shield defense and higher-priority combat actions still take precedence.");
         addHudToggle(actions, "autoInsta", "Insta", "One combo planner: automatically attacks a ready lethal opportunity. R requests a combo manually. Turning this off disables both; normal attacks still work");
         addHudToggle(actions, "autoAim", "Kitty target aim", "While left click is held, aim at the nearer hostile player or active animal without changing out of the main weapon. Accessories follow fixed Kitty's close-target and danger rules.");
         addHudToggle(actions, "autoBarbarian", "Auto Barbarian", "On a confirmed nonlethal enemy main swing, use Barbarian Armor for the retaliation tick. It yields to projectile, sync, Musket, trap, and lethal threats.");
@@ -34574,6 +34574,11 @@ function __mmPulseHeldAttack() {
 
   if (__mmSecondaryHeld) return void __mmPulseSecondaryWeapon(!0);
   if (__mmPrimaryHeld) {
+    const __mmPrimaryWeapon = v && v.weapons && v.weapons[0];
+    // Tank-on-click is an explicit manual gear choice. Resolve it before the
+    // optional aim/Bull helper can replace the requested hat for this swing.
+    if (__mmTankPrimaryClickPreferred(__mmPrimaryWeapon))
+      return void __mmPulsePrimaryTankClick(__mmPrimaryWeapon);
     const __mmAutoAim = __mmAutoAimPlan(),
       __mmManualBreak = __mmAutoAim ? null : __mmKittyManualBreakPlan();
 
@@ -57481,7 +57486,11 @@ function __mmClearPrimaryTankLease() {
     (__mmPrimaryTankLeaseUntil = 0));
 }
 function __mmReleasePrimaryTankLease(__mmAllowWatchdog = !1) {
-  if (__mmPrimaryGearStage !== "tankBreak") return !1;
+  if (
+    __mmPrimaryGearStage !== "tankBreak" &&
+    __mmPrimaryGearStage !== "tankClick"
+  )
+    return !1;
   const __mmNow = Date.now(),
     __mmTickReady =
       __mmPrimaryTankLeaseUntilTick >= 0 &&
@@ -57490,7 +57499,11 @@ function __mmReleasePrimaryTankLease(__mmAllowWatchdog = !1) {
       __mmAllowWatchdog &&
       __mmPrimaryTankLeaseUntil > 0 &&
       __mmNow >= __mmPrimaryTankLeaseUntil;
-  const __mmCombatBlocked = __mmPrimaryTankCombatBlocked();
+  // Structure-breaking Tank yields to an immediate melee threat. A player
+  // explicitly holding a normal click, however, asked for Tank on that
+  // swing, so do not tear its lease down before the server has applied it.
+  const __mmCombatBlocked =
+    __mmPrimaryGearStage === "tankBreak" && __mmPrimaryTankCombatBlocked();
   if (!__mmTickReady && !__mmWatchdogReady && !__mmCombatBlocked) return !1;
   (__mmCombatBlocked || (__mmWatchdogReady && !__mmTickReady)) &&
     __mmResetManualHatOutput();
@@ -58358,6 +58371,9 @@ function __mmRunManualCombatGearTick(__mmForce = !1) {
         : __mmPulseSecondaryWeapon(!0)
     );
   if (!__mmPrimaryHeld) return;
+  const __mmPrimaryWeapon = v.weapons && v.weapons[0];
+  if (__mmTankPrimaryClickPreferred(__mmPrimaryWeapon))
+    return void __mmPulsePrimaryTankClick(__mmPrimaryWeapon);
   const __mmAutoAim = __mmAutoAimPlan(),
       __mmManualBreak = __mmAutoAim ? null : __mmKittyManualBreakPlan();
   if (__mmManualBreak)
@@ -58625,6 +58641,8 @@ function __mmPulsePrimaryBullWeapon(__mmAutoAim = __mmAutoAimPlan()) {
   const __mmManualBreak = __mmAutoAim ? null : __mmKittyManualBreakPlan();
   if (__mmManualBreak)
     return void __mmPulsePrimaryManualBreak(__mmManualBreak);
+  if (__mmTankPrimaryClickPreferred(v && v.weapons && v.weapons[0]))
+    return void __mmPulsePrimaryTankClick(v.weapons[0]);
   __mmClearResponsiveBreakAim();
   if (__mmAutoAim) {
     if (
@@ -59149,6 +59167,25 @@ function __mmTankSecondaryPreferred(__mmWeapon = __mmRightClickWeapon()) {
     return !1;
   return !!__mmKittyTankTarget(__mmWeapon);
 }
+function __mmTankClickWeaponEligible(__mmWeapon) {
+  const __mmWeaponData = b && b.weapons && b.weapons[__mmWeapon];
+  return !!(
+    __mmWeaponData &&
+    __mmWeaponData.projectile == null &&
+    !__mmWeaponData.shield
+  );
+}
+function __mmTankSecondaryClickPreferred(__mmWeapon = __mmRightClickWeapon()) {
+  return !!(
+    __mmTankRightClickEnabled &&
+    v &&
+    v.alive &&
+    v.skins &&
+    v.skins[40] &&
+    __mmWeapon != null &&
+    __mmTankClickWeaponEligible(__mmWeapon)
+  );
+}
 function __mmPrimaryTankCombatBlocked(
   __mmWeapon = v && v.weapons && v.weapons[0],
 ) {
@@ -59230,13 +59267,31 @@ function __mmTankPrimaryTarget(__mmWeapon = v && v.weapons && v.weapons[0]) {
 function __mmTankPrimaryPreferred(__mmWeapon = v && v.weapons && v.weapons[0]) {
   return !!__mmTankPrimaryTarget(__mmWeapon);
 }
+function __mmTankPrimaryClickPreferred(
+  __mmWeapon = v && v.weapons && v.weapons[0],
+) {
+  return !!(
+    __mmTankRightClickEnabled &&
+    v &&
+    v.alive &&
+    v.skins &&
+    v.skins[40] &&
+    __mmWeapon != null &&
+    __mmTankClickWeaponEligible(__mmWeapon)
+  );
+}
 function __mmEquipTankForPrimary(
   __mmWeapon = v && v.weapons && v.weapons[0],
   __mmNow = Date.now(),
+  __mmNormalClick = !1,
 ) {
   if (
     __mmInstaTestingModeEnabled ||
-    !__mmTankPrimaryPreferred(__mmWeapon) ||
+    !(
+      __mmNormalClick
+        ? __mmTankPrimaryClickPreferred(__mmWeapon)
+        : __mmTankPrimaryPreferred(__mmWeapon)
+    ) ||
     !v ||
     !v.alive ||
     __mmWeapon == null ||
@@ -59255,7 +59310,7 @@ function __mmEquipTankForPrimary(
   )
     return !1;
   (__mmClearPrimaryGearTimer(),
-    (__mmPrimaryGearStage = "tankBreak"),
+    (__mmPrimaryGearStage = __mmNormalClick ? "tankClick" : "tankBreak"),
     (__mmPrimaryTankLeaseUntilTick = __mmCombatServerTick + 1),
     (__mmPrimaryTankLeaseUntil =
       __mmNow + Math.max(30, __mmServerTickMs() * 1.25)),
@@ -59267,13 +59322,43 @@ function __mmEquipTankForPrimary(
     }, Math.max(30, __mmPrimaryTankLeaseUntil - __mmNow)));
   return !0;
 }
+function __mmPulsePrimaryTankClick(__mmWeapon, __mmNow = Date.now()) {
+  if (
+    !__mmPrimaryHeld ||
+    !v ||
+    !v.alive ||
+    !__mmTankPrimaryClickPreferred(__mmWeapon)
+  )
+    return !1;
+  Number(__mmPrimaryManualWeapon) !== Number(__mmWeapon) &&
+    ((__mmPrimaryManualWeapon = Number(__mmWeapon)),
+    (__mmPrimaryManualReadyAt = 0));
+  if (
+    !__mmManualWeaponArming(
+      __mmWeapon,
+      __mmPrimaryManualReadyAt,
+      __mmNow,
+    )
+  )
+    return !0;
+  if (!__mmEquipTankForPrimary(__mmWeapon, __mmNow, !0)) return !0;
+  (__mmGearArbiter.commit(),
+    je(__mmWeapon, !0),
+    !__mmPrimaryAttackDown && __mmSendWeaponAttack(1),
+    (__mmPrimaryAttackDown = !0),
+    __mmTrackPlayerToolCooldown(v.sid, __mmWeapon, "manual-primary-tank"),
+    (__mmPrimaryManualFiredTick = __mmCombatServerTick),
+    (__mmPrimaryManualReadyAt =
+      __mmNow + __mmManualWeaponCooldown(__mmWeapon, 40)));
+  return !0;
+}
 function __mmEquipTankForSecondary(
   __mmWeapon = __mmRightClickWeapon(),
   __mmNow = Date.now(),
 ) {
   if (
     __mmInstaTestingModeEnabled ||
-    !__mmTankSecondaryPreferred(__mmWeapon) ||
+    !__mmTankSecondaryClickPreferred(__mmWeapon) ||
     !v ||
     !v.alive ||
     __mmWeapon == null ||
@@ -59467,7 +59552,7 @@ function __mmPulseSecondaryWeapon(__mmTimingTick = !1) {
     ),
     __mmUseTank = !!(
       !__mmShieldMode &&
-      __mmTankSecondaryPreferred(__mmWeapon)
+      __mmTankSecondaryClickPreferred(__mmWeapon)
     );
   if (__mmShieldMode) {
     __mmReleaseSecondaryTankTap();
