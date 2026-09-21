@@ -2,7 +2,7 @@
 // @name         kitty klient
 // @author       Coder Guy
 // @credits       random4ik — bot script
-// @version      7.0.47
+// @version      7.0.48
 // @icon         https://cdn.discordapp.com/icons/1540876076224356437/ac27c0ce87c4c46b407ebca78e150aeb.webp?size=2048
 // @description  kitty klient — a MooMoo.io client with adaptive zoom, fast autoheal, gear automation, combat tools, predictive placement, visual markers, CC0 background music, manual quick builds, and a fully rebindable keyboard/mouse controls HUD.
 // @match        *://moomoo.io/*
@@ -269,7 +269,7 @@
     const AUTO_PUSH_FINISHER_MIGRATION_KEY = "kitty-klient-auto-push-finisher-v1";
     const ASSASSIN_RANGE_AUTO_MIGRATION_KEY = "kitty-klient-assassin-range-auto-v1";
     const TAB_SYNC_BRIDGE_KEY = "kitty-klient-tab-sync-bridge-v1";
-const KITTY_KLIENT_VERSION = "7.0.47";
+const KITTY_KLIENT_VERSION = "7.0.48";
     const KITTY_SHARED_STORAGE_APPLIED_EVENT = "KittyMooMooSharedStorageApplied";
 
 
@@ -726,7 +726,7 @@ const KITTY_KLIENT_VERSION = "7.0.47";
     const KITTY_DEFAULT_KEYBINDS = Object.freeze(Object.fromEntries(
         KITTY_BINDING_ACTIONS.map((entry) => [entry.id, entry.binding])
     ));
-    const KITTY_RETIRED_INSTA_KEYS = Object.freeze(["soldierPredictInsta", "autoBowUpgradeInsta", "reverseInsta", "oneTickInsta", "sevenShameInsta", "appleInsta", "bleedInsta", "knockbackInsta", "primaryKnockbackTick", "hammerTurretKnockbackTick", "hammerTrapKnockbackTick", "spikeSync", "spikeSyncHammer", "velTickInsta", "tankPredictInsta", "polearmAids", "autoTrapInsta", "autoSpikeInsta", "instaSync", "antiBoostInsta", "trapKnockbackStrike", "autoPushFinisher", "meowChainInsta"]);
+    const KITTY_RETIRED_INSTA_KEYS = Object.freeze(["soldierPredictInsta", "autoBowUpgradeInsta", "reverseInsta", "oneTickInsta", "sevenShameInsta", "appleInsta", "bleedInsta", "knockbackInsta", "primaryKnockbackTick", "hammerTurretKnockbackTick", "hammerTrapKnockbackTick", "spikeSync", "spikeSyncHammer", "velTickInsta", "tankPredictInsta", "polearmAids", "autoPushInsta", "autoTrapInsta", "autoSpikeInsta", "instaSync", "antiBoostInsta", "trapKnockbackStrike", "autoPushFinisher", "meowChainInsta"]);
     const HUD_DEFAULTS = Object.freeze({
 
 
@@ -4470,7 +4470,6 @@ const KITTY_KLIENT_VERSION = "7.0.47";
         const mediumCombatSection = addHudSection(mediumCombat, "Combat");
         addHudCompactGroup(mediumCombatSection, "insta", "Insta", "One ready-combo planner for automatic attacks and the R hotkey");
         addHudCompactGroup(mediumCombatSection, "combat", "Combat", "Combat defenses and tactical reaction helpers");
-        addHudCompactToggle(mediumCombatSection, "autoPushInsta", "Auto Push", "Push trapped enemies toward spikes when the route is safe");
         const mediumPlacementSection = addHudSection(mediumPlacement, "Placement");
         addHudCompactGroup(mediumPlacementSection, "autoPlace", "Auto Place", "Automatic trap, spike, and combat placement decisions");
         addHudCompactToggle(mediumPlacementSection, "smartAutoReplace", "Trap Replace", "Predict and restore your broken enemy-holding trap");
@@ -4759,7 +4758,6 @@ const KITTY_KLIENT_VERSION = "7.0.47";
         addHudSlider(actions, "autoSpinSpeed", "Auto Spin speed", "Degrees per second sent to other players");
         addHudToggle(actions, "boostBreak", "Shift + F boost-break", "Place and boost forward, snap 180° for each destroy swing, then instantly face forward again");
 
-        addHudToggle(actions, "autoPushInsta", "Auto Push", "Uses far-point alignment and close-point steering within 250 pixels; pauses while movement keys are held");
         addHudToggle(actions, "boostSpikeKill", "Boost + Spike", "G uses x-RedDragon's 80 ms pattern: two side spikes, two close diagonals within 150 units, then a forward Boost Pad. Kitty skips any illegal slot.");
 
         const combatStatistics = addHudSection(combatPage, "Session combat statistics");
@@ -32073,12 +32071,71 @@ window.addEventListener("KittyKlientAccountState", function (__mmEvent) {
     __mmEvent && __mmEvent.detail && __mmEvent.detail.signedIn
   );
   __mmEnforceAccountFeatureLocks();
+  __mmSetUnifiedInstaAutomation(__mmAutoInstaEnabled);
   __mmPublishHudState();
 });
-const __mmRetiredInstaKeys = new Set(["soldierPredictInsta", "autoBowUpgradeInsta", "reverseInsta", "oneTickInsta", "sevenShameInsta", "appleInsta", "bleedInsta", "knockbackInsta", "primaryKnockbackTick", "hammerTurretKnockbackTick", "hammerTrapKnockbackTick", "spikeSync", "spikeSyncHammer", "velTickInsta", "tankPredictInsta", "polearmAids", "autoTrapInsta", "autoSpikeInsta", "instaSync", "antiBoostInsta", "trapKnockbackStrike", "autoPushFinisher", "meowChainInsta"]);
+const __mmRetiredInstaKeys = new Set(["soldierPredictInsta", "autoBowUpgradeInsta", "reverseInsta", "oneTickInsta", "sevenShameInsta", "appleInsta", "bleedInsta", "knockbackInsta", "primaryKnockbackTick", "hammerTurretKnockbackTick", "hammerTrapKnockbackTick", "spikeSync", "spikeSyncHammer", "velTickInsta", "tankPredictInsta", "polearmAids", "autoPushInsta", "autoTrapInsta", "autoSpikeInsta", "instaSync", "antiBoostInsta", "trapKnockbackStrike", "autoPushFinisher", "meowChainInsta"]);
+function __mmSetUnifiedInstaAutomation(__mmEnabled) {
+  // These planners intentionally no longer have independent HUD controls.
+  // The main Insta toggle is their single source of truth, so a saved legacy
+  // flag can never leave one of them attacking after Insta was switched off.
+  __mmSoldierPredictInstaEnabled =
+    __mmEnabled && __mmAccountFeatureAllowed("soldierPredictInsta");
+  __mmAutoBowUpgradeInstaEnabled = __mmEnabled;
+  __mmReverseInstaEnabled = __mmEnabled;
+  __mmOneTickInstaEnabled = __mmEnabled;
+  __mmSevenShameInstaEnabled = __mmEnabled;
+  __mmAppleInstaEnabled = __mmEnabled;
+  __mmBleedInstaEnabled = __mmEnabled;
+  __mmKnockbackInstaEnabled = __mmEnabled;
+  __mmPrimaryKnockbackTickEnabled = __mmEnabled;
+  __mmHammerTurretKnockbackTickEnabled = __mmEnabled;
+  __mmHammerTrapKnockbackTickEnabled = __mmEnabled;
+  __mmSpikeSyncEnabled = __mmEnabled;
+  __mmSpikeSyncHammerEnabled = __mmEnabled;
+  __mmVelTickInstaEnabled = __mmEnabled;
+  __mmTankPredictInstaEnabled = __mmEnabled;
+  __mmHammerPolearmInstaEnabled = __mmEnabled;
+  __mmPolearmAidsEnabled = __mmEnabled;
+  __mmAutoPushInstaEnabled = __mmEnabled;
+  __mmAutoPushFinisherEnabled =
+    __mmEnabled && __mmAccountFeatureAllowed("autoPushFinisher");
+  __mmAutoTrapInstaEnabled = __mmEnabled;
+  __mmAutoSpikeInstaEnabled = __mmEnabled;
+  __mmInstaSyncEnabled = __mmEnabled;
+  __mmAntiBoostInstaEnabled = __mmEnabled;
+  __mmTrapKnockbackStrikeEnabled = __mmEnabled;
+  __mmMeowChainInstaEnabled =
+    __mmEnabled && __mmAccountFeatureAllowed("meowChainInsta");
+  if (__mmEnabled) {
+    (__mmEnsureOperationPipeline(),
+      __mmStartAutoTrapInsta(),
+      __mmUpdateAutoTrapInsta(),
+      __mmStartAutoSpikeInsta(),
+      __mmUpdateAutoSpikeInsta(),
+      __mmUpdateAutoPushWatchVisual());
+  } else {
+    (__mmSoldierPredictInsta.reset("Insta disabled"),
+      __mmBowUpgradeInsta.cancel("Insta disabled"),
+      __mmTankPredictInsta.reset(),
+      __mmStopVelTickInsta("Insta disabled"),
+      __mmStopAutoPushSetup("Insta disabled"),
+      __mmStopDedicatedKnockbackTick("Insta disabled"),
+      __mmStopSpikeSync("Insta disabled"),
+      __mmStopSpikeSyncHammer("Insta disabled"),
+      __mmStopSpikeTickStrike("Insta disabled"),
+      __mmAutoTrapInstaTimer && clearInterval(__mmAutoTrapInstaTimer),
+      (__mmAutoTrapInstaTimer = 0),
+      __mmAutoSpikeInstaTimer && clearInterval(__mmAutoSpikeInstaTimer),
+      (__mmAutoSpikeInstaTimer = 0));
+  }
+  __mmRefreshKittyInstaLoop();
+}
 function __mmSetHudToggle(__mmKey, __mmValue) {
-  // Legacy saves, imports and direct commands cannot revive retired planners.
+  // Legacy planner controls remain hidden. The master Insta control below
+  // owns their runtime state, so stale per-planner settings are ignored.
   if (__mmKey === "instaKill") return;
+  if (__mmRetiredInstaKeys.has(__mmKey)) return;
   let __mmEnabled = !__mmRetiredInstaKeys.has(__mmKey) && !!__mmValue;
   if (__mmEnabled && !__mmAccountFeatureAllowed(__mmKey))
     __mmEnabled = !1;
@@ -32325,6 +32382,7 @@ function __mmSetHudToggle(__mmKey, __mmValue) {
   else if (__mmKey === "autoInsta") {
     ((__mmAutoInstaEnabled = __mmEnabled),
       (__mmInstaUiEnabled = __mmEnabled),
+      __mmSetUnifiedInstaAutomation(__mmEnabled),
       !__mmEnabled && __mmInsta.cancel("insta-disabled"));
   }
   else if (__mmKey === "autoAim") {
@@ -32913,6 +32971,11 @@ function __mmApplyHudSettings(__mmSettings) {
       __mmSetHudValue(__mmKey,__mmSettings[__mmKey]);
     }
   } finally { __mmHudSettingsApplyDepth--; }
+
+  // The old per-planner preferences are intentionally ignored above. Apply
+  // the master value once after hydration so a default-on Insta setting also
+  // brings the bundled planners online.
+  __mmSetUnifiedInstaAutomation(__mmAutoInstaEnabled);
 
 
 
@@ -42616,6 +42679,7 @@ const __mmTurretMainSync = {
 };
 function __mmUpdateKittyInstas() {
   if (
+    !__mmAutoInstaEnabled ||
     !v ||
     !v.alive ||
     !Array.isArray(E) ||
@@ -42624,21 +42688,6 @@ function __mmUpdateKittyInstas() {
     __mmBoostInsta.isActive()
   )
     return;
-  const __mmAnyEnabled = !!(
-    __mmAppleInstaEnabled ||
-    __mmBleedInstaEnabled ||
-    __mmKnockbackInstaEnabled ||
-    __mmVelTickInstaEnabled ||
-    __mmTankPredictInstaEnabled ||
-    __mmHammerPolearmInstaEnabled ||
-    __mmPolearmAidsEnabled ||
-    __mmAutoPushInstaEnabled
-  );
-  if (!__mmAnyEnabled) {
-    (__mmStopVelTickInsta("Insta automation disabled"),
-      __mmStopAutoPushSetup("Insta automation disabled"));
-    return;
-  }
   const __mmAutoPushPlan = __mmAutoPushInstaEnabled
     ? __mmAutoPushTargetPlan()
     : null;
@@ -42653,6 +42702,62 @@ function __mmUpdateKittyInstas() {
     return;
   __mmAutoPushInstaEnabled && __mmUpdateAutoPushWatchVisual();
   __mmStopAutoPushSetup("no trapped auto-push target");
+  const __mmEnemy = __mmNearestEnemy();
+  if (!__mmEnemy) {
+    __mmStopVelTickInsta("no target");
+    return;
+  }
+  const __mmNow = Date.now(),
+    __mmPrediction = __mmPredictEnemyNextTick(__mmEnemy, __mmNow),
+    __mmPolearmHammer = __mmKittyPolearmHammerLoadout(),
+    __mmEnemyTrap = __mmAutoSpikeSpamTrapForEnemy(__mmEnemy);
+  if (__mmReverseInstaEnabled && __mmUpdatePriorityReversePolearmInsta())
+    return;
+  if (__mmSevenShameInstaEnabled && __mmUpdateSevenShameInsta()) return;
+  if (__mmTankPredictInstaEnabled) {
+    const __mmTankPlan = __mmTankPredictInsta.plan(__mmEnemy, __mmNow);
+    if (__mmTankPlan && __mmTankPredictInsta.launch(__mmEnemy, __mmTankPlan))
+      return;
+  }
+  if (
+    __mmHammerPolearmInstaEnabled &&
+    __mmHammerPolearmInsta.start(__mmEnemy)
+  )
+    return;
+  if (
+    __mmPolearmAidsEnabled &&
+    __mmPolearmHammer &&
+    __mmEnemyTrap &&
+    __mmStartKittyProfile("polearmAids", __mmEnemy, "enemy caught in allied trap")
+  )
+    return;
+  if (
+    __mmKnockbackInstaEnabled &&
+    __mmPolearmHammer &&
+    __mmKittyKnockbackContact(__mmEnemy, __mmPrediction) &&
+    __mmStartKittyProfile(
+      "knockback",
+      __mmEnemy,
+      "predicted knockback into allied spike",
+    )
+  )
+    return;
+  if (
+    __mmAppleInstaEnabled &&
+    __mmPolearmHammer &&
+    Number(__mmEnemy.skinIndex) === 6 &&
+    __mmStartKittyProfile("apple", __mmEnemy, "Soldier-hat Apple Insta")
+  )
+    return;
+  if (
+    __mmBleedInstaEnabled &&
+    __mmKittyBleedReady(__mmEnemy) &&
+    __mmStartKittyProfile("bleed", __mmEnemy, "high-variant Bleed Insta")
+  )
+    return;
+  __mmVelTickInstaEnabled
+    ? __mmUpdateVelTickInsta(__mmEnemy, __mmPrediction)
+    : __mmStopVelTickInsta("VelTick disabled");
 }
 function __mmStartKittyInstas() {
   __mmEnsureOperationPipeline();
