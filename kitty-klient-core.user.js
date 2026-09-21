@@ -2,7 +2,7 @@
 // @name         kitty klient
 // @author       Coder Guy
 // @credits       random4ik — bot script
-// @version      7.0.41
+// @version      7.0.42
 // @icon         https://cdn.discordapp.com/icons/1540876076224356437/ac27c0ce87c4c46b407ebca78e150aeb.webp?size=2048
 // @description  kitty klient — a MooMoo.io client with adaptive zoom, fast autoheal, gear automation, combat tools, predictive placement, visual markers, CC0 background music, manual quick builds, and a fully rebindable keyboard/mouse controls HUD.
 // @match        *://moomoo.io/*
@@ -267,7 +267,7 @@
     const AUTO_PUSH_FINISHER_MIGRATION_KEY = "kitty-klient-auto-push-finisher-v1";
     const ASSASSIN_RANGE_AUTO_MIGRATION_KEY = "kitty-klient-assassin-range-auto-v1";
     const TAB_SYNC_BRIDGE_KEY = "kitty-klient-tab-sync-bridge-v1";
-const KITTY_KLIENT_VERSION = "7.0.41";
+const KITTY_KLIENT_VERSION = "7.0.42";
     const KITTY_SHARED_STORAGE_APPLIED_EVENT = "KittyMooMooSharedStorageApplied";
 
 
@@ -13692,6 +13692,7 @@ function __mmQueueTacticalAction(owner, callback, options = {}) {
   __mmPendingTacticalActions.push({ owner, callback,
     priority: options.priority == null ? __mmActionPriority(owner) : options.priority,
     emergency: !!options.emergency, maintenance: !!options.maintenance,
+    followPlacement: !!options.followPlacement,
     stage: __mmOperationPipelineStage, order: __mmPendingTacticalActions.length });
 }
 function __mmTacticalMayReplace(current, owner, priority, emergency = false) {
@@ -13699,6 +13700,15 @@ function __mmTacticalMayReplace(current, owner, priority, emergency = false) {
   // Routine work may replace only an uncommitted reservation. Emergency
   // interruption remains available after packets have already left the client.
   return emergency || (!current.committed && priority > current.priority);
+}
+function __mmTacticalMayFollowPlacement(__mmCurrent, __mmAction) {
+  if (!__mmCurrent || !__mmAction || !__mmAction.followPlacement) return !1;
+  // Placement is a short select/place/restore transaction. Let a ready Insta
+  // consume that completed setup in the same tick, but keep defensive and all
+  // unrelated sequences exclusive so the packet-saving arbiter still works.
+  return ["smartAutoPlace", "spikeSpam", "trapReplace", "threatTrap"].includes(
+    __mmCurrent.owner,
+  );
 }
 function __mmFlushTacticalActions() {
   if (__mmTacticalCommitting) return;
@@ -13711,8 +13721,13 @@ function __mmFlushTacticalActions() {
     for (const action of actions) {
       if (!v || !v.alive) break;
       const winner = __mmTacticalChannels.sequence;
-      if (!action.maintenance && !__mmTacticalMayReplace(winner,
-          action.owner, action.priority, action.emergency)) {
+      const __mmMayFollowPlacement = __mmTacticalMayFollowPlacement(
+        winner,
+        action,
+      );
+      if (!action.maintenance && !__mmMayFollowPlacement &&
+          !__mmTacticalMayReplace(winner,
+            action.owner, action.priority, action.emergency)) {
         __mmActionLastDecision = action.owner + ": deferred to " + winner.owner;
         continue;
       }
@@ -14165,7 +14180,8 @@ function __mmReleaseAllConfiguredBindings() {
     __mmReleaseConfiguredAction(__mmActions[__mmIndex], !1);
   (__mmReleaseConfiguredMovement(),
     __mmActiveBindingActions.clear(),
-    __mmConsumedBindingInputs.clear());
+    __mmConsumedBindingInputs.clear(),
+    __mmSyncNativeMouseAttackState());
 }
 function __mmConfiguredModifierReleased(__mmCode, __mmParts) {
   return !!(
@@ -14290,28 +14306,28 @@ function __mmHandleConfiguredInput(__mmEvent, __mmPressed, __mmMouse) {
     (__mmEvent.preventDefault(), __mmEvent.stopImmediatePropagation());
   return __mmConsumed;
 }
-document.addEventListener(
+window.addEventListener(
   "keydown",
   function (__mmEvent) {
     __mmHandleConfiguredInput(__mmEvent, !0, !1);
   },
   !0,
 );
-document.addEventListener(
+window.addEventListener(
   "keyup",
   function (__mmEvent) {
     __mmHandleConfiguredInput(__mmEvent, !1, !1);
   },
   !0,
 );
-document.addEventListener(
+window.addEventListener(
   "mousedown",
   function (__mmEvent) {
     __mmHandleConfiguredInput(__mmEvent, !0, !0);
   },
   !0,
 );
-document.addEventListener(
+window.addEventListener(
   "mouseup",
   function (__mmEvent) {
     __mmHandleConfiguredInput(__mmEvent, !1, !0);
@@ -14681,7 +14697,14 @@ function __mmRunServerTacticalTick() {
         __mmUpdateAutoPurchase();
       });
     __mmOperationStage("tick-trap", function () {
-      (__mmTrapEscapeEnabled || __mmTrapAttackActive) && __mmQueueTacticalAction("trapEscape", () => __mmBreakTrap(), { emergency: true });
+      if (__mmTrapEscapeEnabled || __mmTrapAttackActive) {
+        (__mmQueueTacticalAction("trapEscape", () => __mmBreakTrap(), { emergency: true }),
+          __mmQueueTacticalAction(
+            "trapEscape",
+            () => __mmUpdateDualTrapEscapePreplace(),
+            { emergency: true, maintenance: true },
+          ));
+      }
     });
     __mmOperationStage("tick-trap-replace", function () {
       __mmQueueTacticalAction("trapReplace", () => __mmUpdatePriorityTrapReplacement());
@@ -14711,7 +14734,9 @@ function __mmRunServerTacticalTick() {
         __mmQueueTacticalAction("manualAttack", () => __mmUpdateAutoBarbarian()),
         __mmQueueTacticalAction("spikeGearCounter", () => __mmUpdateSpikeGearCounter()),
         __mmQueueTacticalAction("movementGear", () => __mmUpdateBushMode()),
-        __mmQueueTacticalAction("insta", () => __mmUpdateAutoInsta()));
+        __mmQueueTacticalAction("insta", () => __mmUpdateAutoInsta(), {
+          followPlacement: true,
+        }));
     });
     __mmOperationStage("tick-shame-reset", function () {
       __mmQueueTacticalAction("autoHeal", () => __mmUpdateAutoHealBullShameReset(__mmThreat), { emergency: true });
@@ -14824,7 +14849,14 @@ function __mmRunOperationPipeline() {
       });
 
     __mmOperationStage("trap", function () {
-      (__mmTrapEscapeEnabled || __mmTrapAttackActive) && __mmQueueTacticalAction("trapEscape", () => __mmBreakTrap(), { emergency: true });
+      if (__mmTrapEscapeEnabled || __mmTrapAttackActive) {
+        (__mmQueueTacticalAction("trapEscape", () => __mmBreakTrap(), { emergency: true }),
+          __mmQueueTacticalAction(
+            "trapEscape",
+            () => __mmUpdateDualTrapEscapePreplace(),
+            { emergency: true, maintenance: true },
+          ));
+      }
     });
 
 
@@ -14867,7 +14899,9 @@ function __mmRunOperationPipeline() {
           __mmQueueTacticalAction("movementGear", () => __mmUpdateBushMode()),
 
 
-          __mmQueueTacticalAction("insta", () => __mmUpdateAutoInsta()));
+          __mmQueueTacticalAction("insta", () => __mmUpdateAutoInsta(), {
+            followPlacement: true,
+          }));
       });
 
 
@@ -15167,7 +15201,11 @@ O.send = function () {
   __mmBeforeTacticalPacket(arguments[0], arguments[1]);
   const __mmResult = __mmOriginalSocketSend.apply(this, arguments);
 
-
+  // Automatic attack pulses must not leave MooMoo's native held-attack flag
+  // armed. Preserve it only while one of Kitty's real held inputs is active.
+  arguments[0] === "F" &&
+    Number(arguments[1]) === 0 &&
+    __mmSyncNativeMouseAttackState();
 
   arguments[0] === "F" && Number(arguments[1]) === 1 && __mmResumeAutoSpinAfterAction();
   __mmHeldWeaponSelect != null && __mmCopyHeldWeaponToBots(__mmHeldWeaponSelect);
@@ -28459,7 +28497,7 @@ function __mmAutoEnemySpikeBreakPlan() {
     __mmTick = Math.max(1, __mmServerTickMs()),
     __mmPingValue = Number(window.pingTime ?? window.ping),
     __mmPing = Number.isFinite(__mmPingValue)
-      ? Math.max(0, Math.min(300, __mmPingValue)) : 0,
+      ? Math.max(0, Math.min(300, __mmPingValue)) / 2 : 0,
     __mmSampleAt = Number(__mmCombatServerTickAt),
     __mmAge = __mmSampleAt > 0 ? Math.max(0, __mmNow - __mmSampleAt) : Infinity,
     __mmFresh = __mmAge <= Math.max(250, __mmTick * 2),
@@ -34473,6 +34511,9 @@ function __mmHeldAttackWeapon() {
 }
 function __mmSendWeaponAttack(__mmState) {
   O.send("F", __mmState, null);
+}
+function __mmSyncNativeMouseAttackState() {
+  U = __mmPrimaryHeld || __mmSecondaryHeld ? 1 : 0;
 }
 function __mmPulseHeldAttack() {
   const __mmWeapon = __mmHeldAttackWeapon();
@@ -51772,13 +51813,127 @@ function __mmSmartTrapReplaceTarget(__mmKnown) {
   }
   return __mmClosest;
 }
+// Trap escape normally owns the placement channel. Keep that protection, but
+// let a predicted exact re-trap through when both players are locked in
+// adjacent traps and the enemy is about to break a friendly trap beneath them.
+// The candidate remains an expected-removal solve, so this cannot place into a
+// live occupied slot or turn ordinary trap escape into general auto-place.
+function __mmDualTrapEscapePreplaceContext(__mmNow = Date.now()) {
+  if (
+    !v ||
+    !v.alive ||
+    __mmInstaTestingModeEnabled ||
+    (!__mmTrapEscapeEnabled && !__mmTrapAttackActive) ||
+    (!__mmSmartAutoReplaceEnabled && !__mmSmartSpikeSyncPlaceEnabled)
+  )
+    return null;
+  const __mmLocalTrap = __mmCurrentNearbyTrap(),
+    __mmEnemies = __mmSmartPlacementEnemies(),
+    __mmTarget = __mmSmartTrappedEnemyTarget(__mmEnemies),
+    __mmTrapItem = __mmSmartPitTrapItem();
+  if (
+    !__mmLocalTrap ||
+    !__mmTarget ||
+    !__mmTarget.enemy ||
+    !__mmTarget.trap ||
+    __mmTrapItem == null
+  )
+    return null;
+  const __mmLocalScale = __mmReferenceObjectScale(__mmLocalTrap),
+    __mmEnemyTrapScale = __mmReferenceObjectScale(__mmTarget.trap),
+    __mmDualTrapRange = Math.max(
+      190,
+      __mmLocalScale + __mmEnemyTrapScale + 95,
+    ),
+    __mmLocalEnemyDistance = Number(__mmTarget.distance),
+    __mmTrapDistance = Math.hypot(
+      Number(__mmLocalTrap.x) - Number(__mmTarget.trap.x),
+      Number(__mmLocalTrap.y) - Number(__mmTarget.trap.y),
+    );
+  if (
+    !Number.isFinite(__mmLocalEnemyDistance) ||
+    __mmLocalEnemyDistance > 235 ||
+    !Number.isFinite(__mmTrapDistance) ||
+    __mmTrapDistance > __mmDualTrapRange
+  )
+    return null;
+  const __mmOrigin = __mmServerEntityPosition(v) || v,
+    __mmEnemySid = String(__mmTarget.enemy.sid),
+    __mmTraps = __mmActiveObjectSnapshot(!0).traps;
+  let __mmBest = null;
+  for (let __mmIndex = 0; __mmIndex < __mmTraps.length; __mmIndex++) {
+    const __mmTrap = __mmTraps[__mmIndex];
+    if (
+      !__mmTrap ||
+      !__mmTrap.active ||
+      !__mmTrap.trap ||
+      !__mmFriendlyStructure(__mmTrap) ||
+      Math.hypot(Number(__mmTrap.x) - Number(v.x), Number(__mmTrap.y) - Number(v.y)) > 190
+    )
+      continue;
+    const __mmHoldingEnemy = __mmSmartTrapReplaceTarget(__mmTrap);
+    if (
+      !__mmHoldingEnemy ||
+      (String(__mmHoldingEnemy.sid) !== __mmEnemySid &&
+        __mmHoldingEnemy !== __mmTarget.enemy)
+    )
+      continue;
+    const __mmBreakAt = __mmReplacementBreakAt(__mmTrap, __mmNow);
+    if (__mmBreakAt == null) continue;
+    const __mmAngle = Math.atan2(
+        Number(__mmTrap.y) - Number(__mmOrigin.y),
+        Number(__mmTrap.x) - Number(__mmOrigin.x),
+      ),
+      __mmCandidate = __mmSmartCandidateForExpectedRemoval(
+        __mmTrapItem,
+        __mmAngle,
+        __mmTrap,
+      );
+    if (
+      !__mmCandidate ||
+      !__mmCandidate.preplace ||
+      Math.hypot(
+        __mmCandidate.x - Number(__mmTrap.x),
+        __mmCandidate.y - Number(__mmTrap.y),
+      ) > 14
+    )
+      continue;
+    if (!__mmBest || __mmBreakAt < __mmBest.breakAt)
+      __mmBest = {
+        target: __mmTarget,
+        localTrap: __mmLocalTrap,
+        trap: __mmTrap,
+        item: __mmTrapItem,
+        candidate: __mmCandidate,
+        breakAt: __mmBreakAt,
+      };
+  }
+  return __mmBest;
+}
+function __mmUpdateDualTrapEscapePreplace() {
+  const __mmContext = __mmDualTrapEscapePreplaceContext();
+  if (!__mmContext) return !1;
+  const __mmPlaced = __mmPreplaceReplacement(
+    __mmContext.trap,
+    __mmContext.item,
+  );
+  if (__mmPlaced)
+    __mmSmartSetStatus("sent", "dual-trap escape enemy preplace", {
+      legal: 1,
+      scored: 1,
+      itemSummary: "Pit Trap",
+    });
+  else if (__mmReplacementTimers.has(__mmContext.trap))
+    __mmSmartSetStatus("armed", "dual-trap escape enemy preplace", {
+      legal: 1,
+      scored: 1,
+      itemSummary: "Pit Trap",
+    });
+  return __mmPlaced;
+}
 function __mmSmartTrapReplaceMayPlace() {
-
-
-
   if (
     [
-      "trapEscape",
       "antiInsta",
       "autoHeal",
       "placementDefense",
@@ -51789,6 +51944,8 @@ function __mmSmartTrapReplaceMayPlace() {
   )
     return !1;
 
+  if (__mmActionOwner === "trapEscape")
+    return !!__mmDualTrapEscapePreplaceContext();
 
   return !!(
     __mmActionCanPreempt("trapReplace") ||
@@ -57191,10 +57348,13 @@ window.addEventListener("blur", function () {
   __mmStopBuildSpam();
 });
 function __mmIsGameClick(__mmEvent) {
-  return (
-    __mmEvent.target instanceof Element &&
-    __mmEvent.target.closest("#gameCanvas,#touch-controls-fullscreen")
-  );
+  const __mmTarget = __mmEvent && __mmEvent.target;
+  if (!__mmTarget) return !1;
+  const __mmTagName = String(__mmTarget.tagName || "").toLowerCase();
+  if (__mmTagName === "canvas" && String(__mmTarget.id || "") !== "mapDisplay")
+    return !0;
+  return typeof __mmTarget.closest === "function" &&
+    !!__mmTarget.closest("#gameCanvas,#touch-controls-fullscreen");
 }
 function __mmManualWeaponCooldown(__mmWeapon, __mmSwingHat = null) {
   const __mmData = b && b.weapons && b.weapons[__mmWeapon];
@@ -58472,6 +58632,7 @@ function __mmStartPrimaryInput() {
     (__mmPrimaryMaterialManualWeapon = null),
     (__mmPrimaryMaterialManualReadyAt = 0),
     (__mmPrimaryHeld = !0),
+    __mmSyncNativeMouseAttackState(),
     __mmUnequipMonkeyTailForPrimary(),
     __mmStartHeldAttackPulse(),
     __mmAtFullHealth() && __mmStopFoodSpam());
@@ -58484,6 +58645,7 @@ function __mmStopPrimaryInput() {
     __mmPrimaryAttackDown && v && v.alive && __mmSendWeaponAttack(0),
     (__mmPrimaryAttackDown = !1),
     (__mmPrimaryHeld = !1),
+    __mmSyncNativeMouseAttackState(),
     __mmClearResponsiveBreakAim(),
     __mmClearAutoAim(),
     __mmGearArbiter.release("manual:"),
@@ -58519,7 +58681,7 @@ function __mmObservePhysicalMouseRelease(__mmEvent) {
     __mmPhysicalPrimaryDown = !1;
   if (__mmEvent && __mmEvent.button === 2)
     __mmPhysicalSecondaryDown = !1;
-  __mmPhysicalInputAt = Date.now();
+  (__mmPhysicalInputAt = Date.now(), __mmSyncNativeMouseAttackState());
 }
 window.addEventListener("mouseup", __mmObservePhysicalMouseRelease, !0);
 window.addEventListener("pointerup", __mmObservePhysicalMouseRelease, !0);
@@ -58536,7 +58698,8 @@ window.addEventListener(
   function () {
     ((__mmPhysicalPrimaryDown = !1),
       (__mmPhysicalSecondaryDown = !1),
-      (__mmPhysicalInputAt = Date.now()));
+      (__mmPhysicalInputAt = Date.now()),
+      __mmSyncNativeMouseAttackState());
   },
   !0,
 );
@@ -59329,6 +59492,7 @@ function __mmStopSecondary() {
     __mmSecondaryAttackDown && v && v.alive && __mmSendWeaponAttack(0),
     (__mmSecondaryAttackDown = !1),
     (__mmSecondaryHeld = !1),
+    __mmSyncNativeMouseAttackState(),
     __mmClearSecondaryTankLease(),
     __mmGearArbiter.release("manual:"),
     (__mmSecondaryShieldActive = !1),
@@ -59413,6 +59577,7 @@ function __mmStartConfiguredSecondary(__mmEvent) {
       ((__mmSecondaryManualWeapon = __mmWeapon),
       (__mmSecondaryManualReadyAt = 0)),
     (__mmSecondaryHeld = !0),
+    __mmSyncNativeMouseAttackState(),
     (__mmPrimaryHeld || __mmPrimaryClickHat != null) &&
       (__mmStopPrimaryInput(), __mmForceRestoreBullForPrimary()),
 
