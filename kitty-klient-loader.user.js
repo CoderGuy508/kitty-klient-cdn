@@ -2,7 +2,7 @@
 // @name         kitty klient
 // @author       Coder Guy
 // @credits       random4ik — bot script
-// @version      7.0.47
+// @version      7.0.48
 // @icon         https://cdn.discordapp.com/icons/1540876076224356437/ac27c0ce87c4c46b407ebca78e150aeb.webp?size=2048
 // @description  kitty klient — a MooMoo.io client with adaptive zoom, fast autoheal, gear automation, combat tools, predictive placement, visual markers, CC0 background music, manual quick builds, and a fully rebindable keyboard/mouse controls HUD.
 // @match        *://moomoo.io/*
@@ -19,7 +19,7 @@
 // @license      MIT
 // @updateURL    https://raw.githubusercontent.com/CoderGuy508/kitty-klient-cdn/main/kitty-klient-loader.user.js
 // @downloadURL  https://raw.githubusercontent.com/CoderGuy508/kitty-klient-cdn/main/kitty-klient-loader.user.js
-// @require      https://cdn.jsdelivr.net/gh/CoderGuy508/kitty-klient-cdn@c2ef940bc4e902a0dd8c59fd34e8205ab2c045a8/kitty-klient-core.user.js
+// @require      https://cdn.jsdelivr.net/gh/CoderGuy508/kitty-klient-cdn@0f30796df1427f0b8f2f7724375f8753afc15488/kitty-klient-core.user.js
 // ==/UserScript==
 
 void 0;
