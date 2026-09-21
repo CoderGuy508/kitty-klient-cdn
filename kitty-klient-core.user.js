@@ -2,7 +2,7 @@
 // @name         kitty klient
 // @author       Coder Guy
 // @credits       random4ik — bot script
-// @version      7.0.45
+// @version      7.0.46
 // @icon         https://cdn.discordapp.com/icons/1540876076224356437/ac27c0ce87c4c46b407ebca78e150aeb.webp?size=2048
 // @description  kitty klient — a MooMoo.io client with adaptive zoom, fast autoheal, gear automation, combat tools, predictive placement, visual markers, CC0 background music, manual quick builds, and a fully rebindable keyboard/mouse controls HUD.
 // @match        *://moomoo.io/*
@@ -269,7 +269,7 @@
     const AUTO_PUSH_FINISHER_MIGRATION_KEY = "kitty-klient-auto-push-finisher-v1";
     const ASSASSIN_RANGE_AUTO_MIGRATION_KEY = "kitty-klient-assassin-range-auto-v1";
     const TAB_SYNC_BRIDGE_KEY = "kitty-klient-tab-sync-bridge-v1";
-    const KITTY_KLIENT_VERSION = "7.0.45";
+    const KITTY_KLIENT_VERSION = "7.0.46";
     const KITTY_SHARED_STORAGE_APPLIED_EVENT = "KittyMooMooSharedStorageApplied";
 
 
@@ -13687,14 +13687,14 @@ function __mmResetTacticalChannels(__mmTick = __mmCurrentTacticalTick()) {
     delete __mmTacticalChannels[__mmChannel];
   __mmTacticalPlacementKeys.clear();
 }
-// Resolve whole feature callbacks before they can change gear, select a weapon,
-// aim or attack. A no-op candidate leaves the next candidate free to run.
+// Priority orders callbacks; it does not grant exclusive ownership of a tick.
+// Each feature checks its live action ownership, reloads and resource channels.
 function __mmQueueTacticalAction(owner, callback, options = {}) {
   if (!__mmTacticalCollecting) return callback();
   __mmPendingTacticalActions.push({ owner, callback,
     priority: options.priority == null ? __mmActionPriority(owner) : options.priority,
     emergency: !!options.emergency, maintenance: !!options.maintenance,
-    followPlacement: !!options.followPlacement,
+    continuation: !!options.continuation,
     stage: __mmOperationPipelineStage, order: __mmPendingTacticalActions.length });
 }
 function __mmTacticalMayReplace(current, owner, priority, emergency = false) {
@@ -13703,36 +13703,17 @@ function __mmTacticalMayReplace(current, owner, priority, emergency = false) {
   // interruption remains available after packets have already left the client.
   return emergency || (!current.committed && priority > current.priority);
 }
-function __mmTacticalMayFollowPlacement(__mmCurrent, __mmAction) {
-  if (!__mmCurrent || !__mmAction || !__mmAction.followPlacement) return !1;
-  // Placement is a short select/place/restore transaction. Let a ready Insta
-  // consume that completed setup in the same tick, but keep defensive and all
-  // unrelated sequences exclusive so the packet-saving arbiter still works.
-  return ["smartAutoPlace", "spikeSpam", "trapReplace", "threatTrap"].includes(
-    __mmCurrent.owner,
-  );
-}
 function __mmFlushTacticalActions() {
   if (__mmTacticalCommitting) return;
   __mmTacticalCollecting = false;
   __mmTacticalCommitting = true;
   const actions = __mmPendingTacticalActions.splice(0).sort((a, b) =>
     Number(b.emergency) - Number(a.emergency) ||
+    Number(b.continuation) - Number(a.continuation) ||
     b.priority - a.priority || a.order - b.order);
   try {
     for (const action of actions) {
       if (!v || !v.alive) break;
-      const winner = __mmTacticalChannels.sequence;
-      const __mmMayFollowPlacement = __mmTacticalMayFollowPlacement(
-        winner,
-        action,
-      );
-      if (!action.maintenance && !__mmMayFollowPlacement &&
-          !__mmTacticalMayReplace(winner,
-            action.owner, action.priority, action.emergency)) {
-        __mmActionLastDecision = action.owner + ": deferred to " + winner.owner;
-        continue;
-      }
       __mmTacticalCurrentAction = action;
       try { __mmOperationStage(action.stage, action.callback); }
       finally {
@@ -13752,6 +13733,8 @@ function __mmFlushTacticalActions() {
   }
 }
 function __mmBeforeTacticalPacket(type, value) {
+  // Releasing an attack is cleanup, never a new action or a gear dependency.
+  if (type === "F" && Number(value) === 0) return;
   if (type !== "z" && type !== "D" && type !== "F" &&
       !(type === "c" && Number(value) === 0)) return;
   // Flush the selected action's gear before its weapon/aim/attack packets.
@@ -13762,10 +13745,6 @@ function __mmBeforeTacticalPacket(type, value) {
 }
 function __mmNoteTacticalCommit() {
   const action = __mmTacticalCurrentAction;
-  if (action && !action.maintenance) {
-    __mmTacticalChannels.sequence = { owner: action.owner,
-      priority: action.priority, committed: true, at: Date.now(), action };
-  }
   for (const channel in __mmTacticalChannels) {
     const reservation = __mmTacticalChannels[channel];
     if (action ? reservation.action === action : !reservation.action)
@@ -14736,8 +14715,10 @@ function __mmRunServerTacticalTick() {
         __mmQueueTacticalAction("manualAttack", () => __mmUpdateAutoBarbarian()),
         __mmQueueTacticalAction("spikeGearCounter", () => __mmUpdateSpikeGearCounter()),
         __mmQueueTacticalAction("movementGear", () => __mmUpdateBushMode()),
-        __mmQueueTacticalAction("insta", () => __mmUpdateAutoInsta(), {
-          followPlacement: true,
+        __mmQueueTacticalAction("insta", __mmInsta.isActive()
+          ? () => __mmInsta.advanceReverse()
+          : () => __mmUpdateAutoInsta(), {
+          continuation: __mmInsta.isActive(),
         }));
     });
     __mmOperationStage("tick-shame-reset", function () {
@@ -14862,6 +14843,9 @@ function __mmRunOperationPipeline() {
     });
 
 
+    __mmOperationStage("manual", function () {
+      __mmQueueTacticalAction("manualAttack", () => __mmRunManualCombatGearTick());
+    });
     __mmOperationStage("trap-replace", function () {
       __mmQueueTacticalAction("trapReplace", () => __mmUpdatePriorityTrapReplacement());
     });
@@ -14901,8 +14885,10 @@ function __mmRunOperationPipeline() {
           __mmQueueTacticalAction("movementGear", () => __mmUpdateBushMode()),
 
 
-          __mmQueueTacticalAction("insta", () => __mmUpdateAutoInsta(), {
-            followPlacement: true,
+          __mmQueueTacticalAction("insta", __mmInsta.isActive()
+            ? () => __mmInsta.advanceReverse()
+            : () => __mmUpdateAutoInsta(), {
+            continuation: __mmInsta.isActive(),
           }));
       });
 
@@ -15102,6 +15088,7 @@ function __mmCopyHeldWeaponToBots(__mmWeaponId) {
   return 0;
 }
 const __mmOriginalSocketSend = O.send;
+let __mmPlacementAttackOpen = false;
 O.send = function () {
   const __mmUpgradePacket = arguments[0] === "H";
   const __mmChatCommand = arguments[0] === "6" ? String(arguments[1] || "").trim() : "";
@@ -15116,6 +15103,10 @@ O.send = function () {
   const __mmHeldWeaponSelect = arguments[0] === "z" && arguments[2] === true
     ? Number(arguments[1])
     : null;
+  // A build pulse must end before a weapon is selected, even if a placement
+  // callback skipped its release or threw after the start packet.
+  if (__mmHeldWeaponSelect != null && __mmPlacementAttackOpen)
+    O.send("F", 0, null);
   const __mmBuildLimitAttempt =
     arguments[0] === "F" &&
     Number(arguments[1]) === 1 &&
@@ -15200,6 +15191,9 @@ O.send = function () {
   __mmProtectTrapBreakDirection(arguments);
   __mmBeforeTacticalPacket(arguments[0], arguments[1]);
   const __mmResult = __mmOriginalSocketSend.apply(this, arguments);
+  if (arguments[0] === "F")
+    __mmPlacementAttackOpen =
+      Number(arguments[1]) === 1 && __mmBuildLimitAttempt != null;
 
   // Automatic attack pulses must not leave MooMoo's native held-attack flag
   // armed. Preserve it only while one of Kitty's real held inputs is active.
@@ -33045,7 +33039,7 @@ function __mmMovementInputActive() {
   return __mmPlayerMoving() || __mmMenuMovementKeys.size > 0 ||
     __mmConfiguredMovementActions.size > 0 || Number.isFinite(Kt);
 }
-function __mmIdleHatSelectionAllowed() {
+function __mmDefaultHatSelectionAllowed() {
   if (
     !v ||
     !v.alive ||
@@ -33057,13 +33051,16 @@ function __mmIdleHatSelectionAllowed() {
     __mmInsta.isActive() ||
     __mmBoostInsta.isActive() ||
     __mmInstaSyncPending ||
-    __mmInstaSyncFiring ||
-    __mmMovementInputActive()
+    __mmInstaSyncFiring
   )
     return !1;
-  return ["idle", "waiting", "movementGear", "soldierGear"].includes(
+  return ["idle", "waiting", "movementGear", "soldierGear", "weaponRecharge"].includes(
     String(__mmActionOwner || "idle"),
   );
+}
+function __mmIdleHatSelectionAllowed() {
+  return __mmDefaultHatSelectionAllowed() &&
+    __mmActionOwner !== "weaponRecharge" && !__mmMovementInputActive();
 }
 function __mmCombatFallbackHat() {
   if (!v || !v.alive) return null;
@@ -33176,7 +33173,7 @@ function __mmResolveDefaultHat() {
       ? Number(__mmActualHat)
       : 0,
     __mmMovement = __mmDefaultMovementSample(),
-    __mmIdleSelection = __mmIdleHatSelectionAllowed(),
+    __mmDefaultSelection = __mmDefaultHatSelectionAllowed(),
     __mmStationary = !__mmMovementInputActive(),
     __mmActualOwned = __mmCanEquipHat(__mmActual);
 
@@ -33195,9 +33192,8 @@ function __mmResolveDefaultHat() {
 
   if (__mmDefaultSoldierThreat()) return 6;
 
-  // A shop selection is an idle preference, not a combat restore target.
-  // While any action is in progress, use the safe held-input fallback instead.
-  if (!__mmIdleSelection) return __mmCombatFallbackHat();
+  // Movement can select biome/speed gear; combat cannot restore a shop hat.
+  if (!__mmDefaultSelection) return __mmCombatFallbackHat();
 
 
   if (
@@ -57929,20 +57925,28 @@ function __mmCommitManualHat(
     if (Number(__mmManualHatOutputHat) === Number(__mmHat)) return !0;
     if ((Number(__mmPriority) || 0) <= __mmManualHatOutputPriority) return !1;
   }
-  __mmManualHatOutputHat = Number(__mmHat);
-  __mmManualHatOutputPriority = Number(__mmPriority) || 0;
+  const __mmWasWriting = __mmCombatHatLockWriting;
   __mmCombatHatLockWriting = !0;
   try {
-    __mmEquipGearPair(
+    const __mmAccepted = __mmEquipGearPair(
       __mmHat,
       __mmTail,
       !0,
       !1,
       "manual:" + String(__mmCombatServerTick),
-      __mmManualHatOutputPriority,
+      Number(__mmPriority) || 0,
     );
+    if (!__mmAccepted) return !1;
+    // Keep the manual lock permission until the queued hat actually reaches
+    // the socket. Clearing it before commit can reject a Bull-to-Tank swap.
+    __mmGearArbiter.commit();
+    const __mmEffectiveHat = __mmPendingHat != null
+      ? __mmPendingHat : v.skinIndex;
+    if (Number(__mmEffectiveHat) !== Number(__mmHat)) return !1;
+    __mmManualHatOutputHat = Number(__mmHat);
+    __mmManualHatOutputPriority = Number(__mmPriority) || 0;
   } finally {
-    __mmCombatHatLockWriting = !1;
+    __mmCombatHatLockWriting = __mmWasWriting;
   }
   return !0;
 }
