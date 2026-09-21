@@ -19,7 +19,7 @@
 // @license      MIT
 // @updateURL    https://raw.githubusercontent.com/CoderGuy508/kitty-klient-cdn/main/kitty-klient-loader.user.js
 // @downloadURL  https://raw.githubusercontent.com/CoderGuy508/kitty-klient-cdn/main/kitty-klient-loader.user.js
-// @require      https://cdn.jsdelivr.net/gh/CoderGuy508/kitty-klient-cdn@a64d5d7/kitty-klient-core.user.js
+// @require      https://cdn.jsdelivr.net/gh/CoderGuy508/kitty-klient-cdn@a64d5d74e077ed909ca8bdbd4b08cae582e97d0e/kitty-klient-core.user.js
 // ==/UserScript==
 
 void 0;
