@@ -2,7 +2,7 @@
 // @name         kitty klient
 // @author       Coder Guy
 // @credits       random4ik — bot script
-// @version      7.0.43
+// @version      7.0.44
 // @icon         https://cdn.discordapp.com/icons/1540876076224356437/ac27c0ce87c4c46b407ebca78e150aeb.webp?size=2048
 // @description  kitty klient — a MooMoo.io client with adaptive zoom, fast autoheal, gear automation, combat tools, predictive placement, visual markers, CC0 background music, manual quick builds, and a fully rebindable keyboard/mouse controls HUD.
 // @match        *://moomoo.io/*
@@ -15135,18 +15135,13 @@ O.send = function () {
     !__mmRightClickTankHatAllowed(arguments[2])
   )
     return;
-  if (
+  const __mmExternalHatPacket =
     arguments[0] === "c" &&
     Number(arguments[1]) === 0 &&
     !arguments[3] &&
     !__mmInternalHatPacket &&
-    Number.isFinite(Number(arguments[2]))
-  ) {
-
-
-    __mmActualHat = Number(arguments[2]);
-    __mmLastNormalHat = __mmActualHat;
-  }
+    Number.isFinite(Number(arguments[2]));
+  if (__mmExternalHatPacket && !__mmIdleHatSelectionAllowed()) return;
   if (
     arguments[0] === "c" &&
     Number(arguments[1]) === 0 &&
@@ -15174,6 +15169,9 @@ O.send = function () {
     !__mmCombatHatPacketAllowed(arguments[2])
   )
     return;
+  if (__mmExternalHatPacket)
+    ((__mmActualHat = Number(arguments[2])),
+      (__mmLastNormalHat = __mmActualHat));
   if (
     arguments[0] === "M" &&
     arguments[1] &&
@@ -16207,10 +16205,14 @@ function __mmInstaSafeRestoreHat(__mmFallback) {
   ];
   for (let __mmIndex = 0; __mmIndex < __mmCandidates.length; __mmIndex++) {
     const __mmHat = __mmCandidates[__mmIndex];
-    if (!__mmTemporaryCombatHat(__mmHat) && __mmCanEquipHat(__mmHat))
+    if (
+      Number(__mmHat) !== 0 &&
+      !__mmTemporaryCombatHat(__mmHat) &&
+      __mmCanEquipHat(__mmHat)
+    )
       return __mmHat;
   }
-  return 0;
+  return v && v.skins && v.skins[6] ? 6 : 0;
 }
 
 
@@ -33043,6 +33045,34 @@ function __mmMovementInputActive() {
   return __mmPlayerMoving() || __mmMenuMovementKeys.size > 0 ||
     __mmConfiguredMovementActions.size > 0 || Number.isFinite(Kt);
 }
+function __mmIdleHatSelectionAllowed() {
+  if (
+    !v ||
+    !v.alive ||
+    __mmPrimaryHeld ||
+    __mmSecondaryHeld ||
+    __mmTrapAttackActive ||
+    __mmBoostBreakHeld ||
+    __mmCombatHatLockActive() ||
+    __mmInsta.isActive() ||
+    __mmBoostInsta.isActive() ||
+    __mmInstaSyncPending ||
+    __mmInstaSyncFiring ||
+    __mmMovementInputActive()
+  )
+    return !1;
+  return ["idle", "waiting", "movementGear", "soldierGear"].includes(
+    String(__mmActionOwner || "idle"),
+  );
+}
+function __mmCombatFallbackHat() {
+  if (!v || !v.alive) return null;
+  if (v.skins && v.skins[6]) return 6;
+  const __mmActual = Number(__mmActualHat);
+  return __mmCanEquipHat(__mmActual) && __mmActual !== 0
+    ? __mmActual
+    : 0;
+}
 function __mmDefaultMovementSample() {
 
 
@@ -33146,6 +33176,7 @@ function __mmResolveDefaultHat() {
       ? Number(__mmActualHat)
       : 0,
     __mmMovement = __mmDefaultMovementSample(),
+    __mmIdleSelection = __mmIdleHatSelectionAllowed(),
     __mmStationary = !__mmMovementInputActive(),
     __mmActualOwned = __mmCanEquipHat(__mmActual);
 
@@ -33164,11 +33195,13 @@ function __mmResolveDefaultHat() {
 
   if (__mmDefaultSoldierThreat()) return 6;
 
+  // A shop selection is an idle preference, not a combat restore target.
+  // While any action is in progress, use the safe held-input fallback instead.
+  if (!__mmIdleSelection) return __mmCombatFallbackHat();
+
 
   if (
     __mmStationary &&
-    !__mmPrimaryHeld &&
-    !__mmSecondaryHeld &&
     v.skins && v.skins[__mmEmpHelmet] &&
     __mmIdleEnemyTurretNearby() &&
     !__mmPrimaryTankCombatBlocked() &&
@@ -33226,7 +33259,14 @@ function __mmBestPostCombatHat() {
   if (__mmBushModeEnabled && __mmBushGearOwned()) return __mmBushGear;
   if (__mmAssassinConcealed && __mmAssassinGearOwned())
     return __mmAssassinGear;
-  return __mmResolveDefaultHat();
+  const __mmHat = __mmResolveDefaultHat();
+  return Number(__mmHat) === 0 &&
+      v.skins &&
+      v.skins[6] &&
+      (__mmTemporaryCombatHat(v.skinIndex) ||
+        __mmTemporaryCombatHat(__mmPendingHat))
+    ? 6
+    : __mmHat;
 }
 function __mmScheduleCombatHatFinish(__mmEpoch = __mmCombatHatLockEpoch) {
   __mmCombatHatLockTimer && clearTimeout(__mmCombatHatLockTimer);
@@ -33841,6 +33881,16 @@ function __mmRememberNormalHat() {
   if (!v || !v.alive) return;
   if (!Number.isFinite(Number(__mmActualHat)))
     ((__mmActualHat = 0), (__mmLastNormalHat = 0));
+  const __mmServerHat = Number(v.skinIndex);
+  if (
+    __mmActualHat === 0 &&
+    __mmLastNormalHat === 0 &&
+    __mmPendingHat == null &&
+    __mmServerHat !== 0 &&
+    !__mmTemporaryCombatHat(__mmServerHat) &&
+    __mmCanEquipHat(__mmServerHat)
+  )
+    ((__mmActualHat = __mmServerHat), (__mmLastNormalHat = __mmServerHat));
   if (
     __mmActualTail == null &&
     Number.isFinite(Number(v.tailIndex)) &&
@@ -34059,8 +34109,11 @@ const __mmGearArbiter = {
         __mmTailWinner &&
         __mmTailWinner.intent.priority >= __mmGearIntentPriorities.insta
       ),
+      __mmHatPermitted =
+        __mmHat == null || __mmCombatHatPacketAllowed(__mmHat),
       __mmSendHat = !!(
         __mmHat != null &&
+        __mmHatPermitted &&
         (Number(v.skinIndex) !== Number(__mmHat) ||
           (__mmPendingHat != null && Number(__mmPendingHat) !== Number(__mmHat))) &&
         !(
@@ -59015,7 +59068,7 @@ function __mmFastCheckMs() {
     __mmServerTickMs(),
   );
 }
-function __mmGlotusAutoBreakPlan() {
+function __mmGlotusAutoBreakPlan(__mmRequestedWeapon = null) {
   if (
     !v ||
     !v.alive ||
@@ -59028,64 +59081,58 @@ function __mmGlotusAutoBreakPlan() {
   const __mmPrimary = Number(v.weapons[0]),
     __mmSecondary = Number(v.weapons[1]),
     __mmDistance = __mmKittyManualBreakDistance(__mmTarget),
-    __mmPrimaryInRange =
-      __mmDistance <= __mmKittyManualBreakRange(__mmPrimary, __mmTarget),
-    __mmSecondaryInRange =
-      __mmDistance <= __mmKittyManualBreakRange(__mmSecondary, __mmTarget),
-    __mmIsHammer = __mmSecondary === Number(__mmGreatHammer),
+    __mmHealth = __mmKittyManualBreakHealth(__mmTarget),
+    __mmPlanForWeapon = function (__mmWeapon) {
+      const __mmRange = __mmKittyManualBreakRange(__mmWeapon, __mmTarget);
+      if (!Number.isFinite(__mmRange) || __mmDistance > __mmRange) return null;
+      const __mmDamage = __mmKittyManualBreakNormalDamage(
+        __mmWeapon,
+        __mmTarget,
+      );
+      return {
+        target: __mmTarget,
+        weapon: Number(__mmWeapon),
+        damage: __mmDamage,
+        useTank: __mmDamage < __mmHealth,
+      };
+    },
+    __mmPrimaryPlan = __mmPlanForWeapon(__mmPrimary),
+    __mmSecondaryPlan = __mmPlanForWeapon(__mmSecondary);
+
+  // A click supplies its own weapon. Do not discard a valid Tank break just
+  // because the other hand would otherwise win the Glotus ordering.
+  if (__mmRequestedWeapon != null)
+    return __mmPlanForWeapon(Number(__mmRequestedWeapon));
+
+  const __mmIsHammer = __mmSecondary === Number(__mmGreatHammer),
     __mmNotStick = __mmPrimary !== 8,
     __mmNotPolearm = __mmPrimary !== 5,
-    __mmHealth = __mmKittyManualBreakHealth(__mmTarget),
-    __mmPrimaryDamage = __mmKittyManualBreakNormalDamage(
-      __mmPrimary,
-      __mmTarget,
-    ),
-    __mmSecondaryDamage = __mmKittyManualBreakNormalDamage(
-      __mmSecondary,
-      __mmTarget,
-    ),
     __mmPrimaryReload = __mmKittyManualBreakReloadRemaining(__mmPrimary),
     __mmSecondaryReload = __mmKittyManualBreakReloadRemaining(__mmSecondary),
     __mmPrimaryFasterThanSecondary =
       !__mmWeaponReady(__mmSecondary) ||
       __mmPrimaryReload <= __mmSecondaryReload;
 
-  // Glotus AutoBreak ordering: take a lethal primary break when it is the
-  // better-loaded option, otherwise prefer the Great Hammer, then primary.
+  // Glotus ordering remains the default for callers that do not supply a
+  // hand: a loaded lethal primary, then Great Hammer, then primary.
   if (
-    __mmPrimaryInRange &&
+    __mmPrimaryPlan &&
     __mmIsHammer &&
     __mmNotStick &&
     __mmNotPolearm &&
     __mmPrimaryFasterThanSecondary &&
-    __mmPrimaryDamage >= __mmHealth
+    __mmPrimaryPlan.damage >= __mmHealth
   )
-    return {
-      target: __mmTarget,
-      weapon: __mmPrimary,
-      useTank: __mmPrimaryDamage < __mmHealth,
-    };
-  if (__mmIsHammer && __mmSecondaryInRange)
-    return {
-      target: __mmTarget,
-      weapon: __mmSecondary,
-      useTank: __mmSecondaryDamage < __mmHealth,
-    };
-  if (__mmNotStick && (__mmNotPolearm || !__mmIsHammer) && __mmPrimaryInRange)
-    return {
-      target: __mmTarget,
-      weapon: __mmPrimary,
-      useTank: __mmPrimaryDamage < __mmHealth,
-    };
+    return __mmPrimaryPlan;
+  if (__mmIsHammer && __mmSecondaryPlan) return __mmSecondaryPlan;
+  if (__mmNotStick && (__mmNotPolearm || !__mmIsHammer) && __mmPrimaryPlan)
+    return __mmPrimaryPlan;
   return null;
 }
 function __mmKittyTankTarget(__mmWeapon) {
   if (!v || !v.alive || !v.skins || !v.skins[40]) return null;
-  const __mmPlan = __mmGlotusAutoBreakPlan();
-  return __mmPlan && __mmPlan.useTank &&
-    Number(__mmPlan.weapon) === Number(__mmWeapon)
-    ? __mmPlan.target
-    : null;
+  const __mmPlan = __mmGlotusAutoBreakPlan(__mmWeapon);
+  return __mmPlan && __mmPlan.useTank ? __mmPlan.target : null;
 }
 function __mmTankSecondaryPreferred(__mmWeapon = __mmRightClickWeapon()) {
   if (
@@ -59098,8 +59145,66 @@ function __mmTankSecondaryPreferred(__mmWeapon = __mmRightClickWeapon()) {
     return !1;
   return !!__mmKittyTankTarget(__mmWeapon);
 }
-function __mmPrimaryTankCombatBlocked() {
-  return __mmKittyManualBreakShouldIgnore();
+function __mmPrimaryTankCombatBlocked(
+  __mmWeapon = v && v.weapons && v.weapons[0],
+) {
+  if (__mmKittyManualBreakShouldIgnore()) return !0;
+  if (!v || !v.alive || __mmWeapon == null) return !0;
+  const __mmWeaponData = b && b.weapons && b.weapons[__mmWeapon],
+    __mmDamage = Number(
+      __mmWeaponData && (__mmWeaponData.dmg ?? __mmWeaponData.damage),
+    );
+  if (
+    !__mmWeaponData ||
+    __mmWeaponData.projectile != null ||
+    __mmWeaponData.shield ||
+    !Number.isFinite(__mmDamage) ||
+    __mmDamage <= 1
+  )
+    return !0;
+  const __mmSelf = __mmServerEntityPosition(v) || v,
+    __mmPing = Math.max(
+      0,
+      Math.min(300, Number(window.pingTime) || Number(window.ping) || 0),
+    ),
+    __mmPingMargin = Math.max(10, Math.min(45, __mmPing * 0.1)),
+    __mmReach =
+      Math.max(0, Number(__mmWeaponData.range) || 0) +
+      Math.max(0, Number(v.scale) || 35) +
+      __mmPingMargin,
+    __mmEntityLists = [
+      typeof E !== "undefined" && Array.isArray(E) ? E : [],
+      typeof N !== "undefined" && Array.isArray(N) ? N : [],
+    ];
+  for (let __mmListIndex = 0; __mmListIndex < __mmEntityLists.length; __mmListIndex++) {
+    const __mmEntities = __mmEntityLists[__mmListIndex];
+    for (let __mmIndex = 0; __mmIndex < __mmEntities.length; __mmIndex++) {
+      const __mmEnemy = __mmEntities[__mmIndex];
+      if (
+        !__mmEnemy ||
+        __mmEnemy === v ||
+        __mmEnemy.alive === !1 ||
+        __mmEnemy.active === !1 ||
+        (__mmListIndex === 0 && !__mmIsEnemyPlayer(__mmEnemy)) ||
+        (__mmListIndex === 1 &&
+          Number.isFinite(Number(__mmEnemy.health)) &&
+          Number(__mmEnemy.health) <= 0)
+      )
+        continue;
+      const __mmPosition = __mmServerEntityPosition(__mmEnemy) || __mmEnemy,
+        __mmDistance = Math.hypot(
+          Number(__mmPosition.x) - Number(__mmSelf.x),
+          Number(__mmPosition.y) - Number(__mmSelf.y),
+        ),
+        __mmEnemyScale = Math.max(0, Number(__mmEnemy.scale) || 35);
+      if (
+        Number.isFinite(__mmDistance) &&
+        __mmDistance <= __mmReach + __mmEnemyScale
+      )
+        return !0;
+    }
+  }
+  return !1;
 }
 function __mmTankPrimaryTarget(__mmWeapon = v && v.weapons && v.weapons[0]) {
 
@@ -59113,7 +59218,7 @@ function __mmTankPrimaryTarget(__mmWeapon = v && v.weapons && v.weapons[0]) {
     !v.skins ||
     !v.skins[40] ||
     __mmWeapon == null ||
-    __mmPrimaryTankCombatBlocked()
+    __mmPrimaryTankCombatBlocked(__mmWeapon)
   )
     return null;
   return __mmKittyTankTarget(Number(__mmWeapon));
