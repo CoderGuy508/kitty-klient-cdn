@@ -2,7 +2,7 @@
 // @name         kitty klient
 // @author       Coder Guy
 // @credits       random4ik — bot script
-// @version      7.0.49
+// @version      7.0.50
 // @icon         https://cdn.discordapp.com/icons/1540876076224356437/ac27c0ce87c4c46b407ebca78e150aeb.webp?size=2048
 // @description  kitty klient — a MooMoo.io client with adaptive zoom, fast autoheal, gear automation, combat tools, predictive placement, visual markers, CC0 background music, manual quick builds, and a fully rebindable keyboard/mouse controls HUD.
 // @match        *://moomoo.io/*
@@ -269,7 +269,7 @@
     const AUTO_PUSH_FINISHER_MIGRATION_KEY = "kitty-klient-auto-push-finisher-v1";
     const ASSASSIN_RANGE_AUTO_MIGRATION_KEY = "kitty-klient-assassin-range-auto-v1";
     const TAB_SYNC_BRIDGE_KEY = "kitty-klient-tab-sync-bridge-v1";
-const KITTY_KLIENT_VERSION = "7.0.49";
+const KITTY_KLIENT_VERSION = "7.0.50";
     const KITTY_SHARED_STORAGE_APPLIED_EVENT = "KittyMooMooSharedStorageApplied";
 
 
@@ -13459,7 +13459,22 @@ let __mmActionOwner = "idle",
   __mmActionSince = 0,
   __mmActionLastDecision = "waiting";
 function __mmActionPriority(__mmOwner) {
-  return Number(__mmActionPriorities[__mmOwner]) || 0;
+  const __mmPriority = Number(__mmActionPriorities[__mmOwner]) || 0;
+  // Once a combo has armed, routine close-combat helpers must not tear it
+  // down between stages. Anti-Insta and trap escape retain higher priority
+  // so an immediate survival response can still take over.
+  if (
+    (__mmOwner === "insta" &&
+      typeof __mmInsta !== "undefined" &&
+      __mmInsta &&
+      __mmInsta.isActive()) ||
+    (__mmOwner === "boostInsta" &&
+      typeof __mmBoostInsta !== "undefined" &&
+      __mmBoostInsta &&
+      __mmBoostInsta.isActive())
+  )
+    return Math.max(__mmPriority, 94);
+  return __mmPriority;
 }
 function __mmHeldAttackMayLoan(__mmOwner) {
   return !!(
@@ -16370,6 +16385,7 @@ const __mmInsta = {
   tankCoverTimer: 0,
 
   reverseOpeningTick: null,
+  reverseOpeningUsesHammer: !1,
   isActive() {
     return this.state !== "idle" && this.state !== "cleanup";
   },
@@ -16481,20 +16497,27 @@ const __mmInsta = {
     return self && enemy ? Math.atan2(enemy.y-self.y,enemy.x-self.x) : this.aim(target);
   },
   openReverse(context) {
-    const secondary = this.secondaryFollowup();
-    if (!__mmWeaponReady(context.primary) || !__mmWeaponReady(secondary))
+    const secondary = this.secondaryFollowup(),
+      useHammer = !context.target || this.inRange(secondary, context.target);
+    if (
+      !__mmWeaponReady(context.primary) ||
+      (useHammer && !__mmWeaponReady(secondary))
+    )
       return void this.cleanup("reverse-weapons-unavailable");
     if (!this.turretReady()) return void this.cleanup("reverse-turret-unavailable");
     this.selectSecondaryDamageGear();
     __mmGearArbiter.commit();
     const angle = this.reverseAim(context.target);
     O.send("D",angle);
-    if (!this.sendAttack(secondary,true,context.target,angle))
-      return void this.cleanup("reverse-secondary-send-failed");
+    this.reverseOpeningUsesHammer = useHammer;
+    if (useHammer) {
+      if (!this.sendAttack(secondary,true,context.target,angle))
+        return void this.cleanup("reverse-secondary-send-failed");
+    }
     __mmAssumeTurretGearShot();
     this.reverseOpeningTick = __mmCombatServerTick;
     this.countActivation();
-    this.scheduleRelease();
+    useHammer && this.scheduleRelease();
     this.schedule(() => this.cleanup("reverse-server-timeout"),Math.max(1000,this.tick()*8));
   },
   advanceReverse() {
@@ -16506,6 +16529,7 @@ const __mmInsta = {
       return true;
     }
     this.reverseOpeningTick = null;
+    this.reverseOpeningUsesHammer = !1;
     this.releaseAttack();
     this.selectDamageGear();
     __mmGearArbiter.commit();
@@ -17372,6 +17396,7 @@ const __mmInsta = {
     this.profileSource = String(__mmOptions.profileSource || this.profile);
     this.tankPredictPlan = __mmOptions.tankPredictPlan || null;
     this.reverseOpeningTick = null;
+    this.reverseOpeningUsesHammer = !1;
     this.popupShown = !1;
     if (!this.runtimeReady()) return (this.cleanup("runtime-unavailable"), !1);
     this.capture();
@@ -18206,6 +18231,7 @@ const __mmInsta = {
     this.postSpikeTarget = null;
     this.tankPredictPlan = null;
     this.reverseOpeningTick = null;
+    this.reverseOpeningUsesHammer = !1;
     this.profile = "normal";
     this.profileSource = "R";
     this.popupShown = !1;
@@ -28437,6 +28463,9 @@ let __mmAutoEnemySpikeBreakTimer = 0,
 
   __mmAutoEnemySpikeBreakLockedWeapon = null,
   __mmAutoEnemySpikeBreakLockedTargetKey = null,
+  __mmAutoEnemySpikeBreakAwaitingTargetKey = null,
+  __mmAutoEnemySpikeBreakAwaitingHealth = null,
+  __mmAutoEnemySpikeBreakAwaitingUntil = 0,
 
 
 
@@ -28550,6 +28579,17 @@ function __mmAutoEnemySpikeBreakPlan() {
         preBreak: __mmPreBreak,
         predictionMs: __mmLeadMs,
       };
+    if (__mmPlan.key === __mmAutoEnemySpikeBreakAwaitingTargetKey) {
+      const __mmTargetUpdated =
+        Number.isFinite(__mmAutoEnemySpikeBreakAwaitingHealth) &&
+        __mmPlan.health > 0 &&
+        __mmPlan.health < __mmAutoEnemySpikeBreakAwaitingHealth - 0.01;
+      if (!__mmTargetUpdated && __mmNow < __mmAutoEnemySpikeBreakAwaitingUntil)
+        continue;
+      ((__mmAutoEnemySpikeBreakAwaitingTargetKey = null),
+        (__mmAutoEnemySpikeBreakAwaitingHealth = null),
+        (__mmAutoEnemySpikeBreakAwaitingUntil = 0));
+    }
     if (__mmPlan.key === __mmAutoEnemySpikeBreakLockedTargetKey) {
       __mmLocked = __mmPlan;
       break;
@@ -28788,7 +28828,10 @@ function __mmStopAutoEnemySpikeBreak(__mmReason) {
     (__mmAutoEnemySpikeBreakAimAngle = null),
     __mmDisable &&
       ((__mmAutoEnemySpikeBreakLockedWeapon = null),
-      (__mmAutoEnemySpikeBreakLockedTargetKey = null)),
+      (__mmAutoEnemySpikeBreakLockedTargetKey = null),
+      (__mmAutoEnemySpikeBreakAwaitingTargetKey = null),
+      (__mmAutoEnemySpikeBreakAwaitingHealth = null),
+      (__mmAutoEnemySpikeBreakAwaitingUntil = 0)),
     __mmRestore && __mmTool && __mmRestoreTool(__mmTool),
     __mmActionRelease("enemySpikeBreak", __mmReason || "spike swing sent"),
     __mmHadAim && __mmScheduleMouseAimReturn());
@@ -28894,13 +28937,19 @@ function __mmUpdateAutoEnemySpikeBreak() {
 
 
     v.skins && v.skins[40] && __mmActivateImmediateTankTick();
+    const __mmDamage = __mmAutoEnemySpikeBreakMaximumDamage(__mmPlan);
     (je(__mmPlan.weapon, !0),
       O.send("F", 1, __mmPlan.angle),
       O.send("F", 0, null),
       __mmTrackPlayerToolCooldown(v.sid, __mmPlan.weapon, "enemy-spike-break"),
+      (__mmAutoEnemySpikeBreakAwaitingTargetKey = __mmPlan.key),
+      (__mmAutoEnemySpikeBreakAwaitingHealth =
+        __mmPlan.health > 0 ? __mmPlan.health : null),
+      (__mmAutoEnemySpikeBreakAwaitingUntil =
+        Date.now() + Math.max(550, __mmServerTickMs() * 5)),
       __mmArmAutoEnemySpikeBreakReplacement(
         __mmPlan,
-        __mmAutoEnemySpikeBreakMaximumDamage(__mmPlan),
+        __mmDamage,
       ));
   } catch (__mmEnemySpikeBreakError) {
     return void __mmStopAutoEnemySpikeBreak("spike packet failed");
@@ -29504,15 +29553,21 @@ Vl = function (data) {
   return result;
 };
 Il = function (sid) {
-  __mmForgetBreakableHealth(ns(sid));
-  return __mmOriginalObjectRemove.apply(this, arguments);
+  const __mmRemoved = ns(sid);
+  __mmForgetBreakableHealth(__mmRemoved);
+  const __mmResult = __mmOriginalObjectRemove.apply(this, arguments);
+  __mmAntiCollisionObjectRemoved(__mmRemoved);
+  return __mmResult;
 };
 Ml = function (sid) {
+  const __mmRemoved = [];
   if (Array.isArray(ge))
     for (const object of ge)
       if (object && String(__mmStructureOwnerSid(object)) === String(sid))
-        __mmForgetBreakableHealth(object);
-  return __mmOriginalOwnerObjectsRemove.apply(this, arguments);
+        (__mmForgetBreakableHealth(object), __mmRemoved.push(object));
+  const __mmResult = __mmOriginalOwnerObjectsRemove.apply(this, arguments);
+  for (const object of __mmRemoved) __mmAntiCollisionObjectRemoved(object);
+  return __mmResult;
 };
 ql = function (sid, range) {
   __mmQueueStructureProjectile(sid);
@@ -33169,9 +33224,12 @@ function __mmAnimalSoldierThreat() {
   const __mmWinner = __mmGearArbiter.resolve("hat"),
     __mmTank = Number(v.skinIndex) === 40 || Number(__mmPendingHat) === 40 ||
       (__mmWinner && Number(__mmWinner.intent.hat) === 40);
-
-
-  return !__mmTank && !__mmPrimaryHeld && !__mmSecondaryHeld && __mmDangerAnimalNearby();
+  if (__mmTank || !__mmDangerAnimalNearby()) return !1;
+  // An untargeted animal should not affect normal clicks. Once the held
+  // weapon is actually aimed at it, retain Soldier as the defensive option.
+  return (!__mmPrimaryHeld && !__mmSecondaryHeld) ||
+    (typeof __mmAnimalSoldierTargeted === "function" &&
+      __mmAnimalSoldierTargeted());
 }
 function __mmUpdateFreeAnimalSoldierCheck() {
 
@@ -33236,7 +33294,11 @@ function __mmResolveDefaultHat() {
       ? Number(__mmActualHat)
       : 0,
     __mmMovement = __mmDefaultMovementSample(),
-    __mmDefaultSelection = __mmDefaultHatSelectionAllowed(),
+    __mmDefaultSelection =
+      __mmDefaultHatSelectionAllowed() ||
+      // A click without a combat/animal/turret threat is still ordinary
+      // movement or idle play, not a reason to fall back to Soldier.
+      (__mmPrimaryHeld || __mmSecondaryHeld),
     __mmStationary = !__mmMovementInputActive(),
     __mmActualOwned = __mmCanEquipHat(__mmActual);
 
@@ -33253,7 +33315,9 @@ function __mmResolveDefaultHat() {
 
 
 
-  if (__mmDefaultSoldierThreat()) return 6;
+  if (__mmDefaultSoldierThreat() ||
+      ((__mmPrimaryHeld || __mmSecondaryHeld) && __mmIdleEnemyTurretNearby()))
+    return 6;
 
   // Movement can select biome/speed gear; combat cannot restore a shop hat.
   if (!__mmDefaultSelection) return __mmCombatFallbackHat();
@@ -38553,7 +38617,13 @@ function __mmCombatModelSafeWalkThreat(__mmDirection, __mmWalkOffset = null) {
     __mmCombatModelWalkOffset = Number.isFinite(Number(__mmWalkOffset))
       ? Math.max(0, Number(__mmWalkOffset))
       : __mmSpeed + 45,
-    __mmProbeDistance = __mmCombatModelWalkOffset + __mmSpeed / 4,
+    // STOP must see an intended movement lane before we are already beside
+    // its spike. Keep a bounded two-ish tick look-ahead for fresh key-downs
+    // and for movement that has not yet appeared in the position sample.
+    __mmProbeDistance = Math.min(
+      320,
+      Math.max(180, __mmCombatModelWalkOffset + Math.max(35, __mmSpeed / 3)),
+    ),
     __mmProbeX = __mmPlayerX + Math.cos(__mmDirection) * __mmProbeDistance,
     __mmProbeY = __mmPlayerY + Math.sin(__mmDirection) * __mmProbeDistance,
     __mmPlayerScale = Number(v.scale) || 35,
@@ -38563,7 +38633,8 @@ function __mmCombatModelSafeWalkThreat(__mmDirection, __mmWalkOffset = null) {
     const __mmObject = __mmObjects[__mmIndex];
     if (!__mmCombatModelSafeWalkObjectAllowed(__mmObject)) continue;
     const __mmScale = Math.max(1, __mmReferenceObjectScale(__mmObject)),
-      __mmAcquireRadius = __mmPlayerScale + __mmScale + 150,
+      __mmAcquireRadius = __mmPlayerScale + __mmScale +
+        __mmProbeDistance + 25,
       __mmCurrentDistance = Math.hypot(
         Number(__mmObject.x) - __mmPlayerX,
         Number(__mmObject.y) - __mmPlayerY,
@@ -38681,6 +38752,15 @@ function __mmAntiCollisionReleaseBlock(__mmResumeMovement) {
     (__mmAntiCollisionBlockedKey = null),
     (Kt = null));
   __mmResumeMovement && v && v.alive && Tt();
+}
+function __mmAntiCollisionObjectRemoved(__mmObject) {
+  if (!__mmObject || !__mmAntiCollisionBlocked) return !1;
+  const __mmKey = __mmAntiCollisionObjectKey(__mmObject);
+  if (__mmKey == null || __mmKey !== __mmAntiCollisionBlockedKey) return !1;
+  // The removal packet is authoritative. Resume the held direction now, then
+  // immediately scan it again so another spike in the same lane can STOP it.
+  (__mmAntiCollisionReleaseBlock(!0), __mmUpdateAntiCollision());
+  return !0;
 }
 function __mmAntiCollisionQuickRightClick(__mmThreat) {
   if (
