@@ -2,7 +2,7 @@
 // @name         kitty klient
 // @author       Coder Guy
 // @credits       random4ik — bot script
-// @version      7.0.48
+// @version      7.0.49
 // @icon         https://cdn.discordapp.com/icons/1540876076224356437/ac27c0ce87c4c46b407ebca78e150aeb.webp?size=2048
 // @description  kitty klient — a MooMoo.io client with adaptive zoom, fast autoheal, gear automation, combat tools, predictive placement, visual markers, CC0 background music, manual quick builds, and a fully rebindable keyboard/mouse controls HUD.
 // @match        *://moomoo.io/*
@@ -269,7 +269,7 @@
     const AUTO_PUSH_FINISHER_MIGRATION_KEY = "kitty-klient-auto-push-finisher-v1";
     const ASSASSIN_RANGE_AUTO_MIGRATION_KEY = "kitty-klient-assassin-range-auto-v1";
     const TAB_SYNC_BRIDGE_KEY = "kitty-klient-tab-sync-bridge-v1";
-const KITTY_KLIENT_VERSION = "7.0.48";
+const KITTY_KLIENT_VERSION = "7.0.49";
     const KITTY_SHARED_STORAGE_APPLIED_EVENT = "KittyMooMooSharedStorageApplied";
 
 
@@ -34626,8 +34626,22 @@ function __mmHeldAttackWeapon() {
 function __mmSendWeaponAttack(__mmState) {
   O.send("F", __mmState, null);
 }
+function __mmNativeMouseAttackInputActive() {
+  // F:0 can be sent by Insta and the automatic break systems while their
+  // internal "held" flags have not yet been cleared. Only re-arm MooMoo's
+  // native swing latch for an input that is still physically or key-bound
+  // held by the player.
+  return !!(
+    (__mmPrimaryHeld &&
+      (__mmPhysicalPrimaryDown ||
+        __mmBindingActionHeld("primaryAttack") ||
+        __mmBindingActionHeld("clickBoostInsta"))) ||
+    (__mmSecondaryHeld &&
+      (__mmPhysicalSecondaryDown || __mmBindingActionHeld("secondaryAttack")))
+  );
+}
 function __mmSyncNativeMouseAttackState() {
-  U = __mmPrimaryHeld || __mmSecondaryHeld ? 1 : 0;
+  U = __mmNativeMouseAttackInputActive() ? 1 : 0;
 }
 function __mmPulseHeldAttack() {
   const __mmWeapon = __mmHeldAttackWeapon();
@@ -41390,9 +41404,41 @@ function __mmUpdatePlacementStep() {
   plan.angle=Math.atan2(plan.goal.y-from.y,plan.goal.x-from.x);
   Kt=plan.angle; O.send("9",plan.angle);
 }
+function __mmAutoPushPredictEnemyPosition(__mmEnemy) {
+  const __mmCurrent = __mmServerEntityPosition(__mmEnemy) || __mmEnemy;
+  if (
+    !__mmCurrent ||
+    !Number.isFinite(Number(__mmCurrent.x)) ||
+    !Number.isFinite(Number(__mmCurrent.y))
+  )
+    return null;
+  const __mmVelocity = __mmThreatEntityVelocity(__mmEnemy),
+    __mmSpeed = Math.hypot(
+      Number(__mmVelocity && __mmVelocity.x) || 0,
+      Number(__mmVelocity && __mmVelocity.y) || 0,
+    );
+  if (__mmSpeed < 0.025)
+    return { x: Number(__mmCurrent.x), y: Number(__mmCurrent.y) };
+  const __mmPing = Number(window.pingTime),
+    __mmLead = Math.min(
+      180,
+      Math.max(
+        60,
+        __mmServerTickMs() +
+          (Number.isFinite(__mmPing) ? Math.max(0, __mmPing / 2) : 0),
+      ),
+    ),
+    __mmTravelX = Math.max(-85, Math.min(85, Number(__mmVelocity.x) * __mmLead)),
+    __mmTravelY = Math.max(-85, Math.min(85, Number(__mmVelocity.y) * __mmLead));
+  return {
+    x: Number(__mmCurrent.x) + __mmTravelX,
+    y: Number(__mmCurrent.y) + __mmTravelY,
+  };
+}
 function __mmAutoPushAlliedSpike(__mmEnemy, __mmTrap) {
   if (!v || !v.alive || !__mmEnemy || !__mmTrap) return null;
-  const __mmEnemyPosition = __mmServerEntityPosition(__mmEnemy) || __mmEnemy,
+  const __mmEnemyPosition = __mmAutoPushPredictEnemyPosition(__mmEnemy) ||
+      __mmServerEntityPosition(__mmEnemy) || __mmEnemy,
     __mmEnemyX = Number(__mmEnemyPosition.x),
     __mmEnemyY = Number(__mmEnemyPosition.y),
     __mmTrapScale =
@@ -41578,7 +41624,8 @@ function __mmAutoPushTrappedEntries(__mmAcquireRange) {
   for (let __mmIndex = 0; __mmIndex < E.length; __mmIndex++) {
     const __mmEnemy = E[__mmIndex];
     if (!__mmIsEnemyPlayer(__mmEnemy)) continue;
-    const __mmPosition = __mmServerEntityPosition(__mmEnemy);
+    const __mmPosition = __mmAutoPushPredictEnemyPosition(__mmEnemy) ||
+      __mmServerEntityPosition(__mmEnemy);
     if (!__mmPosition) continue;
     const __mmEnemyX = Number(__mmPosition.x),
       __mmEnemyY = Number(__mmPosition.y),
@@ -42192,11 +42239,12 @@ function __mmUpdateAutoPushGear(enemy, geometry) {
 
 function __mmAutoPushCombatModelGeometry(__mmEnemy, __mmSpike) {
   const self = __mmServerEntityPosition(v),
-    enemy = __mmServerEntityPosition(__mmEnemy),
+    currentEnemy = __mmServerEntityPosition(__mmEnemy),
+    enemy = __mmAutoPushPredictEnemyPosition(__mmEnemy) || currentEnemy,
     spike = __mmSpike.object,
     enemyScale = Number(__mmEnemy.scale) || 35,
     spikeScale = Number(__mmSpike.scale) || __mmThreatObjectScale(spike);
-  if (!self || !enemy) return null;
+  if (!self || !enemy || !currentEnemy) return null;
   const distance = Math.hypot(enemy.x - spike.x, enemy.y - spike.y),
     angle = Math.atan2(enemy.y - spike.y, enemy.x - spike.x),
     standX = spike.x + Math.cos(angle) * (distance + enemyScale + 7),
@@ -42216,9 +42264,8 @@ function __mmAutoPushCombatModelGeometry(__mmEnemy, __mmSpike) {
     goalY = aligned ? standY : farY,
     previous = Number.isFinite(__mmEnemy.x1) && Number.isFinite(__mmEnemy.y1)
       ? { x: __mmEnemy.x1, y: __mmEnemy.y1 } : enemy,
-    future = { x: enemy.x * 2 - previous.x, y: enemy.y * 2 - previous.y },
     contactRadius = enemyScale + spikeScale + 1,
-    contact = [previous, enemy, future].some(point =>
+    contact = [previous, currentEnemy, enemy].some(point =>
       Math.hypot(point.x - spike.x, point.y - spike.y) <= contactRadius),
     targetDistance = Math.hypot(enemy.x - self.x, enemy.y - self.y);
   return { self, enemy, standX, standY, farX, farY, goalX, goalY,
